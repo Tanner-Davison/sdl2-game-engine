@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SDL2 CONFIG REQUIRED)
 find_package(SDL2_image CONFIG REQUIRED)          
 find_package(SDL2_ttf CONFIG REQUIRED)  
+
 # Source files
 set(SOURCES
     src/main.cpp
