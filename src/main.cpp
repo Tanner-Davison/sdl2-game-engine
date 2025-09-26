@@ -1,32 +1,18 @@
-#include "window.hpp"
-#include <iostream>
+/*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
 
-/**
- * @brief this is a test documentation
- *
- * @param TestConst
- */
-void test(float TestConst) { std::cout << "testing" << std::endl; }
-int main(int argc, char *argv[]) {
-	 try {
-			SDLWindow gameWindow(800, 600, "My SDL Window");
-			const std::string name = "tanner";
-			// if (!gameWindow.loadMedia("hello_world.bmp")) {
-			//   printf("Failed to load media!\n");
-			//   return -1;
-			// }
-			// Main loop or other logic here
+#include "Window.hpp"
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_events.h>
+#include <SDL2/SDL_video.h>
 
-			SDL_Event e;
-			while (true) {
-				 SDL_PollEvent(&e);
-				 if (e.type == SDL_QUIT) {
-						break;
-				 }
-			}
-	 } catch (const std::exception &e) {
-			printf("Error: %s\n", e.what());
-			return -1;
-	 }
-	 return 0;
+int main(int argc, char** argv) {
+   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
+
+   Window gameWindow;
+
+   while (true) {
+      SDL_PumpEvents();
+   }
+   SDL_Quit();
+   return 0;
 }
