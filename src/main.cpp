@@ -6,8 +6,7 @@
 #include <SDL2/SDL_video.h>
 
 int main(int argc, char** argv) {
-   SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER);
-
+   SDL_Init(SDL_INIT_VIDEO);
    Window gameWindow;
 
    while (true) {
