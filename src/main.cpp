@@ -2,8 +2,6 @@
 
 #include "Window.hpp"
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_video.h>
 
 int main(int argc, char** argv) {
    SDL_Init(SDL_INIT_VIDEO);
@@ -12,6 +10,7 @@ int main(int argc, char** argv) {
    while (true) {
       SDL_PumpEvents();
    }
+
    SDL_Quit();
    return 0;
 }

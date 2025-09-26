@@ -1,8 +1,6 @@
 #pragma once
-#include <SDL2/SDL_video.h>
+#include <SDL2/SDL_stdinc.h>
 #include <memory>
-#define SDL_MAIN_HANDLED
-// window.hpp
 #ifdef __linux__
 #include <SDL2/SDL.h>
 #else
@@ -23,8 +21,15 @@ class Window {
  public:
    Window();
 
-   // Window(const Window&)            = delete;
-   // Window& operator=(const Window&) = delete;  -- No longer needed when using a unique_ptr for SDLWindow
+   SDL_Window*  GetRaw() const;
+   SDL_Surface* GetSurface() const;
+
+   SDL_PixelFormat* Fmt;
+   Uint32           Red;
+   Uint32           Green;
+   Uint32           DarkGreen;
+   Uint32           Blue;
+   Uint32           Yellow;
 
  private:
    UniqueSDLWindow SDLWindow{nullptr};

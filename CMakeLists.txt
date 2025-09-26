@@ -12,7 +12,7 @@ find_package(SDL2_ttf CONFIG REQUIRED)
 # Source files
 set(SOURCES
     src/main.cpp
-    src/window.cpp
+    src/Window.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
