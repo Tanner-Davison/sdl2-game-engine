@@ -1,4 +1,5 @@
 #include "Window.hpp"
+#include "ErrorHandling.h"
 #include <SDL2/SDL_video.h>
 #include <iostream>
 #include <stdexcept>
@@ -10,20 +11,26 @@ Window::Window() {
                                        700,
                                        300,
                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_MINIMIZED)};
+   CheckSDLError("Creating Window");
+
    if (!Ptr) {
-      throw std::runtime_error(std::string("Failed to create Window: ") + SDL_GetError());
+#ifdef ERROR_LOGGING
+      CheckSDLError("No Window Created Check if Minimized");
+#else
+      throw std::runtime_error(std::string("Failed to create Window") + SDL_Error());
+#endif
    }
+
    SDLWindow.reset(Ptr);
 
    Fmt = GetSurface()->format;
-   if (!Fmt) {
-      throw std::runtime_error("Failed to **GetSurace() --SDL_Surface**");
-   }
-   Red       = SDL_MapRGB(Fmt, 255, 0, 0);
-   Green     = SDL_MapRGB(Fmt, 0, 255, 0);
+   CheckSDLError("Getting Surface");
+
    DarkGreen = SDL_MapRGB(Fmt, 0, 150, 100);
-   Blue      = SDL_MapRGB(Fmt, 0, 0, 255);
    Yellow    = SDL_MapRGB(Fmt, 255, 255, 0);
+   Green     = SDL_MapRGB(Fmt, 0, 255, 0);
+   Red       = SDL_MapRGB(Fmt, 255, 0, 0);
+   Blue      = SDL_MapRGB(Fmt, 0, 0, 255);
 
    SDL_FillRect(GetSurface(), nullptr, DarkGreen);
    SDL_UpdateWindowSurface(SDLWindow.get());
@@ -34,5 +41,5 @@ SDL_Window* Window::GetRaw() const {
 }
 
 SDL_Surface* Window::GetSurface() const {
-   return SDL_GetWindowSurface(SDLWindow.get());
+   return SDLWindow ? SDL_GetWindowSurface(SDLWindow.get()) : nullptr;
 }
