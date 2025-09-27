@@ -25,6 +25,8 @@ class Window {
    SDL_Surface* GetSurface() const;
    void         Render();
    void         Update();
+   int          GetWidth() const;
+   int          GetHeight() const;
 
    SDL_PixelFormat* Fmt;
    Uint32           Red;

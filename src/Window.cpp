@@ -44,3 +44,10 @@ void Window::Render() {
 void Window::Update() {
    SDL_UpdateWindowSurface(SDLWindow.get());
 };
+
+int Window::GetWidth() const {
+   return 700;
+};
+int Window::GetHeight() const {
+   return 700;
+};
