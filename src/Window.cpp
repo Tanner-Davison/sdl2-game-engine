@@ -1,5 +1,6 @@
 #include "Window.hpp"
 #include "ErrorHandling.h"
+#include <SDL2/SDL_shape.h>
 #include <SDL2/SDL_video.h>
 #include <iostream>
 #include <stdexcept>
@@ -27,9 +28,6 @@ Window::Window() {
    Green     = SDL_MapRGB(Fmt, 0, 255, 0);
    Red       = SDL_MapRGB(Fmt, 255, 0, 0);
    Blue      = SDL_MapRGB(Fmt, 0, 0, 255);
-
-   SDL_FillRect(GetSurface(), nullptr, DarkGreen);
-   SDL_UpdateWindowSurface(SDLWindow.get());
 }
 
 SDL_Window* Window::GetRaw() const {
@@ -39,3 +37,10 @@ SDL_Window* Window::GetRaw() const {
 SDL_Surface* Window::GetSurface() const {
    return SDLWindow ? SDL_GetWindowSurface(SDLWindow.get()) : nullptr;
 }
+void Window::Render() {
+   SDL_FillRect(GetSurface(), nullptr, DarkGreen);
+};
+
+void Window::Update() {
+   SDL_UpdateWindowSurface(SDLWindow.get());
+};

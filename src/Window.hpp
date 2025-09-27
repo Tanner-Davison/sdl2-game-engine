@@ -23,6 +23,8 @@ class Window {
 
    SDL_Window*  GetRaw() const;
    SDL_Surface* GetSurface() const;
+   void         Render();
+   void         Update();
 
    SDL_PixelFormat* Fmt;
    Uint32           Red;
