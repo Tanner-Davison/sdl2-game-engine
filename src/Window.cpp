@@ -5,12 +5,8 @@
 #include <stdexcept>
 
 Window::Window() {
-   SDL_Window* Ptr = {SDL_CreateWindow("Smart Pointer Window",
-                                       SDL_WINDOWPOS_UNDEFINED,
-                                       SDL_WINDOWPOS_UNDEFINED,
-                                       700,
-                                       300,
-                                       SDL_WINDOW_RESIZABLE | SDL_WINDOW_MINIMIZED)};
+   SDL_Window* Ptr = {SDL_CreateWindow(
+       "Smart Pointer Window", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 700, 300, SDL_WINDOW_RESIZABLE)};
    CheckSDLError("Creating Window");
 
    if (!Ptr) {
