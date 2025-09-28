@@ -9,7 +9,7 @@ AlignEscapedNewlines: Left
 AlignOperands: true
 AlignAfterOpenBracket: Align
 AlignTrailingComments: true
-AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortBlocksOnASingleLine: false
 AllowShortCaseLabelsOnASingleLine: false
 AllowShortFunctionsOnASingleLine: Empty
@@ -24,7 +24,7 @@ BreakBeforeBinaryOperators: None
 BreakBeforeBraces: Attach
 BreakBeforeTernaryOperators: true
 BreakStringLiterals: true
-ColumnLimit: 120
+ColumnLimit: 100
 CommentPragmas: "^ IWYU pragma:"
 AllowAllConstructorInitializersOnNextLine: false
 BreakConstructorInitializers: BeforeComma
@@ -38,8 +38,8 @@ ExperimentalAutoDetectBinPacking: false
 FixNamespaceComments: true
 IncludeBlocks: Preserve
 IndentCaseLabels: true
-IndentPPDirectives: None
-IndentWidth: 3
+IndentPPDirectives: BeforeHash
+IndentWidth: 4
 IndentWrappedFunctionNames: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 1
@@ -60,11 +60,12 @@ SpaceAfterTemplateKeyword: true
 SpaceBeforeAssignmentOperators: true
 SpaceInEmptyParentheses: false
 SpacesBeforeTrailingComments: 1
+SpaceBeforeParens: ControlStatements
 SpacesInAngles: false
 SpacesInContainerLiterals: false
 SpacesInCStyleCastParentheses: false
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
 Standard: c++20
-TabWidth: 2
+TabWidth: 4
 UseTab: Never

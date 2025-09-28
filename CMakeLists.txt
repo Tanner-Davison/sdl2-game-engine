@@ -13,6 +13,7 @@ find_package(SDL2_ttf CONFIG REQUIRED)
 set(SOURCES
     src/main.cpp
     src/Window.cpp
+    src/Rectangle.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
