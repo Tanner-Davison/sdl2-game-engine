@@ -1,4 +1,5 @@
 #pragma once
+#include "CursorManager.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_events.h>
 
@@ -7,6 +8,7 @@ class Rectangle {
     Rectangle(const SDL_Rect& _Rect);
 
     void Render(SDL_Surface* Surface) const;
+
     void HandleEvent(SDL_Event& E);
 
     void SetColor(const SDL_Color& NewColor);
@@ -16,10 +18,15 @@ class Rectangle {
     SDL_Color GetHoverColor() const;
 
   private:
-    SDL_Rect  Rect;
-    SDL_Color Color{255, 0, 0, 255};
-    SDL_Color HoverColor{0, 0, 255, 255};
+    CursorManager cursorManager;
+    SDL_Rect      Rect;
+    int           pos_X;
+    int           pos_Y;
+    SDL_Color     Rect_Color{255, 0, 0, 255};
+    SDL_Color     HoverColor{128, 128, 128, 0};
+    SDL_Color     PressedColor{96, 96, 96, 0};
 
+    bool isMousePressed{false};
     bool isPointerHovering{false};
     bool isWithinRect(int x, int y);
 };
