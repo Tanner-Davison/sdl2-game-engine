@@ -1,13 +1,46 @@
+# CMake Build Files
 CMakeLists.txt.user
 CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Testing
+CMakeFiles/
+CMakeScripts/
+Testing/
 Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
-_deps
+_deps/
 CMakeUserPresets.json
 build/
+
+# Executables and Binaries
+*.exe
+*.out
+*.app
+sdl-starter
+
+# IDE/Language Server Configuration
+.clangd
+compile_flags.txt
+
+# Cache Directories
+.cache/
+.cache/
+*.cache
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows Zone Identifier Files
+*.Zone.Identifier
+
+# Temporary Files
+*.tmp
+*.temp
+*~

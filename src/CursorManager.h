@@ -1,5 +1,8 @@
-
-#include <SDL2/SDL_mouse.h>
+#ifdef __linux__
+    #include <SDL2/SDL.h>
+#else
+    #include <SDL.h>
+#endif
 class CursorManager {
   private:
     SDL_Cursor* defaultCursor;

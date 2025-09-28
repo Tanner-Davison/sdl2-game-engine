@@ -1,4 +1,8 @@
 -I./include
--I./include/SDL2
--std=c++23
+-I./src
+-isystem /opt/homebrew/Cellar/sdl2/2.32.2/include/SDL2
+-isystem /opt/homebrew/Cellar/sdl2_image/2.8.8/include/SDL2
+-isystem /opt/homebrew/Cellar/sdl2_ttf/2.24.0/include/SDL2
+-std=gnu++2b
+-arch arm64
 

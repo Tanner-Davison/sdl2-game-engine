@@ -17,7 +17,12 @@ set(SOURCES
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
-
+add_custom_target(generate_compile_commands ALL
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_BINARY_DIR}/compile_commands.json
+        ${CMAKE_SOURCE_DIR}/compile_commands.json
+    DEPENDS ${PROJECT_NAME}
+)
 target_include_directories(${PROJECT_NAME} PRIVATE 
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

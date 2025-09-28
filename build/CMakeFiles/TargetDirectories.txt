@@ -1,3 +1,4 @@
-/home/tanner/projects/cpp/game-loops/sdl-starter/build/CMakeFiles/sdl-starter.dir
-/home/tanner/projects/cpp/game-loops/sdl-starter/build/CMakeFiles/edit_cache.dir
-/home/tanner/projects/cpp/game-loops/sdl-starter/build/CMakeFiles/rebuild_cache.dir
+/Users/tanner.davison/source/repos/sdl-platformer/build/CMakeFiles/sdl-starter.dir
+/Users/tanner.davison/source/repos/sdl-platformer/build/CMakeFiles/generate_compile_commands.dir
+/Users/tanner.davison/source/repos/sdl-platformer/build/CMakeFiles/edit_cache.dir
+/Users/tanner.davison/source/repos/sdl-platformer/build/CMakeFiles/rebuild_cache.dir

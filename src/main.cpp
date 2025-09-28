@@ -1,8 +1,11 @@
 /*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
 #include "Rectangle.hpp"
 #include "Window.hpp"
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
+#ifdef __linux__
+    #include <SDL2/SDL.h>
+#else
+    #include <SDL.h>
+#endif
 #include <iostream>
 
 void HandleMotion(SDL_MouseMotionEvent& E, Window& gameWindow) {

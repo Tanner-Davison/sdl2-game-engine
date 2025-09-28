@@ -1,0 +1,20 @@
+[
+{
+  "directory": "/Users/tanner.davison/source/repos/sdl-platformer/build",
+  "command": "/usr/bin/c++  -I/Users/tanner.davison/source/repos/sdl-platformer/include -I/Users/tanner.davison/source/repos/sdl-platformer/src -isystem /opt/homebrew/Cellar/sdl2/2.32.2/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_image/2.8.8/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_ttf/2.24.0/include/SDL2 -std=gnu++2b -arch arm64 -o CMakeFiles/sdl-starter.dir/src/main.cpp.o -c /Users/tanner.davison/source/repos/sdl-platformer/src/main.cpp",
+  "file": "/Users/tanner.davison/source/repos/sdl-platformer/src/main.cpp",
+  "output": "CMakeFiles/sdl-starter.dir/src/main.cpp.o"
+},
+{
+  "directory": "/Users/tanner.davison/source/repos/sdl-platformer/build",
+  "command": "/usr/bin/c++  -I/Users/tanner.davison/source/repos/sdl-platformer/include -I/Users/tanner.davison/source/repos/sdl-platformer/src -isystem /opt/homebrew/Cellar/sdl2/2.32.2/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_image/2.8.8/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_ttf/2.24.0/include/SDL2 -std=gnu++2b -arch arm64 -o CMakeFiles/sdl-starter.dir/src/Window.cpp.o -c /Users/tanner.davison/source/repos/sdl-platformer/src/Window.cpp",
+  "file": "/Users/tanner.davison/source/repos/sdl-platformer/src/Window.cpp",
+  "output": "CMakeFiles/sdl-starter.dir/src/Window.cpp.o"
+},
+{
+  "directory": "/Users/tanner.davison/source/repos/sdl-platformer/build",
+  "command": "/usr/bin/c++  -I/Users/tanner.davison/source/repos/sdl-platformer/include -I/Users/tanner.davison/source/repos/sdl-platformer/src -isystem /opt/homebrew/Cellar/sdl2/2.32.2/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_image/2.8.8/include/SDL2 -isystem /opt/homebrew/Cellar/sdl2_ttf/2.24.0/include/SDL2 -std=gnu++2b -arch arm64 -o CMakeFiles/sdl-starter.dir/src/Rectangle.cpp.o -c /Users/tanner.davison/source/repos/sdl-platformer/src/Rectangle.cpp",
+  "file": "/Users/tanner.davison/source/repos/sdl-platformer/src/Rectangle.cpp",
+  "output": "CMakeFiles/sdl-starter.dir/src/Rectangle.cpp.o"
+}
+]
