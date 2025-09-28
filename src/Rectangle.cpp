@@ -6,7 +6,10 @@
 Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {};
 
 void Rectangle::Render(SDL_Surface* Surface) const {
-    auto [r, g, b, a]{isMousePressed ? PressedColor : isPointerHovering ? HoverColor : Rect_Color};
+    auto [r, g, b, a]{isLocked                              ? Rect_Color
+                      : isMousePressed && isPointerHovering ? PressedColor
+                      : isPointerHovering                   ? HoverColor
+                                                            : Rect_Color};
     SDL_FillRect(Surface, &Rect, SDL_MapRGB(Surface->format, r, g, b));
 }
 
@@ -14,15 +17,28 @@ void Rectangle::Render(SDL_Surface* Surface) const {
 void Rectangle::HandleEvent(SDL_Event& E) {
     if (E.type == SDL_MOUSEMOTION) {
         isPointerHovering = isWithinRect(E.motion.x, E.motion.y);
-        if (isMousePressed && isPointerHovering) {
-            cursorManager.setHandCursor();
+
+        if (isMousePressed && isPointerHovering && !isLocked) {
+            cursorManager.setGrabCursor();
             if (E.motion.x != 0 && E.motion.x != 700)
                 Rect.x = E.motion.x - (Rect.w / 2);
             Rect.y = E.motion.y - (Rect.h / 2);
+        } else if (isPointerHovering && !isMousePressed && !isLocked) {
+            cursorManager.setHandCursor();
+        } else {
+            cursorManager.setDefaultCursor();
         }
     }
     if (E.type == SDL_MOUSEBUTTONDOWN) {
-        isMousePressed = true;
+        if (E.button.button == SDL_BUTTON_LEFT) {
+            isMousePressed = true;
+        } else if (E.button.button == SDL_BUTTON_RIGHT) {
+            if (E.button.state == SDL_PRESSED && E.button.clicks >= 2) {
+                isLocked = false;
+            } else if (E.button.state == SDL_PRESSED && E.button.clicks <= 1) {
+                isLocked = true;
+            }
+        }
     }
     if (E.type == SDL_MOUSEBUTTONUP) {
         isMousePressed = false;

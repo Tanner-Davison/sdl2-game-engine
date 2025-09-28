@@ -28,5 +28,6 @@ class Rectangle {
 
     bool isMousePressed{false};
     bool isPointerHovering{false};
+    bool isLocked{false};
     bool isWithinRect(int x, int y);
 };
