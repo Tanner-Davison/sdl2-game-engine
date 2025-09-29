@@ -2,8 +2,11 @@
 #include "Rectangle.hpp"
 #include "UI.hpp"
 #include "Window.hpp"
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
+#ifdef __linux__
+    #include <SDL2/SDL.h>
+#else
+    #include <SDL.h>
+#endif
 #include <iostream>
 
 int main(int argc, char** argv) {

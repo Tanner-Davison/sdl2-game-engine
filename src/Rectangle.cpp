@@ -1,7 +1,9 @@
 #include "Rectangle.hpp"
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_mouse.h>
+#ifdef __linux__
+    #include <SDL2/SDL.h>
+#else
+    #include <SDL.h>
+#endif
 bool Rectangle::isAnyRectangleMoving = false;
 
 Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {};
