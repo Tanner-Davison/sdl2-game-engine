@@ -11,4 +11,3 @@ Button::Button(const SDL_Rect& R) : Rect(R) {
 void Button::Render(SDL_Surface* Surface) const {
     Rect.Render(Surface);
 };
-void Button::HandleEvent(SDL_Event& E) {};

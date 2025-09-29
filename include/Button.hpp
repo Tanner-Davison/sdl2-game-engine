@@ -10,8 +10,7 @@
 class Button : public Rectangle {
   public:
     Button(const SDL_Rect& R);
-    void Render(SDL_Surface* Surface) const;
-    void HandleEvent(SDL_Event& E);
+    void Render(SDL_Surface* Surface) const override;
 
   private:
     Rectangle Rect;
