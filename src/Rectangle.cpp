@@ -1,4 +1,5 @@
 #include "Rectangle.hpp"
+#include <iostream>
 #ifdef __linux__
     #include <SDL2/SDL.h>
 #else
@@ -6,7 +7,9 @@
 #endif
 bool Rectangle::isAnyRectangleMoving = false;
 
-Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {};
+Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {
+    std::cout << "Rectangle constructed at " << this << std::endl;
+};
 
 void Rectangle::Render(SDL_Surface* Surface) const {
     auto [r, g, b, a]{isLocked                              ? Rect_Color
@@ -20,7 +23,9 @@ void Rectangle::HandleEvent(SDL_Event& E) {
         bool wasPointerHovering{isPointerHovering};
         isPointerHovering = isWithinRect(E.motion.x, E.motion.y);
         if (!wasPointerHovering && isPointerHovering) {
-            onMouseEnter();
+            OnMouseEnter();
+        } else if (wasPointerHovering && !isPointerHovering) {
+            OnMouseExit();
         }
         if (canStartMoving()) {
             startMoving();
@@ -38,10 +43,12 @@ void Rectangle::HandleEvent(SDL_Event& E) {
             OnMouseExit();
         isPointerHovering = false;
     } else if (E.type == SDL_MOUSEBUTTONDOWN) {
-        if (E.button.button == SDL_BUTTON_LEFT) {
+        if (E.button.button == SDL_BUTTON_LEFT && isPointerHovering) {
             isMousePressed = true;
+            OnLeftClick();
         } else if (E.button.button == SDL_BUTTON_RIGHT && isPointerHovering) {
             isLocked = (E.button.clicks <= 1); // Locks Rectangle
+            OnRightClick();
         }
     } else if (E.type == SDL_MOUSEBUTTONUP) {
         isMousePressed = false;
@@ -49,14 +56,17 @@ void Rectangle::HandleEvent(SDL_Event& E) {
             isMovingRectangle    = false;
             isAnyRectangleMoving = false;
         }
-
         cursorManager.setDefaultCursor();
     }
 }
 
-void Rectangle::onMouseEnter() {}
+void Rectangle::OnMouseEnter() {}
 
 void Rectangle::OnMouseExit() {}
+
+void Rectangle::OnLeftClick() {}
+
+void Rectangle::OnRightClick() {}
 
 bool Rectangle::canStartMoving() const {
     return isMousePressed && isPointerHovering && !isLocked && !isAnyRectangleMoving;
@@ -67,7 +77,7 @@ void Rectangle::startMoving() {
     cursorManager.setGrabCursor();
 }
 
-bool Rectangle::isWithinRect(int x, int y) {
+bool Rectangle::isWithinRect(int x, int y) const {
     if (x < Rect.x) /// Too far left
         return false;
 
