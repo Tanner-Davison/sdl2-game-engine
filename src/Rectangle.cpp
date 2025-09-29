@@ -17,9 +17,11 @@ void Rectangle::Render(SDL_Surface* Surface) const {
 }
 void Rectangle::HandleEvent(SDL_Event& E) {
     if (E.type == SDL_MOUSEMOTION) {
-        bool wasHovering  = isPointerHovering;
+        bool wasPointerHovering{isPointerHovering};
         isPointerHovering = isWithinRect(E.motion.x, E.motion.y);
-
+        if (!wasPointerHovering && isPointerHovering) {
+            onMouseEnter();
+        }
         if (canStartMoving()) {
             startMoving();
         } else if (isMovingRectangle) {
@@ -28,14 +30,18 @@ void Rectangle::HandleEvent(SDL_Event& E) {
             Rect.y = E.motion.y - (Rect.h / 2);
         } else if (isPointerHovering && !isMousePressed && !isLocked) {
             cursorManager.setHandCursor();
-        } else if (wasHovering && !isPointerHovering && !isAnyRectangleMoving) {
+        } else if (wasPointerHovering && !isPointerHovering && !isAnyRectangleMoving) {
             cursorManager.setDefaultCursor();
         }
+    } else if (E.type == SDL_WINDOWEVENT && E.window.event == SDL_WINDOWEVENT_LEAVE) {
+        if (isPointerHovering)
+            OnMouseExit();
+        isPointerHovering = false;
     } else if (E.type == SDL_MOUSEBUTTONDOWN) {
         if (E.button.button == SDL_BUTTON_LEFT) {
             isMousePressed = true;
         } else if (E.button.button == SDL_BUTTON_RIGHT && isPointerHovering) {
-            isLocked = (E.button.clicks <= 1); // Simplified
+            isLocked = (E.button.clicks <= 1); // Locks Rectangle
         }
     } else if (E.type == SDL_MOUSEBUTTONUP) {
         isMousePressed = false;
@@ -43,9 +49,14 @@ void Rectangle::HandleEvent(SDL_Event& E) {
             isMovingRectangle    = false;
             isAnyRectangleMoving = false;
         }
+
         cursorManager.setDefaultCursor();
     }
 }
+
+void Rectangle::onMouseEnter() {}
+
+void Rectangle::OnMouseExit() {}
 
 bool Rectangle::canStartMoving() const {
     return isMousePressed && isPointerHovering && !isLocked && !isAnyRectangleMoving;
@@ -55,7 +66,7 @@ void Rectangle::startMoving() {
     isAnyRectangleMoving = true;
     cursorManager.setGrabCursor();
 }
-/// Check if Mouse inside of Rect?
+
 bool Rectangle::isWithinRect(int x, int y) {
     if (x < Rect.x) /// Too far left
         return false;

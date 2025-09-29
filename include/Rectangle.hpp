@@ -29,12 +29,39 @@ class Rectangle {
     SDL_Color HoverColor{128, 128, 128, 0};
     SDL_Color PressedColor{96, 96, 96, 0};
 
-    bool isMousePressed{false};
-    bool isPointerHovering{false};
+  protected:
+    bool         isMousePressed{false};
+    bool         isPointerHovering{false};
+    virtual void onMouseEnter();
+    virtual void OnMouseExit();
 
   private:
-    bool          canStartMoving() const;
-    void          startMoving();
+    /**
+     * @brief Checks if  the Rectangle can begin moving based on input and state conditions
+     *
+     * - isMousePressed
+     * - isPointerHovering
+     * - !isLocked
+     * - !isAnyRectangleMoving
+     *
+     * @return true if all conditions are met
+     */
+    bool canStartMoving() const;
+    /**
+     * @brief Toggles Conditional varibales to enable movement
+     * - isMovingRectangle -> true
+     * - isAnyRectangleMoving -> true
+     * - Cursor State -> setGrabCursor()
+     * @return --VOID--
+     */
+    void startMoving();
+    /**
+     * @brief Checks if a point is within the rectangle's bounds
+     *
+     * @param x The x-coordinate to test
+     * @param y The y-coordinate to test
+     * @return true if the point is inside the rectangle, false otherwise
+     */
     bool          isWithinRect(int x, int y);
     CursorManager cursorManager;
     int           pos_X;
