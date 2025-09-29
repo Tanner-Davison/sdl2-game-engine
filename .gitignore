@@ -1,4 +1,4 @@
-.cache
+.cache/
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
