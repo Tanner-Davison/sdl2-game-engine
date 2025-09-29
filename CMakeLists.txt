@@ -14,6 +14,7 @@ set(SOURCES
     src/main.cpp
     src/Window.cpp
     src/Rectangle.cpp
+    src/UI.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
