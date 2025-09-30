@@ -6,8 +6,6 @@
 #endif
 #include "Button.hpp"
 #include "Rectangle.hpp"
-#include <memory>
-#include <vector>
 
 class UI {
   public:
@@ -18,5 +16,5 @@ class UI {
     /// Of type SDL_Rect
     Rectangle A{{50, 50, 50, 50}};
     Rectangle B{{150, 50, 50, 50}};
-    Button    C{{250, 50, 50, 50}};
+    Button    C{*this, {250, 50, 50, 50}};
 };
