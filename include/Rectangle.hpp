@@ -16,17 +16,16 @@ class Rectangle {
 
     virtual ~Rectangle() = default;
 
-    SDL_Rect  Rect;
-    SDL_Color Color{255, 0, 0, 255};
-    SDL_Color HoverColor{128, 128, 128, 0};
-
     virtual void OnMouseEnter();
     virtual void OnMouseExit();
     virtual void OnLeftClick();
 
   private:
-    bool isWithinRect(int x, int y) const;
+    SDL_Rect  Rect;
+    SDL_Color Color{255, 0, 0, 255};
+    SDL_Color HoverColor{128, 128, 128, 0};
+
     bool isPointerHovering{false};
-    int  pos_X;
-    int  pos_Y;
+
+    bool isWithinRect(int x, int y) const;
 };
