@@ -4,8 +4,9 @@
 #else
     #include <SDL.h>
 #endif
-#include "Button.hpp"
-#include "Rectangle.hpp"
+#include "Footer.h"
+#include "Grid.h"
+#include "Header.h"
 
 class UI {
   public:
@@ -13,8 +14,7 @@ class UI {
     void HandleEvent(SDL_Event& E);
 
   private:
-    /// Of type SDL_Rect
-    Rectangle A{{50, 50, 50, 50}};
-    Rectangle B{{150, 50, 50, 50}};
-    Button    C{*this, {250, 50, 50, 50}};
+    Header TopMenu;
+    Grid   Rectangles;
+    Footer BottomMenu;
 };

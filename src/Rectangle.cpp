@@ -7,9 +7,7 @@
 #endif
 bool Rectangle::isAnyRectangleMoving = false;
 
-Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {
-    std::cout << "Rectangle constructed at " << this << std::endl;
-};
+Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {};
 
 void Rectangle::Render(SDL_Surface* Surface) const {
     auto [r, g, b, a]{isLocked                              ? Rect_Color
@@ -35,10 +33,12 @@ void Rectangle::HandleEvent(SDL_Event& E) {
             Rect.y = E.motion.y - (Rect.h / 2);
         } else if (isPointerHovering && !isMousePressed && !isLocked) {
             cursorManager.setHandCursor();
-        } else if (wasPointerHovering && !isPointerHovering && !isAnyRectangleMoving) {
+        } else if (wasPointerHovering && !isPointerHovering &&
+                   !isAnyRectangleMoving) {
             cursorManager.setDefaultCursor();
         }
-    } else if (E.type == SDL_WINDOWEVENT && E.window.event == SDL_WINDOWEVENT_LEAVE) {
+    } else if (E.type == SDL_WINDOWEVENT &&
+               E.window.event == SDL_WINDOWEVENT_LEAVE) {
         if (isPointerHovering)
             OnMouseExit();
         isPointerHovering = false;
@@ -69,7 +69,8 @@ void Rectangle::OnLeftClick() {}
 void Rectangle::OnRightClick() {}
 
 bool Rectangle::canStartMoving() const {
-    return isMousePressed && isPointerHovering && !isLocked && !isAnyRectangleMoving;
+    return isMousePressed && isPointerHovering && !isLocked &&
+           !isAnyRectangleMoving;
 }
 void Rectangle::startMoving() {
     isMovingRectangle    = true;

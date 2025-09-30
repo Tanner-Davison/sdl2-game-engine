@@ -1,13 +1,13 @@
 #include "UI.hpp"
 
 void UI::Render(SDL_Surface* Surface) const {
-    A.Render(Surface);
-    B.Render(Surface);
-    C.Render(Surface);
+    TopMenu.Render(Surface);
+    Rectangles.Render(Surface);
+    BottomMenu.Render(Surface);
 };
 
 void UI::HandleEvent(SDL_Event& E) {
-    A.HandleEvent(E);
-    B.HandleEvent(E);
-    C.HandleEvent(E);
+    TopMenu.HandleEvent(E);
+    Rectangles.HandleEvent(E);
+    BottomMenu.HandleEvent(E);
 };
