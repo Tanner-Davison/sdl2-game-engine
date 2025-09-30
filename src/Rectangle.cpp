@@ -6,9 +6,7 @@
     #include <SDL.h>
 #endif
 
-Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {
-    std::cout << "Rectangle constructed at " << this << std::endl;
-};
+Rectangle::Rectangle(const SDL_Rect& _Rect) : Rect(_Rect) {};
 
 void Rectangle::Render(SDL_Surface* Surface) const {
     auto [r, g, b, a]{isPointerHovering ? HoverColor : Color};

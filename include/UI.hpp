@@ -6,6 +6,7 @@
 #endif
 #include "Button.hpp"
 #include "Rectangle.hpp"
+#include "SettingsMenu.hpp"
 
 class UI {
   public:
@@ -14,7 +15,9 @@ class UI {
 
   private:
     /// Of type SDL_Rect
-    Rectangle A{{50, 50, 50, 50}};
-    Rectangle B{{150, 50, 50, 50}};
-    Button    C{*this, {250, 50, 50, 50}};
+    // Rectangle A{{50, 50, 50, 50}};
+    Rectangle    B{{150, 50, 50, 50}};
+    Button       C{*this, {350, 50, 50, 50}};
+    Button       SettingsButton{*this, {50, 50, 50, 50}};
+    SettingsMenu Settings;
 };
