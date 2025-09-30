@@ -1,4 +1,5 @@
 #pragma once
+#include "Button.hpp"
 #include "UserEvents.hpp"
 #include <SDL.h>
 #include <SDL_pixels.h>
@@ -17,12 +18,12 @@ class SettingsMenu {
         using namespace UserEvents;
         if (E.type == OPEN_SETTINGS) {
             isOpen = true;
-
-            std::cout << "That's a user  event\n";
-            auto* Config{static_cast<SettingsConfig*>(E.data1)};
-            Rect.x = Config->x;
-            Rect.y = Config->y;
-            if (Config->Page == SettingsPage::GAMEPLAY) {
+            auto* Instigator{static_cast<Button*>(E.data1)};
+            std::cout << "I was Opened From a Button: "
+                      << Instigator->GetLocation() << "\n";
+            Rect.x = Instigator->GetConfig().x;
+            Rect.y = Instigator->GetConfig().y;
+            if (Instigator->GetConfig().Page == SettingsPage::GAMEPLAY) {
                 std::cout << "Page: Gameplay Settings\n";
             }
         } else if (E.type == CLOSE_SETTINGS) {
@@ -39,6 +40,6 @@ class SettingsMenu {
 
   private:
     bool      isOpen{false};
-    SDL_Rect  Rect{100, 50, 200, 200};
+    SDL_Rect  Rect{50, 100, 200, 200};
     SDL_Color Color{150, 150, 150, 255};
 };

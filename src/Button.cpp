@@ -21,8 +21,15 @@ void Button::OnLeftClick() { // override
     using namespace UserEvents;
     SDL_Event Event{isSettingsOpen ? CLOSE_SETTINGS : OPEN_SETTINGS};
     if (Event.type == OPEN_SETTINGS) {
-        Event.user.data1 = &Config;
+        Event.user.data1 = this;
     }
 
     SDL_PushEvent(&Event);
 }
+
+std::string Button::GetLocation() {
+    return "The main menu";
+};
+UserEvents::SettingsConfig Button::GetConfig() {
+    return Config;
+};
