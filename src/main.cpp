@@ -19,16 +19,12 @@ int main(int argc, char** argv) {
     Image     ExampleImg{"game_assets/example.bmp",
                      GameWindow.GetSurface()->format}; // image blitting
     SDL_Event E;
-    // std::cout << SDL_GetBasePath();
-    std::cout << "Game Window Surface is storing "
-                 "It's Pixel data in: "
-              << GameWindow.GetSurface()->pixels;
-    Uint64 frequency = SDL_GetPerformanceFrequency();
+    Uint64    frequency = SDL_GetPerformanceFrequency();
     while (true) {
         // 1. Process Events
         while (SDL_PollEvent(&E)) {
             /// Process Events
-            // UIManager.HandleEvent(E);
+            UIManager.HandleEvent(E);
             if (E.type == SDL_QUIT) {
                 SDL_Quit();
                 return 0;
@@ -40,10 +36,7 @@ int main(int argc, char** argv) {
 
         GameWindow.Render(); /// Render Background Color
 
-        Uint64 Start{SDL_GetPerformanceCounter()};
-        ExampleImg.Render(GameWindow.GetSurface());
-        Uint64 Delta{SDL_GetPerformanceCounter()};
-
+        UI.Render();
         ExampleImg.Render(GameWindow.GetSurface());
 
         GameWindow.Update(); /// Swap Buffers
