@@ -21,8 +21,8 @@ class SettingsMenu {
 
             auto* Instigator{static_cast<Button*>(E.data1)};
 
-            std::cout << "I was Opened From a Button: "
-                      << Instigator->GetLocation() << "\n";
+            // std::cout << "I was Opened From a Button: "
+            //           << Instigator->GetLocation() << "\n";
 
             Rect.x = Instigator->GetConfig().x;
             Rect.y = Instigator->GetConfig().y;

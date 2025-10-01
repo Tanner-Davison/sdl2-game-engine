@@ -10,6 +10,8 @@ class Image {
         if (!ImageSurface) {
             std::cout << "Failed to load image: " << File << ":\n"
                       << SDL_GetError();
+        } else {
+            srcRect = {0, 0, ImageSurface->w, ImageSurface->h};
         }
         if (PreferredFormat) {
             SDL_Surface* Converted{
@@ -44,5 +46,5 @@ class Image {
     int          destWidth{0};
     SDL_Surface* ImageSurface{nullptr};
     SDL_Rect     destRect;
-    SDL_Rect     srcRect{0, 0, ImageSurface->w, ImageSurface->h};
+    SDL_Rect     srcRect{0, 0, 0, 0};
 };

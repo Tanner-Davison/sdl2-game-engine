@@ -41,9 +41,6 @@ int main(int argc, char** argv) {
         UIManager.Render(GameWindow.GetSurface());
         GameWindow.Update(); /// Swap Buffers
 
-        // 2. Update Objects
-        // 3. Render Changes
-
         /*UNCOMMENT FOR PERFOMANCE RENDERING*/
         // Uint64 Delta{SDL_GetPerformanceCounter()};
         // double elapsedMs = ((Delta - Start) * 1000.0) / frequency;
