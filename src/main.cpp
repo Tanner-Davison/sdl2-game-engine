@@ -36,9 +36,9 @@ int main(int argc, char** argv) {
 
         GameWindow.Render(); /// Render Background Color
 
-        UI.Render();
         ExampleImg.Render(GameWindow.GetSurface());
 
+        UIManager.Render(GameWindow.GetSurface());
         GameWindow.Update(); /// Swap Buffers
 
         // 2. Update Objects

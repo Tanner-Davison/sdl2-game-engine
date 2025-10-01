@@ -22,6 +22,9 @@ void Button::OnLeftClick() { // override
     SDL_Event Event{isSettingsOpen ? CLOSE_SETTINGS : OPEN_SETTINGS};
     if (Event.type == OPEN_SETTINGS) {
         Event.user.data1 = this;
+        SetColor({100, 100, 0, 0});
+    } else if (Event.type == CLOSE_SETTINGS) {
+        SetColor({0, 200, 0, 255});
     }
 
     SDL_PushEvent(&Event);

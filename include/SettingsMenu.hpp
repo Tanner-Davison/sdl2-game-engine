@@ -18,11 +18,15 @@ class SettingsMenu {
         using namespace UserEvents;
         if (E.type == OPEN_SETTINGS) {
             isOpen = true;
+
             auto* Instigator{static_cast<Button*>(E.data1)};
+
             std::cout << "I was Opened From a Button: "
                       << Instigator->GetLocation() << "\n";
+
             Rect.x = Instigator->GetConfig().x;
             Rect.y = Instigator->GetConfig().y;
+
             if (Instigator->GetConfig().Page == SettingsPage::GAMEPLAY) {
                 std::cout << "Page: Gameplay Settings\n";
             }

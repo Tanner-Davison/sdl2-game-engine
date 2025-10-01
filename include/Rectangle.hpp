@@ -20,11 +20,13 @@ class Rectangle {
     virtual void OnMouseExit();
     virtual void OnLeftClick();
 
-  private:
-    SDL_Rect  Rect;
+  protected:
+    SDL_Rect Rect;
+
     SDL_Color Color{255, 0, 0, 255};
     SDL_Color HoverColor{128, 128, 128, 0};
 
+  private:
     bool isPointerHovering{false};
 
     bool isWithinRect(int x, int y) const;

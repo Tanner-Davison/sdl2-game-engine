@@ -17,7 +17,7 @@ class Button : public Rectangle {
 
   private:
     UserEvents::SettingsConfig Config{
-        UserEvents::SettingsPage::GAMEPLAY, 50, 100};
+        UserEvents::SettingsPage::GAMEPLAY, Rect.x, (Rect.y + Rect.h)};
 
     UI&  UIManager;
     bool isSettingsOpen{false};
