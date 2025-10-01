@@ -2,6 +2,7 @@
 CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
+sdlCmakeConfig/
 CMakeScripts
 Testing
 Makefile
