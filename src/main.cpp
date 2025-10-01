@@ -1,5 +1,4 @@
 /*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
-// #include "Image.h"
 #include "Image.hpp"
 #include "Rectangle.hpp"
 #include "UI.hpp"
@@ -17,8 +16,8 @@ int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     Window    GameWindow;
     UI        UIManager;
-    Image     Example{"game_assets/example.bmp",
-                  GameWindow.GetSurface()->format}; // image blitting
+    Image     ExampleImg{"game_assets/example.bmp",
+                     GameWindow.GetSurface()->format}; // image blitting
     SDL_Event E;
     // std::cout << SDL_GetBasePath();
     std::cout << "Game Window Surface is storing "
@@ -36,21 +35,26 @@ int main(int argc, char** argv) {
             }
         };
 
+        /*UNCOMMENT Uint64 PERFOMANCE RENDERING*/
+        // Uint64 Start{SDL_GetPerformanceCounter()};
+
         GameWindow.Render(); /// Render Background Color
 
         Uint64 Start{SDL_GetPerformanceCounter()};
-        Example.Render(GameWindow.GetSurface());
+        ExampleImg.Render(GameWindow.GetSurface());
         Uint64 Delta{SDL_GetPerformanceCounter()};
 
-        double elapsedMs = ((Delta - Start) * 1000.0) / frequency;
-        std::cout << "Render time: " << elapsedMs << " ms" << std::endl;
+        ExampleImg.Render(GameWindow.GetSurface());
 
-        // UIManager.Render(GameWindow.GetSurface());
-        //
         GameWindow.Update(); /// Swap Buffers
 
         // 2. Update Objects
         // 3. Render Changes
+
+        /*UNCOMMENT FOR PERFOMANCE RENDERING*/
+        // Uint64 Delta{SDL_GetPerformanceCounter()};
+        // double elapsedMs = ((Delta - Start) * 1000.0) / frequency;
+        // std::cout << "Render time: " << elapsedMs << " ms" << std::endl;
     };
 
     SDL_Quit();
