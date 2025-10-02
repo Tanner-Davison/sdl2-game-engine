@@ -1,10 +1,11 @@
 #include "Image.hpp"
 #include <SDL_image.h>
+#include <SDL_surface.h>
 #include <iostream>
 
-// bmp files
-Image::Image(std::string File, SDL_PixelFormat* PreferredFormat)
-    : ImageSurface{IMG_Load(File.c_str())} {
+Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
+    : ImageSurface{IMG_Load(File.c_str())}
+    , fitMode{mode} {
     if (!ImageSurface) {
         std::cout << "Failed to load image: " << File << ":\n"
                   << SDL_GetError();
@@ -65,6 +66,9 @@ void Image::SetDestinationRectangle(SDL_Rect Requested) {
         case FitMode::COVER:
             HandleCover(Requested);
             break;
+        case FitMode::STRETCH:
+            HandleStretch(Requested);
+            break;
     }
 }
 
@@ -117,4 +121,14 @@ void Image::HandleCover(SDL_Rect& Requested) {
         SrcRectangle.y   = (originalHeight - newSrcHeight) / 2;
         SrcRectangle.h   = newSrcHeight;
     }
+}
+void Image::HandleStretch(SDL_Rect& Requested) {
+    // Reset source to full original image
+    SrcRectangle.x = 0;
+    SrcRectangle.y = 0;
+    SrcRectangle.w = originalWidth;
+    SrcRectangle.h = originalHeight;
+
+    // Destination fills entire requested area (no aspect ratio preservation)
+    DestRectangle = Requested;
 }

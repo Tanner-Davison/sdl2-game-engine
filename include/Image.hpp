@@ -7,7 +7,16 @@ enum class FitMode { CONTAIN, COVER, STRETCH };
 
 class Image {
   public:
-    Image(std::string File, SDL_PixelFormat* PreferredFormat);
+    /**
+     * @param File Path to image file (supports BMP, PNG, JPG, etc.)
+     * @param PreferredFormat Optional format conversion for optimized blitting
+     * (nullptr = no conversion)
+     * @param mode How the image should fit in the destination (CONTAIN, COVER,
+     * or STRETCH)
+     */
+    Image(std::string      File,
+          SDL_PixelFormat* PreferredFormat = nullptr,
+          FitMode          mode            = FitMode::CONTAIN);
     Image(std::string File);
     ~Image();
 
@@ -23,6 +32,7 @@ class Image {
   protected:
     void HandleContain(SDL_Rect& Requested);
     void HandleCover(SDL_Rect& Requested);
+    void HandleStretch(SDL_Rect& Requested);
 
   private:
     int          destHeight{0};
@@ -32,5 +42,5 @@ class Image {
     SDL_Surface* ImageSurface{nullptr};
     SDL_Rect     DestRectangle{0, 0, 0, 0};
     SDL_Rect     SrcRectangle{0, 0, 0, 0};
-    FitMode      fitMode = FitMode::COVER;
+    FitMode      fitMode{FitMode::COVER};
 };
