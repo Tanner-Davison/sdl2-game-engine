@@ -3,8 +3,7 @@
 #include "Rectangle.hpp"
 #include "UI.hpp"
 #include "Window.hpp"
-#include <SDL_filesystem.h>
-#include <SDL_timer.h>
+#include <SDL_image.h>
 #ifdef __linux__
     #include <SDL2/SDL.h>
 #else
@@ -14,9 +13,11 @@
 
 int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
-    Window    GameWindow;
-    Image     ExampleImg{"game_assets/example.bmp",
-                     GameWindow.GetSurface()->format}; // image blitting
+    IMG_Init(IMG_INIT_PNG);
+    Window GameWindow;
+    Image  ExampleImg{"game_assets/base_pack/bg_castle.png",
+                     GameWindow.GetSurface()->format};
+    ExampleImg.SetFitMode(FitMode::CONTAIN);
     UI        UIManager;
     SDL_Event E;
     // Uint64    frequency = SDL_GetPerformanceFrequency();
@@ -29,21 +30,25 @@ int main(int argc, char** argv) {
             }
         };
 
-        /*UNCOMMENT Uint64 PERFOMANCE RENDERING*/
+        // UNCOMMENT Uint64 PERFOMANCE RENDERING
         // Uint64 Start{SDL_GetPerformanceCounter()};
 
         GameWindow.Render(); /// Render Background Color
 
         ExampleImg.Render(GameWindow.GetSurface());
 
-        UIManager.Render(GameWindow.GetSurface());
+        // UIManager.Render(GameWindow.GetSurface());
         GameWindow.Update(); /// Swap Buffers
 
-        /*UNCOMMENT FOR PERFOMANCE RENDERING*/
-        // Uint64 Delta{SDL_GetPerformanceCounter()};
-        // double elapsedMs = ((Delta - Start) * 1000.0) / frequency;
-        // std::cout << "Render time: " << elapsedMs << " ms" << std::endl;
+        // UNCOMMENT FOR PERFOMANCE RENDERING
+        /*
+                Uint64 Delta{SDL_GetPerformanceCounter()};
+                double elapsedMs = ((Delta - Start) * 1000.0) / frequency;
+                std::cout << "Render time: " << elapsedMs << " ms" << std::endl;
+         * */
     };
-
+    // cleanup
+    IMG_Quit();
+    SDL_Quit();
     return 0;
 }

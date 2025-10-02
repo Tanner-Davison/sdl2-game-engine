@@ -9,8 +9,8 @@ Window::Window() {
     SDL_Window* Ptr = {SDL_CreateWindow("Smart Pointer Window",
                                         SDL_WINDOWPOS_UNDEFINED,
                                         SDL_WINDOWPOS_UNDEFINED,
-                                        700,
-                                        300,
+                                        1440,
+                                        1080,
                                         SDL_WINDOW_RESIZABLE)};
     CheckSDLError("Creating Window");
 
@@ -33,6 +33,8 @@ Window::Window() {
     Green     = SDL_MapRGB(Fmt, 0, 255, 0);
     Red       = SDL_MapRGB(Fmt, 255, 0, 0);
     Blue      = SDL_MapRGB(Fmt, 0, 0, 255);
+    Black     = SDL_MapRGB(Fmt, 0, 0, 1);
+    Gray      = SDL_MapRGB(Fmt, 134, 149, 149);
 }
 
 SDL_Window* Window::GetRaw() const {
@@ -43,7 +45,7 @@ SDL_Surface* Window::GetSurface() const {
     return SDLWindow ? SDL_GetWindowSurface(SDLWindow.get()) : nullptr;
 }
 void Window::Render() {
-    SDL_FillRect(GetSurface(), nullptr, DarkGreen);
+    SDL_FillRect(GetSurface(), nullptr, Black);
 };
 
 void Window::Update() {

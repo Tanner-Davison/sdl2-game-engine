@@ -34,6 +34,8 @@ class Window {
     Uint32           DarkGreen;
     Uint32           Blue;
     Uint32           Yellow;
+    Uint32           Black;
+    Uint32           Gray;
 
   private:
     UniqueSDLWindow SDLWindow{nullptr};

@@ -3,9 +3,12 @@
 #include <SDL_surface.h>
 #include <string>
 
+enum class FitMode { CONTAIN, COVER, STRETCH };
+
 class Image {
   public:
-    Image(std::string File, SDL_PixelFormat* PreferredFormat = nullptr);
+    Image(std::string File, SDL_PixelFormat* PreferredFormat);
+    Image(std::string File);
     ~Image();
 
     void Render(SDL_Surface* DestinationSurface);
@@ -14,10 +17,20 @@ class Image {
     Image(const Image&)            = delete;
     Image& operator=(const Image&) = delete;
 
+    void    SetFitMode(FitMode mode);
+    FitMode GetFitMode() const;
+
+  protected:
+    void HandleContain(SDL_Rect& Requested);
+    void HandleCover(SDL_Rect& Requested);
+
   private:
     int          destHeight{0};
     int          destWidth{0};
+    int          originalWidth{0};
+    int          originalHeight{0};
     SDL_Surface* ImageSurface{nullptr};
     SDL_Rect     DestRectangle{0, 0, 0, 0};
     SDL_Rect     SrcRectangle{0, 0, 0, 0};
+    FitMode      fitMode = FitMode::COVER;
 };
