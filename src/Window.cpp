@@ -18,7 +18,8 @@ Window::Window() {
 #ifdef ERROR_LOGGING
         CheckSDLError("No Window Created Check if Minimized");
 #else
-        throw std::runtime_error(std::string("Failed to create Window") + SDL_Error());
+        throw std::runtime_error(std::string("Failed to create Window") +
+                                 SDL_Error());
 #endif
     }
 

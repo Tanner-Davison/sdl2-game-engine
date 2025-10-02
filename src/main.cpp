@@ -15,15 +15,13 @@
 int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     Window    GameWindow;
-    UI        UIManager;
     Image     ExampleImg{"game_assets/example.bmp",
                      GameWindow.GetSurface()->format}; // image blitting
+    UI        UIManager;
     SDL_Event E;
-    Uint64    frequency = SDL_GetPerformanceFrequency();
+    // Uint64    frequency = SDL_GetPerformanceFrequency();
     while (true) {
-        // 1. Process Events
         while (SDL_PollEvent(&E)) {
-            /// Process Events
             UIManager.HandleEvent(E);
             if (E.type == SDL_QUIT) {
                 SDL_Quit();
@@ -47,6 +45,5 @@ int main(int argc, char** argv) {
         // std::cout << "Render time: " << elapsedMs << " ms" << std::endl;
     };
 
-    SDL_Quit();
     return 0;
 }
