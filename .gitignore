@@ -3,6 +3,7 @@ CMakeLists.txt.user
 CMakeCache.txt
 CMakeFiles
 CMakeScripts
+sdlCmakeConfig
 Testing
 Makefile
 cmake_install.cmake
@@ -12,3 +13,4 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build/
+cmake/
