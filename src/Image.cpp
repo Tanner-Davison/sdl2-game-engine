@@ -10,6 +10,7 @@ Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
         std::cout << "Failed to load image: " << File << ":\n"
                   << SDL_GetError();
     } else {
+        SDL_SetSurfaceBlendMode(ImageSurface, SDL_BLENDMODE_BLEND);
         originalWidth  = ImageSurface->w;
         originalHeight = ImageSurface->h;
         SrcRectangle.w = originalWidth;
@@ -20,6 +21,7 @@ Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
         SDL_Surface* Converted{
             SDL_ConvertSurface(ImageSurface, PreferredFormat, 0)};
         if (Converted) {
+            SDL_SetSurfaceBlendMode(Converted, SDL_BLENDMODE_BLEND);
             SDL_FreeSurface(ImageSurface);
             ImageSurface = Converted;
         } else {
@@ -43,10 +45,13 @@ void Image::Render(SDL_Surface* DestinationSurface) {
         DestRectangle.h = destHeight;
         SetDestinationRectangle(DestRectangle);
     }
-    SDL_BlitScaled(
-        ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
-    // destinationRectangle.x = ImageSurface->w;
-    // destinationRectangle.y = ImageSurface->h;
+    if (fitMode == FitMode::SRCSIZE) {
+        SDL_BlitSurface(
+            ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
+    } else {
+        SDL_BlitScaled(
+            ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
+    }
     // SDL_BlitSurface(ImageSurface, &srcRect, DestinationSurface,
     // &destRect);
 }
@@ -69,6 +74,8 @@ void Image::SetDestinationRectangle(SDL_Rect Requested) {
         case FitMode::STRETCH:
             HandleStretch(Requested);
             break;
+        case FitMode::SRCSIZE:
+            HandleSrcSize(Requested);
     }
 }
 
@@ -131,4 +138,16 @@ void Image::HandleStretch(SDL_Rect& Requested) {
 
     // Destination fills entire requested area (no aspect ratio preservation)
     DestRectangle = Requested;
+}
+
+void Image::HandleSrcSize(SDL_Rect& Requested) {
+    // Reset source to full image
+    SrcRectangle.x = 0;
+    SrcRectangle.y = 0;
+    SrcRectangle.w = originalWidth;
+    SrcRectangle.h = originalHeight;
+
+    // Center image
+    DestRectangle.x = (Requested.w - DestRectangle.w) / 2;
+    DestRectangle.y = (Requested.h - DestRectangle.h) / 2;
 }

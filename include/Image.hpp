@@ -3,7 +3,7 @@
 #include <SDL_surface.h>
 #include <string>
 
-enum class FitMode { CONTAIN, COVER, STRETCH };
+enum class FitMode { CONTAIN, COVER, STRETCH, SRCSIZE };
 
 class Image {
   public:
@@ -33,6 +33,7 @@ class Image {
     void HandleContain(SDL_Rect& Requested);
     void HandleCover(SDL_Rect& Requested);
     void HandleStretch(SDL_Rect& Requested);
+    void HandleSrcSize(SDL_Rect& Requested);
 
   private:
     int          destHeight{0};

@@ -14,10 +14,14 @@
 int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
-    Window    GameWindow;
-    Image     ExampleImg{"game_assets/base_pack/bg_castle.png",
-                     GameWindow.GetSurface()->format,
-                     FitMode::STRETCH};
+    Window GameWindow;
+
+    Image     BackgroundImg{"game_assets/base_pack/bg_castle.png",
+                        GameWindow.GetSurface()->format,
+                        FitMode::COVER};
+    Image     Player{"game_assets/base_pack/Player/p1_front.png",
+                 GameWindow.GetSurface()->format,
+                 FitMode::SRCSIZE};
     UI        UIManager;
     SDL_Event E;
     // Uint64    frequency = SDL_GetPerformanceFrequency();
@@ -34,8 +38,8 @@ int main(int argc, char** argv) {
         // Uint64 Start{SDL_GetPerformanceCounter()};
 
         GameWindow.Render(); /// Render Background Color
-
-        ExampleImg.Render(GameWindow.GetSurface());
+        BackgroundImg.Render(GameWindow.GetSurface());
+        Player.Render(GameWindow.GetSurface());
 
         // UIManager.Render(GameWindow.GetSurface());
         GameWindow.Update(); /// Swap Buffers
