@@ -4,6 +4,7 @@
 #include "UI.hpp"
 #include "Window.hpp"
 #include <SDL_image.h>
+#include <SDL_pixels.h>
 #ifdef __linux__
     #include <SDL2/SDL.h>
 #else
@@ -22,6 +23,9 @@ int main(int argc, char** argv) {
     Image     Player{"game_assets/base_pack/Player/p1_front.png",
                  GameWindow.GetSurface()->format,
                  FitMode::SRCSIZE};
+    Image     Bubble{"game_assets/BubbleSimple.png",
+                 GameWindow.GetSurface()->format,
+                 FitMode::SRCSIZE};
     UI        UIManager;
     SDL_Event E;
     // Uint64    frequency = SDL_GetPerformanceFrequency();
@@ -38,7 +42,8 @@ int main(int argc, char** argv) {
         // Uint64 Start{SDL_GetPerformanceCounter()};
 
         GameWindow.Render(); /// Render Background Color
-        BackgroundImg.Render(GameWindow.GetSurface());
+
+        Bubble.Render(GameWindow.GetSurface());
         Player.Render(GameWindow.GetSurface());
 
         // UIManager.Render(GameWindow.GetSurface());
