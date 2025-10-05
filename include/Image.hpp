@@ -43,5 +43,6 @@ class Image {
     SDL_Surface* ImageSurface{nullptr};
     SDL_Rect     DestRectangle{0, 0, 0, 0};
     SDL_Rect     SrcRectangle{0, 0, 0, 0};
-    FitMode      fitMode{FitMode::COVER};
+      FitMode      fitMode{FitMode::COVER};
+      bool         destinationInitialized{false};
 };

@@ -38,12 +38,14 @@ Image::~Image() {
 
 void Image::Render(SDL_Surface* DestinationSurface) {
     if (destWidth != DestinationSurface->w ||
-        destHeight != DestinationSurface->h) {
+        destHeight != DestinationSurface->h ||
+        !destinationInitialized) {
         destWidth       = DestinationSurface->w;
         destHeight      = DestinationSurface->h;
         DestRectangle.w = destWidth;
         DestRectangle.h = destHeight;
         SetDestinationRectangle(DestRectangle);
+        destinationInitialized = true;
     }
     if (fitMode == FitMode::SRCSIZE) {
         SDL_BlitSurface(
@@ -52,8 +54,6 @@ void Image::Render(SDL_Surface* DestinationSurface) {
         SDL_BlitScaled(
             ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
     }
-    // SDL_BlitSurface(ImageSurface, &srcRect, DestinationSurface,
-    // &destRect);
 }
 void Image::SetFitMode(FitMode mode) {
     fitMode = mode;
