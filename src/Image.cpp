@@ -16,10 +16,19 @@ Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
         SrcRectangle.w = originalWidth;
         SrcRectangle.h = originalHeight;
         SetDestinationRectangle({0, 0, 600, 300});
+        // std::cout << "Original Format: "
+        //           << SDL_GetPixelFormatName(ImageSurface->format->format)
+        //           << "\n";
+        // std::cout << "Has alpha: " << (ImageSurface->format->Amask != 0)
+        //           << "\n";
     }
     if (PreferredFormat) {
-        SDL_Surface* Converted{
-            SDL_ConvertSurface(ImageSurface, PreferredFormat, 0)};
+        Uint32 targetFormat = (PreferredFormat && PreferredFormat->Amask != 0)
+                                  ? PreferredFormat->format
+                                  : SDL_PIXELFORMAT_RGBA8888;
+
+        SDL_Surface* Converted =
+            SDL_ConvertSurfaceFormat(ImageSurface, targetFormat, 0);
         if (Converted) {
             SDL_SetSurfaceBlendMode(Converted, SDL_BLENDMODE_BLEND);
             SDL_FreeSurface(ImageSurface);
@@ -38,8 +47,7 @@ Image::~Image() {
 
 void Image::Render(SDL_Surface* DestinationSurface) {
     if (destWidth != DestinationSurface->w ||
-        destHeight != DestinationSurface->h ||
-        !destinationInitialized) {
+        destHeight != DestinationSurface->h || !destinationInitialized) {
         destWidth       = DestinationSurface->w;
         destHeight      = DestinationSurface->h;
         DestRectangle.w = destWidth;
