@@ -22,10 +22,6 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
 
-    Image ClearPng{"game_assets/clearpng.png",
-                   GameWindow.GetSurface()->format,
-                   FitMode::CONTAIN};
-
     std::vector<std::string> playerFrames = {
         "game_assets/base_pack/Player/p1_walk/PNG/p1_walk01.png",
         "game_assets/base_pack/Player/p1_walk/PNG/p1_walk02.png",
@@ -56,6 +52,7 @@ int main(int argc, char** argv) {
             UIManager.HandleEvent(E);
             PlayerSprite.HandleEvent(E);
             if (E.type == SDL_QUIT) {
+                GameWindow.Render();
                 IMG_Quit();
                 SDL_Quit();
                 return 0;
@@ -70,8 +67,8 @@ int main(int argc, char** argv) {
         BackgroundImg.Render(GameWindow.GetSurface());
         PlayerSprite.Render(GameWindow.GetSurface());
 
-        ClearPng.Render(GameWindow.GetSurface());
         GameWindow.Update();
+        SDL_Delay(100);
     }
 
     IMG_Quit();

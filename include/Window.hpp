@@ -27,6 +27,7 @@ class Window {
     void         Update();
     int          GetWidth() const;
     int          GetHeight() const;
+    void         TakeScreenshot(std::string Location);
 
     SDL_PixelFormat* Fmt;
     Uint32           Red;

@@ -23,11 +23,12 @@ class Image {
     void Render(SDL_Surface* DestinationSurface);
     void SetDestinationRectangle(SDL_Rect Requested);
 
-    Image(const Image&)            = delete;
-    Image& operator=(const Image&) = delete;
-
+    Image(const Image& Source);
+    Image&  operator=(const Image& Source);
     void    SetFitMode(FitMode mode);
     FitMode GetFitMode() const;
+
+    void SaveToFile(std::string Location);
 
   protected:
     void HandleContain(SDL_Rect& Requested);
@@ -40,9 +41,9 @@ class Image {
     int          destWidth{0};
     int          originalWidth{0};
     int          originalHeight{0};
-    SDL_Surface* ImageSurface{nullptr};
-    SDL_Rect     DestRectangle{0, 0, 0, 0};
-    SDL_Rect     SrcRectangle{0, 0, 0, 0};
-      FitMode      fitMode{FitMode::COVER};
-      bool         destinationInitialized{false};
+    SDL_Surface* mImageSurface{nullptr};
+    SDL_Rect     mDestRectangle{0, 0, 0, 0};
+    SDL_Rect     mSrcRectangle{0, 0, 0, 0};
+    FitMode      fitMode{FitMode::COVER};
+    bool         destinationInitialized{false};
 };

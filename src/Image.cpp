@@ -4,17 +4,17 @@
 #include <iostream>
 
 Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
-    : ImageSurface{IMG_Load(File.c_str())}
+    : mImageSurface{IMG_Load(File.c_str())}
     , fitMode{mode} {
-    if (!ImageSurface) {
+    if (!mImageSurface) {
         std::cout << "Failed to load image: " << File << ":\n"
                   << SDL_GetError();
     } else {
-        SDL_SetSurfaceBlendMode(ImageSurface, SDL_BLENDMODE_BLEND);
-        originalWidth  = ImageSurface->w;
-        originalHeight = ImageSurface->h;
-        SrcRectangle.w = originalWidth;
-        SrcRectangle.h = originalHeight;
+        SDL_SetSurfaceBlendMode(mImageSurface, SDL_BLENDMODE_BLEND);
+        originalWidth   = mImageSurface->w;
+        originalHeight  = mImageSurface->h;
+        mSrcRectangle.w = originalWidth;
+        mSrcRectangle.h = originalHeight;
         SetDestinationRectangle({0, 0, 600, 300});
         // std::cout << "Original Format: "
         //           << SDL_GetPixelFormatName(ImageSurface->format->format)
@@ -28,39 +28,92 @@ Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
                                   : SDL_PIXELFORMAT_RGBA8888;
 
         SDL_Surface* Converted =
-            SDL_ConvertSurfaceFormat(ImageSurface, targetFormat, 0);
+            SDL_ConvertSurfaceFormat(mImageSurface, targetFormat, 0);
         if (Converted) {
             SDL_SetSurfaceBlendMode(Converted, SDL_BLENDMODE_BLEND);
-            SDL_FreeSurface(ImageSurface);
-            ImageSurface = Converted;
+            SDL_FreeSurface(mImageSurface);
+            mImageSurface = Converted;
         } else {
             std::cout << "Error converting surface: " << SDL_GetError();
         }
     }
 }
 
+// Copy  constructor
+Image::Image(const Image& Source)
+    : destHeight{Source.destHeight}
+    , destWidth{Source.destWidth}
+    , originalWidth{Source.originalWidth}
+    , originalHeight{Source.originalHeight}
+    , mImageSurface{nullptr}
+    , mDestRectangle{Source.mDestRectangle}
+    , mSrcRectangle{Source.mSrcRectangle}
+    , fitMode{Source.fitMode}
+    , destinationInitialized{Source.destinationInitialized} {
+    if (Source.mImageSurface) {
+        mImageSurface = SDL_ConvertSurface(
+            Source.mImageSurface, Source.mImageSurface->format, 0);
+        if (mImageSurface) {
+            SDL_SetSurfaceBlendMode(mImageSurface, SDL_BLENDMODE_BLEND);
+        }
+    }
+}
+
+// copy assaignment operator
+Image& Image::operator=(const Image& Source) {
+    // Self-assignment check
+    if (this == &Source) {
+        return *this;
+    }
+
+    // Free current resources
+    SDL_FreeSurface(mImageSurface);
+
+    // Copy surface
+    if (Source.mImageSurface) {
+        mImageSurface = SDL_ConvertSurface(
+            Source.mImageSurface, Source.mImageSurface->format, 0);
+        if (mImageSurface) {
+            SDL_SetSurfaceBlendMode(mImageSurface, SDL_BLENDMODE_BLEND);
+        }
+    } else {
+        mImageSurface = nullptr;
+    }
+
+    // Copy ALL member variables
+    destHeight             = Source.destHeight;
+    destWidth              = Source.destWidth;
+    originalWidth          = Source.originalWidth;
+    originalHeight         = Source.originalHeight;
+    mDestRectangle         = Source.mDestRectangle;
+    mSrcRectangle          = Source.mSrcRectangle;
+    fitMode                = Source.fitMode;
+    destinationInitialized = Source.destinationInitialized;
+
+    return *this;
+}
 Image::~Image() {
-    if (ImageSurface) {
-        SDL_FreeSurface(ImageSurface);
+    if (mImageSurface) {
+        SDL_FreeSurface(mImageSurface);
     }
 }
 
 void Image::Render(SDL_Surface* DestinationSurface) {
     if (destWidth != DestinationSurface->w ||
         destHeight != DestinationSurface->h || !destinationInitialized) {
-        destWidth       = DestinationSurface->w;
-        destHeight      = DestinationSurface->h;
-        DestRectangle.w = destWidth;
-        DestRectangle.h = destHeight;
-        SetDestinationRectangle(DestRectangle);
+        destWidth        = DestinationSurface->w;
+        destHeight       = DestinationSurface->h;
+        mDestRectangle.w = destWidth;
+        mDestRectangle.h = destHeight;
+        SetDestinationRectangle(mDestRectangle);
         destinationInitialized = true;
     }
     if (fitMode == FitMode::SRCSIZE) {
         SDL_BlitSurface(
-            ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
+            mImageSurface, &mSrcRectangle, DestinationSurface, &mDestRectangle);
     } else {
         SDL_BlitScaled(
-            ImageSurface, &SrcRectangle, DestinationSurface, &DestRectangle);
+            mImageSurface, &mSrcRectangle, DestinationSurface, &mDestRectangle);
     }
 }
 void Image::SetFitMode(FitMode mode) {
@@ -93,22 +146,22 @@ void Image::HandleContain(SDL_Rect& Requested) {
     float RequestedRatio = Requested.w / static_cast<float>(Requested.h);
 
     // Reset source to full image
-    SrcRectangle.x = 0;
-    SrcRectangle.y = 0;
-    SrcRectangle.w = originalWidth;
-    SrcRectangle.h = originalHeight;
+    mSrcRectangle.x = 0;
+    mSrcRectangle.y = 0;
+    mSrcRectangle.w = originalWidth;
+    mSrcRectangle.h = originalHeight;
 
-    DestRectangle = Requested;
+    mDestRectangle = Requested;
 
     if (RequestedRatio < SourceRatio) {
-        DestRectangle.h = static_cast<int>(Requested.w / SourceRatio);
+        mDestRectangle.h = static_cast<int>(Requested.w / SourceRatio);
     } else {
-        DestRectangle.w = static_cast<int>(Requested.h * SourceRatio);
+        mDestRectangle.w = static_cast<int>(Requested.h * SourceRatio);
     }
 
     // Center image
-    DestRectangle.x = (Requested.w - DestRectangle.w) / 2;
-    DestRectangle.y = (Requested.h - DestRectangle.h) / 2;
+    mDestRectangle.x = (Requested.w - mDestRectangle.w) / 2;
+    mDestRectangle.y = (Requested.h - mDestRectangle.h) / 2;
 }
 void Image::HandleCover(SDL_Rect& Requested) {
     if (originalWidth <= 0 || originalHeight <= 0) {
@@ -117,45 +170,49 @@ void Image::HandleCover(SDL_Rect& Requested) {
     float sourceRatio    = originalWidth / static_cast<float>(originalHeight);
     float requestedRatio = Requested.w / static_cast<float>(Requested.h);
 
-    DestRectangle = Requested;
+    mDestRectangle = Requested;
 
     // Reset source to original
-    SrcRectangle.x = 0;
-    SrcRectangle.y = 0;
-    SrcRectangle.w = originalWidth;
-    SrcRectangle.h = originalHeight;
+    mSrcRectangle.x = 0;
+    mSrcRectangle.y = 0;
+    mSrcRectangle.w = originalWidth;
+    mSrcRectangle.h = originalHeight;
 
     if (requestedRatio < sourceRatio) {
         // Crop width
         int newSrcWidth = static_cast<int>(originalHeight * requestedRatio);
-        SrcRectangle.x  = (originalWidth - newSrcWidth) / 2;
-        SrcRectangle.w  = newSrcWidth;
+        mSrcRectangle.x = (originalWidth - newSrcWidth) / 2;
+        mSrcRectangle.w = newSrcWidth;
     } else {
         // Crop height
         int newSrcHeight = static_cast<int>(originalWidth / requestedRatio);
-        SrcRectangle.y   = (originalHeight - newSrcHeight) / 2;
-        SrcRectangle.h   = newSrcHeight;
+        mSrcRectangle.y  = (originalHeight - newSrcHeight) / 2;
+        mSrcRectangle.h  = newSrcHeight;
     }
 }
 void Image::HandleStretch(SDL_Rect& Requested) {
     // Reset source to full original image
-    SrcRectangle.x = 0;
-    SrcRectangle.y = 0;
-    SrcRectangle.w = originalWidth;
-    SrcRectangle.h = originalHeight;
+    mSrcRectangle.x = 0;
+    mSrcRectangle.y = 0;
+    mSrcRectangle.w = originalWidth;
+    mSrcRectangle.h = originalHeight;
 
     // Destination fills entire requested area (no aspect ratio preservation)
-    DestRectangle = Requested;
+    mDestRectangle = Requested;
 }
 
 void Image::HandleSrcSize(SDL_Rect& Requested) {
     // Reset source to full image
-    SrcRectangle.x = 0;
-    SrcRectangle.y = 0;
-    SrcRectangle.w = originalWidth;
-    SrcRectangle.h = originalHeight;
+    mSrcRectangle.x = 0;
+    mSrcRectangle.y = 0;
+    mSrcRectangle.w = originalWidth;
+    mSrcRectangle.h = originalHeight;
 
     // Center image
-    DestRectangle.x = (Requested.w - DestRectangle.w) / 2;
-    DestRectangle.y = (Requested.h - DestRectangle.h) / 2;
+    mDestRectangle.x = (Requested.w - mDestRectangle.w) / 2;
+    mDestRectangle.y = (Requested.h - mDestRectangle.h) / 2;
+}
+
+void Image::SaveToFile(std::string Location) {
+    IMG_SavePNG(mImageSurface, Location.c_str());
 }
