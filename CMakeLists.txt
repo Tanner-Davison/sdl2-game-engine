@@ -21,6 +21,8 @@ set(SOURCES
     src/Button.cpp
     src/Image.cpp
     src/Sprite.cpp
+    src/Text.cpp
+    src/SpriteSheet.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

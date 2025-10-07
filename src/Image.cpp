@@ -39,6 +39,19 @@ Image::Image(std::string File, SDL_PixelFormat* PreferredFormat, FitMode mode)
     }
 }
 
+// for spritesheets implementation
+Image::Image(SDL_Surface* surface, FitMode mode)
+    : mImageSurface{surface}
+    , fitMode{mode} {
+    if (mImageSurface) {
+        SDL_SetSurfaceBlendMode(mImageSurface,
+                                SDL_BLENDMODE_BLEND); // Add this!
+        originalWidth   = mImageSurface->w;
+        originalHeight  = mImageSurface->h;
+        mSrcRectangle.w = originalWidth;
+        mSrcRectangle.h = originalHeight;
+    }
+}
 // Copy  constructor
 Image::Image(const Image& Source)
     : destHeight{Source.destHeight}
@@ -97,10 +110,11 @@ Image::~Image() {
         SDL_FreeSurface(mImageSurface);
     }
 }
-
 void Image::Render(SDL_Surface* DestinationSurface) {
-    if (destWidth != DestinationSurface->w ||
-        destHeight != DestinationSurface->h || !destinationInitialized) {
+    // Only auto-resize for modes that need the full surface (COVER/CONTAIN)
+    if ((fitMode == FitMode::COVER || fitMode == FitMode::CONTAIN) &&
+        (destWidth != DestinationSurface->w ||
+         destHeight != DestinationSurface->h || !destinationInitialized)) {
         destWidth        = DestinationSurface->w;
         destHeight       = DestinationSurface->h;
         mDestRectangle.w = destWidth;
@@ -108,6 +122,7 @@ void Image::Render(SDL_Surface* DestinationSurface) {
         SetDestinationRectangle(mDestRectangle);
         destinationInitialized = true;
     }
+
     if (fitMode == FitMode::SRCSIZE) {
         SDL_BlitSurface(
             mImageSurface, &mSrcRectangle, DestinationSurface, &mDestRectangle);
@@ -197,10 +212,10 @@ void Image::HandleStretch(SDL_Rect& Requested) {
     mSrcRectangle.w = originalWidth;
     mSrcRectangle.h = originalHeight;
 
-    // Destination fills entire requested area (no aspect ratio preservation)
+    // Destination fills entire requested area (no aspect ratio
+    // preservation)
     mDestRectangle = Requested;
 }
-
 void Image::HandleSrcSize(SDL_Rect& Requested) {
     // Reset source to full image
     mSrcRectangle.x = 0;
@@ -208,9 +223,11 @@ void Image::HandleSrcSize(SDL_Rect& Requested) {
     mSrcRectangle.w = originalWidth;
     mSrcRectangle.h = originalHeight;
 
-    // Center image
-    mDestRectangle.x = (Requested.w - mDestRectangle.w) / 2;
-    mDestRectangle.y = (Requested.h - mDestRectangle.h) / 2;
+    // Use the REQUESTED position, not centered!
+    mDestRectangle.x = Requested.x; // Changed from centering calculation
+    mDestRectangle.y = Requested.y; // Changed from centering calculation
+    mDestRectangle.w = originalWidth;
+    mDestRectangle.h = originalHeight;
 }
 
 void Image::SaveToFile(std::string Location) {

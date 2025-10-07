@@ -18,6 +18,7 @@ class Image {
           SDL_PixelFormat* PreferredFormat = nullptr,
           FitMode          mode            = FitMode::CONTAIN);
     Image(std::string File);
+    Image(SDL_Surface* surface, FitMode mode);
     ~Image();
 
     void Render(SDL_Surface* DestinationSurface);

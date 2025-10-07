@@ -52,12 +52,15 @@ void Window::Render() {
 void Window::Update() {
     SDL_UpdateWindowSurface(SDLWindow.get());
 };
-
 int Window::GetWidth() const {
-    return 700;
+    int w;
+    SDL_GetWindowSize(SDLWindow.get(), &w, nullptr);
+    return w;
 };
 int Window::GetHeight() const {
-    return 700;
+    int h;
+    SDL_GetWindowSize(SDLWindow.get(), nullptr, &h);
+    return h;
 };
 void Window::TakeScreenshot(std::string Location) {
     IMG_SavePNG(GetSurface(), Location.c_str());
