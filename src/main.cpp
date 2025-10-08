@@ -25,16 +25,12 @@ int main(int argc, char** argv) {
     }
     SDL_EventState(SDL_KEYDOWN, SDL_ENABLE);
     Window GameWindow;
-    UI     UiManager;
-
-    const Rectangle Rect{{50, 50, 50, 52}};
-    Button          clickMe{UiManager, Rect};
 
     Image BackgroundImg{"game_assets/base_pack/bg_castle.png",
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
-    Text  Example{"Collect the Coins!", 20, 20};
-    Text  ExampleTwo{"I am your father", {200, 149, 180, 0}, 20, 80};
+    Text  TextExample{"You are in space!!", 20, 20};
+    Text  TextExampleTwo{"Float Around", {100, 100, 100, 0}, 20, 80, 30};
 
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
                             "game_assets/base_pack/Player/p1_spritesheet.txt");
@@ -79,15 +75,16 @@ int main(int argc, char** argv) {
         // Update with ACTUAL deltaTime
         PlayerSprite.Update(deltaTime);
 
-        UiManager.Render(GameWindow.GetSurface());
         // Render
         GameWindow.Render();
+
         BackgroundImg.Render(GameWindow.GetSurface());
 
-        Example.Render(GameWindow.GetSurface());
-        ExampleTwo.Render(GameWindow.GetSurface());
+        TextExample.Render(GameWindow.GetSurface());
+        TextExampleTwo.Render(GameWindow.GetSurface());
         PlayerSprite.Render(GameWindow.GetSurface());
 
+        // UIManager.Render(GameWindow.GetSurface());
         GameWindow.Update();
     }
 
