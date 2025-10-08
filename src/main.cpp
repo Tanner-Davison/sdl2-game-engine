@@ -7,8 +7,11 @@
 #include "Text.h"
 #include "UI.hpp"
 #include "Window.hpp"
+#include <SDL_assert.h>
 #include <SDL_image.h>
 #include <SDL_pixels.h>
+#include <cstdlib>
+#include <ctime>
 #ifdef __linux__
     #include <SDL2/SDL.h>
 #else
@@ -20,6 +23,8 @@ int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
+
+    srand(static_cast<unsigned int>(time(nullptr)));
     if (TTF_Init() < 0) {
         std::cout << "Error initializing SDL_ttf: " << SDL_GetError();
     }
@@ -32,9 +37,9 @@ int main(int argc, char** argv) {
     Text  TextExample{"You are in space!!", 20, 20};
     Text  TextExampleTwo{"Float Around", {100, 100, 100, 0}, 20, 80, 30};
 
+    // Player sprite
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
                             "game_assets/base_pack/Player/p1_spritesheet.txt");
-
     std::vector<SDL_Rect> walkFrames = playerSheet.GetAnimation("p1_walk");
 
     Sprite PlayerSprite(playerSheet.GetSurface(),
@@ -42,9 +47,35 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         GameWindow.GetWidth() / 2 - 33,
                         GameWindow.GetHeight() / 2 - 46);
-
     PlayerSprite.SetAnimationSpeed(10.0f);
     PlayerSprite.SetLooping(true);
+    // Enemy Sprites
+    SpriteSheet enemySheet(
+        "game_assets/base_pack/Enemies/enemies_spritesheet.png",
+        "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
+    std::vector<SDL_Rect> enemyWalkFrames =
+        enemySheet.GetAnimation("blockerBody");
+
+    std::vector<std::unique_ptr<Sprite>> Enemies;
+
+    for (int i = 0; i < 15; ++i) {
+        // Random position within window bounds (leaving margin for sprite size)
+        float xPos = rand() % (GameWindow.GetWidth() -
+                               100); // -100 for sprite width margin
+        float yPos = rand() % (GameWindow.GetHeight() -
+                               100); // -100 for sprite height margin
+
+        Enemies.push_back(
+            std::make_unique<Sprite>(enemySheet.GetSurface(),
+                                     enemyWalkFrames,
+                                     GameWindow.GetSurface()->format,
+                                     xPos,
+                                     yPos));
+
+        Enemies.back()->SetAnimationSpeed(7.0f);
+        Enemies.back()->SetMoveSpeed(20.0f);
+        Enemies.back()->SetLooping(true);
+    }
 
     UI        UIManager;
     SDL_Event E;
@@ -57,13 +88,15 @@ int main(int argc, char** argv) {
         // Calculate deltaTime
         Uint64 currentTime = SDL_GetPerformanceCounter();
         float  deltaTime   = (float)(currentTime - lastTime) / frequency;
-
-        lastTime = currentTime;
+        lastTime           = currentTime;
 
         // Event handling
         while (SDL_PollEvent(&E)) {
             UIManager.HandleEvent(E);
             PlayerSprite.HandleEvent(E);
+            for (auto& sprite : Enemies) {
+                sprite->HandleEvent(E);
+            }
             if (E.type == SDL_QUIT) {
                 GameWindow.Render();
                 IMG_Quit();
@@ -72,19 +105,28 @@ int main(int argc, char** argv) {
             }
         }
 
-        // Update with ACTUAL deltaTime
+        // Update
         PlayerSprite.Update(deltaTime);
+
+        // Update all enemies
+        for (auto& enemy : Enemies) {
+            enemy->Update(deltaTime);
+        }
 
         // Render
         GameWindow.Render();
-
         BackgroundImg.Render(GameWindow.GetSurface());
-
         TextExample.Render(GameWindow.GetSurface());
         TextExampleTwo.Render(GameWindow.GetSurface());
-        PlayerSprite.Render(GameWindow.GetSurface());
 
+        // Render all enemies
+        for (auto& enemy : Enemies) {
+            enemy->Render(GameWindow.GetSurface());
+        }
+
+        PlayerSprite.Render(GameWindow.GetSurface());
         // UIManager.Render(GameWindow.GetSurface());
+
         GameWindow.Update();
     }
 

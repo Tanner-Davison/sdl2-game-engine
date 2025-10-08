@@ -29,7 +29,10 @@ class Sprite {
            SDL_PixelFormat*             format,
            float                        x = 0,
            float                        y = 0);
-    ~Sprite() = default;
+
+    Sprite(Sprite&& other) noexcept            = default;
+    Sprite& operator=(Sprite&& other) noexcept = default;
+    ~Sprite()                                  = default;
 
     void Update(float deltaTime);
     void Render(SDL_Surface* surface);
