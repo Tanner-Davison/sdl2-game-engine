@@ -25,11 +25,12 @@ int main(int argc, char** argv) {
     SDL_EventState(SDL_KEYDOWN, SDL_ENABLE);
     Window GameWindow;
 
-    Image       BackgroundImg{"game_assets/base_pack/bg_castle.png",
+    Image BackgroundImg{"game_assets/base_pack/bg_castle.png",
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
-    Text        Example{"Collect the Coins!", 800, 800};
-    Text        Example2 {}
+    Text  Example{"Collect the Coins!", 20, 20};
+    Text  ExampleTwo{"I am your father", {200, 149, 180, 0}, 20, 80};
+
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
                             "game_assets/base_pack/Player/p1_spritesheet.txt");
 
@@ -78,6 +79,7 @@ int main(int argc, char** argv) {
         BackgroundImg.Render(GameWindow.GetSurface());
 
         Example.Render(GameWindow.GetSurface());
+        ExampleTwo.Render(GameWindow.GetSurface());
         PlayerSprite.Render(GameWindow.GetSurface());
 
         GameWindow.Update();

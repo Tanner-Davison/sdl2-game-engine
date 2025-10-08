@@ -1,59 +1,66 @@
 #include "Text.h"
 #include <SDL.h>
-#include <SDL_error.h>
-#include <SDL_surface.h>
 #include <SDL_ttf.h>
 #include <iostream>
 #include <string>
 
-/**
- * @brief create a text object at position x and y relative to the screen
- * surface;
- *
- * @param Content the std::string you wish to render
- * @param posX the x position relative to the surface you are rendering on
- * @param posY  the y position relative to the surface you are rendering on
- */
-Text::Text(std::string Content, int posX, int posY)
-    : mFont{TTF_OpenFont("fonts/Roboto-VariableFont_wdth,wght.ttf", 50)}
+Text::Text(std::string Content, int posX, int posY, int fontSize)
+    : Text(Content, {255, 255, 255, 255}, posX, posY, fontSize) {}
+
+Text::Text(
+    std::string Content, SDL_Color Color, int posX, int posY, int fontSize)
+    : mFont{TTF_OpenFont("fonts/Roboto-VariableFont_wdth,wght.ttf", fontSize)}
+    , mColor{Color}
+    , mFontSize{fontSize}
     , mPosX{posX}
     , mPosY{posY} {
     if (!mFont) {
-        std::cout << "Error loading font: " << SDL_GetError();
+        std::cerr << "Error loading font: " << TTF_GetError() << '\n';
+        return;
     }
     CreateSurface(Content);
-    if (!mTextSurface) {
-        std::cout << "Error Setting Texture Surface: " << SDL_GetError();
-    }
-};
+}
 
 Text::~Text() {
-    if (TTF_WasInit()) {
-        SDL_FreeSurface(this->mTextSurface);
-        TTF_CloseFont(this->mFont);
+    if (mTextSurface) {
+        SDL_FreeSurface(mTextSurface);
+    }
+    if (mFont) {
+        TTF_CloseFont(mFont);
     }
 }
 
 void Text::Render(SDL_Surface* DestinationSurface) {
-    if (notread) {
-        std::cout << "This is running" << std::endl;
-        notread = false;
+    if (!mTextSurface || !DestinationSurface) {
+        return;
     }
     SDL_BlitSurface(
         mTextSurface, nullptr, DestinationSurface, &mDestinationRectangle);
-};
+}
 
 void Text::CreateSurface(std::string Content) {
-    SDL_Surface* newSurface = TTF_RenderText_Blended(
-        this->mFont, Content.c_str(), {255, 255, 255, 0});
-    if (newSurface) {
-        SDL_FreeSurface(this->mTextSurface);
-        this->mTextSurface = newSurface;
-    } else {
-        std::cout << "Error Creating Text Surface: " << SDL_GetError() << '\n';
+    if (!mFont) {
+        std::cerr << "Cannot create surface: font is null\n";
+        return;
     }
-    if (mPosX > 0 && mPosY > 0) {
+
+    SDL_Surface* newSurface =
+        TTF_RenderText_Blended(mFont, Content.c_str(), mColor);
+
+    if (newSurface) {
+        // Free old surface if it exists
+        if (mTextSurface) {
+            SDL_FreeSurface(mTextSurface);
+        }
+
+        mTextSurface = newSurface;
+
+        // Update destination rectangle
         mDestinationRectangle.x = mPosX;
         mDestinationRectangle.y = mPosY;
+        mDestinationRectangle.w = newSurface->w;
+        mDestinationRectangle.h = newSurface->h;
+    } else {
+        std::cerr << "Error creating text surface: " << TTF_GetError() << '\n';
     }
 }

@@ -1,7 +1,5 @@
 #include "Window.hpp"
 #include "ErrorHandling.hpp"
-#include <SDL2/SDL_shape.h>
-#include <SDL2/SDL_video.h>
 #include <SDL_image.h>
 #include <iostream>
 #include <stdexcept>
