@@ -28,12 +28,14 @@ int main(int argc, char** argv) {
     Image BackgroundImg{"game_assets/base_pack/bg_castle.png",
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
-    Text  Example{"Hello world"};
+    Text  Example{"Collect the Coins!"};
 
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
                             "game_assets/base_pack/Player/p1_spritesheet.txt");
+
     std::vector<SDL_Rect> walkFrames = playerSheet.GetAnimation("p1_walk");
-    Sprite                PlayerSprite(playerSheet.GetSurface(),
+
+    Sprite PlayerSprite(playerSheet.GetSurface(),
                         walkFrames,
                         GameWindow.GetSurface()->format,
                         GameWindow.GetWidth() / 2 - 33,
@@ -53,7 +55,8 @@ int main(int argc, char** argv) {
         // Calculate deltaTime
         Uint64 currentTime = SDL_GetPerformanceCounter();
         float  deltaTime   = (float)(currentTime - lastTime) / frequency;
-        lastTime           = currentTime;
+
+        lastTime = currentTime;
 
         // Event handling
         while (SDL_PollEvent(&E)) {
