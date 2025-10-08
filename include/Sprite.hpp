@@ -88,7 +88,7 @@ class Sprite {
     bool  movingDown  = false;
     bool  movingLeft  = false;
     bool  movingRight = false;
-    float moveSpeed   = 100.0f;
+    float moveSpeed   = 150.0f;
 
     float positionX;
     float positionY;
