@@ -95,9 +95,11 @@ class Sprite {
     int   frameWidth;
     int   frameHeight;
 
-    float            scaleX;
-    float            scaleY;
-    double           rotation;
+    float  scaleX;
+    float  scaleY;
+    double rotation;
+
+    void             SetFlipHorizontal(bool flip);
     SDL_RendererFlip flip;
 
     float animationSpeed;

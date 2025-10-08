@@ -123,12 +123,60 @@ void Image::Render(SDL_Surface* DestinationSurface) {
         destinationInitialized = true;
     }
 
-    if (fitMode == FitMode::SRCSIZE) {
-        SDL_BlitSurface(
-            mImageSurface, &mSrcRectangle, DestinationSurface, &mDestRectangle);
+    if (flipHorizontal) {
+        // Create a flipped temporary surface
+        SDL_Surface* flipped =
+            SDL_CreateRGBSurfaceWithFormat(0,
+                                           mSrcRectangle.w,
+                                           mSrcRectangle.h,
+                                           32,
+                                           mImageSurface->format->format);
+
+        SDL_SetSurfaceBlendMode(flipped, SDL_BLENDMODE_BLEND);
+
+        // Manually flip pixels horizontally
+        SDL_LockSurface(mImageSurface);
+        SDL_LockSurface(flipped);
+
+        for (int y = 0; y < mSrcRectangle.h; y++) {
+            for (int x = 0; x < mSrcRectangle.w; x++) {
+                Uint32* srcPixel =
+                    (Uint32*)((Uint8*)mImageSurface->pixels +
+                              (mSrcRectangle.y + y) * mImageSurface->pitch +
+                              (mSrcRectangle.x + x) * 4);
+                Uint32* dstPixel =
+                    (Uint32*)((Uint8*)flipped->pixels + y * flipped->pitch +
+                              (mSrcRectangle.w - 1 - x) * 4);
+                *dstPixel = *srcPixel;
+            }
+        }
+
+        SDL_UnlockSurface(flipped);
+        SDL_UnlockSurface(mImageSurface);
+
+        SDL_Rect srcRect = {0, 0, mSrcRectangle.w, mSrcRectangle.h};
+        if (fitMode == FitMode::SRCSIZE) {
+            SDL_BlitSurface(
+                flipped, &srcRect, DestinationSurface, &mDestRectangle);
+        } else {
+            SDL_BlitScaled(
+                flipped, &srcRect, DestinationSurface, &mDestRectangle);
+        }
+
+        SDL_FreeSurface(flipped);
     } else {
-        SDL_BlitScaled(
-            mImageSurface, &mSrcRectangle, DestinationSurface, &mDestRectangle);
+        // Normal rendering
+        if (fitMode == FitMode::SRCSIZE) {
+            SDL_BlitSurface(mImageSurface,
+                            &mSrcRectangle,
+                            DestinationSurface,
+                            &mDestRectangle);
+        } else {
+            SDL_BlitScaled(mImageSurface,
+                           &mSrcRectangle,
+                           DestinationSurface,
+                           &mDestRectangle);
+        }
     }
 }
 void Image::SetFitMode(FitMode mode) {
@@ -229,7 +277,9 @@ void Image::HandleSrcSize(SDL_Rect& Requested) {
     mDestRectangle.w = originalWidth;
     mDestRectangle.h = originalHeight;
 }
-
+void Image::SetFlipHorizontal(bool flip) {
+    flipHorizontal = flip;
+}
 void Image::SaveToFile(std::string Location) {
     IMG_SavePNG(mImageSurface, Location.c_str());
 }

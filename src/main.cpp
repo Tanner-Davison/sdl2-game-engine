@@ -1,4 +1,5 @@
 /*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
+#include "Button.hpp"
 #include "Image.hpp"
 #include "Rectangle.hpp"
 #include "Sprite.hpp"
@@ -24,6 +25,10 @@ int main(int argc, char** argv) {
     }
     SDL_EventState(SDL_KEYDOWN, SDL_ENABLE);
     Window GameWindow;
+    UI     UiManager;
+
+    const Rectangle Rect{{50, 50, 50, 52}};
+    Button          clickMe{UiManager, Rect};
 
     Image BackgroundImg{"game_assets/base_pack/bg_castle.png",
                         GameWindow.GetSurface()->format,
@@ -61,7 +66,7 @@ int main(int argc, char** argv) {
 
         // Event handling
         while (SDL_PollEvent(&E)) {
-            // UIManager.HandleEvent(E);
+            UIManager.HandleEvent(E);
             PlayerSprite.HandleEvent(E);
             if (E.type == SDL_QUIT) {
                 GameWindow.Render();
@@ -74,6 +79,7 @@ int main(int argc, char** argv) {
         // Update with ACTUAL deltaTime
         PlayerSprite.Update(deltaTime);
 
+        UiManager.Render(GameWindow.GetSurface());
         // Render
         GameWindow.Render();
         BackgroundImg.Render(GameWindow.GetSurface());

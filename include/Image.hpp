@@ -28,8 +28,8 @@ class Image {
     Image&  operator=(const Image& Source);
     void    SetFitMode(FitMode mode);
     FitMode GetFitMode() const;
-
-    void SaveToFile(std::string Location);
+    void    SetFlipHorizontal(bool flip);
+    void    SaveToFile(std::string Location);
 
   protected:
     void HandleContain(SDL_Rect& Requested);
@@ -38,6 +38,7 @@ class Image {
     void HandleSrcSize(SDL_Rect& Requested);
 
   private:
+    bool         flipHorizontal{false};
     int          destHeight{0};
     int          destWidth{0};
     int          originalWidth{0};

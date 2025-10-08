@@ -109,6 +109,13 @@ void Sprite::Update(float deltaTime) {
     // Check if any movement key is pressed
     bool isMoving = movingUp || movingDown || movingLeft || movingRight;
 
+    // Automatically flip sprite based on horizontal movement
+    if (movingLeft) {
+        SetFlipHorizontal(true);
+    } else if (movingRight) {
+        SetFlipHorizontal(false);
+    }
+
     // Only animate when moving
     if (isMoving && totalFrames > 1) {
         const float maxDeltaTime = 0.1f;
@@ -143,6 +150,11 @@ void Sprite::SetMoveSpeed(float speed) {
     moveSpeed = speed;
 }
 
+void Sprite::SetFlipHorizontal(bool flip) {
+    for (auto& frame : frames) {
+        frame->SetFlipHorizontal(flip);
+    }
+}
 void Sprite::AdvanceFrame() {
     currentFrame++;
 
