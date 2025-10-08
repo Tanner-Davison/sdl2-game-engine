@@ -1,5 +1,4 @@
 #pragma once
-#include <SDL2/SDL_stdinc.h>
 #include <memory>
 #ifdef __linux__
     #include <SDL2/SDL.h>
