@@ -53,6 +53,18 @@ int main(int argc, char** argv) {
     SpriteSheet enemySheet(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
+
+    // SpriteSheet alienSheet(
+    //     "game_assets/extra_animations_and_enemies/Spritesheets/alienBeige.png",
+    //     "game_assets/extra_animations_and_enemies/Spritesheets/alienBeige.xml");
+
+    // std::vector<SDL_Rect> alienWalkFrames =
+    //     alienSheet.GetAnimation("alienBeige_walk");
+    // std::vector<SDL_Rect> alienJumpFrames =
+    //     alienSheet.GetAnimation("alienBeige_jump");
+    // std::vector<SDL_Rect> alienClimbFrames =
+    //     alienSheet.GetAnimation("alienBeige_climb");
+
     std::vector<SDL_Rect> enemyWalkFrames =
         enemySheet.GetAnimation("blockerBody");
 

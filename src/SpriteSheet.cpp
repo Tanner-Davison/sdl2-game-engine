@@ -29,6 +29,15 @@ SpriteSheet::~SpriteSheet() {
 }
 
 void SpriteSheet::LoadCoordinates(const std::string& coordFile) {
+    // Detect file format by extension or content
+    if (coordFile.find(".xml") != std::string::npos) {
+        LoadXMLFormat(coordFile);
+    } else {
+        LoadTextFormat(coordFile);
+    }
+}
+
+void SpriteSheet::LoadTextFormat(const std::string& coordFile) {
     std::ifstream file(coordFile);
     if (!file.is_open()) {
         std::cout << "Failed to open coordinate file: " << coordFile
@@ -38,8 +47,8 @@ void SpriteSheet::LoadCoordinates(const std::string& coordFile) {
 
     std::string line;
     while (std::getline(file, line)) {
-        // Skip empty lines
-        if (line.empty())
+        // Skip empty lines and comments
+        if (line.empty() || line[0] == '#')
             continue;
 
         // Parse format: "name = x y w h"
@@ -56,6 +65,78 @@ void SpriteSheet::LoadCoordinates(const std::string& coordFile) {
               << std::endl;
 }
 
+void SpriteSheet::LoadXMLFormat(const std::string& coordFile) {
+    std::ifstream file(coordFile);
+    if (!file.is_open()) {
+        std::cout << "Failed to open coordinate file: " << coordFile
+                  << std::endl;
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        // Look for SubTexture tags
+        if (line.find("<SubTexture") == std::string::npos)
+            continue;
+
+        // Extract attributes using simple string parsing
+        std::string name;
+        int         x = 0, y = 0, width = 0, height = 0;
+
+        // Extract name
+        size_t namePos = line.find("name=\"");
+        if (namePos != std::string::npos) {
+            namePos += 6; // Skip 'name="'
+            size_t nameEnd = line.find("\"", namePos);
+            name           = line.substr(namePos, nameEnd - namePos);
+
+            // Remove .png extension if present
+            if (name.size() > 4 && name.substr(name.size() - 4) == ".png") {
+                name = name.substr(0, name.size() - 4);
+            }
+        }
+
+        // Extract x
+        size_t xPos = line.find("x=\"");
+        if (xPos != std::string::npos) {
+            xPos += 3;
+            size_t xEnd = line.find("\"", xPos);
+            x           = std::stoi(line.substr(xPos, xEnd - xPos));
+        }
+
+        // Extract y
+        size_t yPos = line.find("y=\"");
+        if (yPos != std::string::npos) {
+            yPos += 3;
+            size_t yEnd = line.find("\"", yPos);
+            y           = std::stoi(line.substr(yPos, yEnd - yPos));
+        }
+
+        // Extract width
+        size_t wPos = line.find("width=\"");
+        if (wPos != std::string::npos) {
+            wPos += 7;
+            size_t wEnd = line.find("\"", wPos);
+            width       = std::stoi(line.substr(wPos, wEnd - wPos));
+        }
+
+        // Extract height
+        size_t hPos = line.find("height=\"");
+        if (hPos != std::string::npos) {
+            hPos += 8;
+            size_t hEnd = line.find("\"", hPos);
+            height      = std::stoi(line.substr(hPos, hEnd - hPos));
+        }
+
+        if (!name.empty()) {
+            frames[name] = {x, y, width, height};
+        }
+    }
+
+    std::cout << "Loaded " << frames.size() << " frames from XML sprite sheet"
+              << std::endl;
+}
+
 SDL_Rect SpriteSheet::GetFrame(const std::string& name) const {
     auto it = frames.find(name);
     if (it != frames.end()) {
@@ -69,7 +150,7 @@ std::vector<SDL_Rect> SpriteSheet::GetAnimation(
     const std::string& baseName) const {
     std::vector<SDL_Rect> animation;
 
-    // Collect all frames that start with baseName (e.g., "p1_walk")
+    // Collect all frames that start with baseName
     std::vector<std::pair<std::string, SDL_Rect>> matchingFrames;
 
     for (const auto& [name, rect] : frames) {
@@ -78,7 +159,7 @@ std::vector<SDL_Rect> SpriteSheet::GetAnimation(
         }
     }
 
-    // Sort by name to get correct order (p1_walk01, p1_walk02, etc.)
+    // Sort by name to get correct order
     std::sort(matchingFrames.begin(),
               matchingFrames.end(),
               [](const auto& a, const auto& b) { return a.first < b.first; });
