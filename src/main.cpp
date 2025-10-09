@@ -1,7 +1,6 @@
 /*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
 #include "Button.hpp"
 #include "Image.hpp"
-#include "Rectangle.hpp"
 #include "Sprite.hpp"
 #include "SpriteSheet.hpp"
 #include "Text.h"
@@ -23,7 +22,6 @@ int main(int argc, char** argv) {
     SDL_Init(SDL_INIT_VIDEO);
     IMG_Init(IMG_INIT_PNG);
     TTF_Init();
-
     srand(static_cast<unsigned int>(time(nullptr)));
     if (TTF_Init() < 0) {
         std::cout << "Error initializing SDL_ttf: " << SDL_GetError();
@@ -35,7 +33,7 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
     Text  TextExample{"You are in space!!", 20, 20};
-    Text  TextExampleTwo{"Float Around", {100, 100, 100, 0}, 20, 80, 30};
+    Text  TextExampleTwo{"Float Around", {100, 100, 100, 0}, 20, 80, 20};
 
     // Player sprite
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
@@ -47,7 +45,7 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         GameWindow.GetWidth() / 2 - 33,
                         GameWindow.GetHeight() / 2 - 46);
-    PlayerSprite.SetAnimationSpeed(10.0f);
+    PlayerSprite.SetAnimationSpeed(12.0f);
     PlayerSprite.SetLooping(true);
     // Enemy Sprites
 
