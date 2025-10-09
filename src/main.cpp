@@ -32,8 +32,9 @@ int main(int argc, char** argv) {
     Image BackgroundImg{"game_assets/base_pack/bg_castle.png",
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
-    Text  TextExample{"You are in space!!", 20, 20};
-    Text  TextExampleTwo{"Float Around", {100, 100, 100, 0}, 20, 80, 20};
+
+    Text LocationText{"You are in space!!", 20, 20};
+    Text ActionText{"Float Around", {100, 100, 100, 0}, 20, 80, 20};
 
     // Player sprite
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
@@ -127,8 +128,8 @@ int main(int argc, char** argv) {
         // Render
         GameWindow.Render();
         BackgroundImg.Render(GameWindow.GetSurface());
-        TextExample.Render(GameWindow.GetSurface());
-        TextExampleTwo.Render(GameWindow.GetSurface());
+        LocationText.Render(GameWindow.GetSurface());
+        ActionText.Render(GameWindow.GetSurface());
 
         // Render all enemies
         for (auto& enemy : Enemies) {
