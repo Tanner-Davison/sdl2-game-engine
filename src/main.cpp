@@ -50,9 +50,6 @@ int main(int argc, char** argv) {
     PlayerSprite.SetAnimationSpeed(10.0f);
     PlayerSprite.SetLooping(true);
     // Enemy Sprites
-    SpriteSheet enemySheet(
-        "game_assets/base_pack/Enemies/enemies_spritesheet.png",
-        "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
 
     // SpriteSheet alienSheet(
     //     "game_assets/extra_animations_and_enemies/Spritesheets/alienBeige.png",
@@ -64,6 +61,10 @@ int main(int argc, char** argv) {
     //     alienSheet.GetAnimation("alienBeige_jump");
     // std::vector<SDL_Rect> alienClimbFrames =
     //     alienSheet.GetAnimation("alienBeige_climb");
+
+    SpriteSheet enemySheet(
+        "game_assets/base_pack/Enemies/enemies_spritesheet.png",
+        "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
 
     std::vector<SDL_Rect> enemyWalkFrames =
         enemySheet.GetAnimation("blockerBody");
