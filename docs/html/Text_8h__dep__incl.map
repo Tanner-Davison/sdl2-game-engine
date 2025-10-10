@@ -1,0 +1,7 @@
+<map id="include/Text.h" name="include/Text.h">
+<area shape="rect" id="Node000001" title="SDL2&#45;based text rendering component for displaying styled text." alt="" coords="61,5,173,31"/>
+<area shape="rect" id="Node000002" href="$Text_8cpp.html" title=" " alt="" coords="5,79,104,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="100,43,67,80,63,77,96,39"/>
+<area shape="rect" id="Node000003" href="$main_8cpp.html" title=" " alt="" coords="129,79,234,104"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="139,39,173,77,169,80,135,43"/>
+</map>

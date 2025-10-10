@@ -1,0 +1,21 @@
+<map id="include/Rectangle.hpp" name="include/Rectangle.hpp">
+<area shape="rect" id="Node000001" title=" " alt="" coords="311,5,477,31"/>
+<area shape="rect" id="Node000002" href="$Button_8hpp.html" title=" " alt="" coords="138,79,282,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="353,38,241,81,239,76,351,33"/>
+<area shape="rect" id="Node000004" href="$UI_8hpp.html" title=" " alt="" coords="153,225,267,251"/>
+<area shape="poly" id="edge10_Node000001_Node000004" title=" " alt="" coords="390,45,365,110,345,146,320,179,282,208,243,228,241,223,280,204,316,175,341,143,360,108,385,43"/>
+<area shape="rect" id="Node000008" href="$Rectangle_8cpp.html" title=" " alt="" coords="432,79,569,104"/>
+<area shape="poly" id="edge11_Node000001_Node000008" title=" " alt="" coords="424,36,485,76,482,81,421,40"/>
+<area shape="rect" id="Node000003" href="$SettingsMenu_8hpp.html" title=" " alt="" coords="115,152,305,177"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="213,118,213,152,207,152,207,118"/>
+<area shape="poly" id="edge7_Node000002_Node000004" title=" " alt="" coords="157,111,127,129,104,153,100,165,101,175,117,194,143,210,173,223,171,228,141,215,113,198,97,177,95,164,100,151,124,124,154,107"/>
+<area shape="rect" id="Node000005" href="$Button_8cpp.html" title=" " alt="" coords="282,299,397,324"/>
+<area shape="poly" id="edge8_Node000002_Node000005" title=" " alt="" coords="263,107,294,125,320,150,338,190,345,232,346,270,344,299,338,298,341,270,340,232,333,191,316,154,291,129,260,112"/>
+<area shape="rect" id="Node000007" href="$main_8cpp.html" title=" " alt="" coords="5,299,111,324"/>
+<area shape="poly" id="edge9_Node000002_Node000007" title=" " alt="" coords="155,111,122,129,95,154,75,191,64,232,60,270,60,298,55,298,55,270,59,231,70,189,91,150,119,124,153,107"/>
+<area shape="poly" id="edge3_Node000003_Node000004" title=" " alt="" coords="213,191,213,225,207,225,207,191"/>
+<area shape="poly" id="edge4_Node000004_Node000005" title=" " alt="" coords="244,255,319,296,317,301,242,260"/>
+<area shape="rect" id="Node000006" href="$UI_8cpp.html" title=" " alt="" coords="167,299,253,324"/>
+<area shape="poly" id="edge5_Node000004_Node000006" title=" " alt="" coords="213,264,213,299,207,299,207,264"/>
+<area shape="poly" id="edge6_Node000004_Node000007" title=" " alt="" coords="175,259,84,301,82,296,172,254"/>
+</map>

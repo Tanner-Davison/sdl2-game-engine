@@ -1,0 +1,19 @@
+<map id="src/Text.cpp" name="src/Text.cpp">
+<area shape="rect" id="Node000001" title=" " alt="" coords="163,5,261,31"/>
+<area shape="rect" id="Node000002" href="$Text_8h.html" title="SDL2&#45;based text rendering component for displaying styled text." alt="" coords="148,79,209,104"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="209,32,192,67,187,65,204,30"/>
+<area shape="rect" id="Node000003" title=" " alt="" coords="5,152,64,177"/>
+<area shape="poly" id="edge6_Node000001_Node000003" title=" " alt="" coords="194,33,123,81,56,144,53,140,120,77,191,29"/>
+<area shape="rect" id="Node000004" title=" " alt="" coords="88,152,168,177"/>
+<area shape="poly" id="edge7_Node000001_Node000004" title=" " alt="" coords="190,33,162,52,138,80,129,109,128,138,123,138,124,108,134,77,158,48,187,29"/>
+<area shape="rect" id="Node000005" title=" " alt="" coords="192,152,267,177"/>
+<area shape="poly" id="edge9_Node000001_Node000005" title=" " alt="" coords="217,30,224,78,230,138,225,138,219,79,211,31"/>
+<area shape="rect" id="Node000006" title=" " alt="" coords="291,152,349,177"/>
+<area shape="poly" id="edge10_Node000001_Node000006" title=" " alt="" coords="223,30,305,139,301,142,219,33"/>
+<area shape="rect" id="Node000007" title=" " alt="" coords="335,79,415,104"/>
+<area shape="poly" id="edge8_Node000001_Node000007" title=" " alt="" coords="239,28,337,71,334,75,237,33"/>
+<area shape="poly" id="edge2_Node000002_Node000003" title=" " alt="" coords="157,106,72,148,69,143,154,102"/>
+<area shape="poly" id="edge3_Node000002_Node000004" title=" " alt="" coords="172,106,146,142,142,139,168,103"/>
+<area shape="poly" id="edge4_Node000002_Node000005" title=" " alt="" coords="189,103,215,139,211,142,185,106"/>
+<area shape="poly" id="edge5_Node000002_Node000006" title=" " alt="" coords="203,102,286,143,284,148,200,106"/>
+</map>

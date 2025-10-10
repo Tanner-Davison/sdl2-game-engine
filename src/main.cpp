@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
 
     std::vector<SDL_Rect> enemyWalkFrames =
-        enemySheet.GetAnimation("blockerBody");
+        enemySheet.GetAnimation("slimeWalk");
 
     std::vector<std::unique_ptr<Sprite>> Enemies;
 

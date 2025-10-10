@@ -1,0 +1,13 @@
+<map id="Button" name="Button">
+<area shape="rect" id="Node000001" title=" " alt="" coords="139,95,204,121"/>
+<area shape="rect" id="Node000004" href="$classUI.html" title=" " alt="" coords="137,200,176,225"/>
+<area shape="poly" id="edge5_Node000004_Node000001" title=" " alt="" coords="127,122,107,132,91,148,86,161,91,175,100,186,112,194,138,205,136,210,110,199,97,189,86,177,81,161,86,145,103,128,124,117"/>
+<area shape="rect" id="Node000002" href="$classRectangle.html" title=" " alt="" coords="5,5,92,31"/>
+<area shape="poly" id="edge1_Node000001_Node000002" title=" " alt="" coords="77,36,157,93,154,97,74,41"/>
+<area shape="poly" id="edge4_Node000004_Node000002" title=" " alt="" coords="50,44,50,74,54,108,64,143,81,174,93,186,108,195,138,205,136,210,106,199,90,190,77,178,59,145,49,109,45,74,44,44"/>
+<area shape="rect" id="Node000003" href="$structUserEvents_1_1SettingsConfig.html" title=" " alt="" coords="116,5,315,31"/>
+<area shape="poly" id="edge2_Node000001_Node000003" title=" " alt="" coords="206,44,180,96,175,94,201,42"/>
+<area shape="poly" id="edge3_Node000001_Node000004" title=" " alt="" coords="180,189,189,175,191,161,189,147,177,122,182,120,194,146,197,161,194,177,185,192"/>
+<area shape="rect" id="Node000005" href="$classSettingsMenu.html" title=" " alt="" coords="272,95,383,121"/>
+<area shape="poly" id="edge6_Node000004_Node000005" title=" " alt="" coords="316,134,300,157,277,178,251,192,224,202,177,212,176,207,223,197,249,187,274,174,296,154,312,131"/>
+</map>
