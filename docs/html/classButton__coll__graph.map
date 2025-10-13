@@ -1,5 +1,5 @@
 <map id="Button" name="Button">
-<area shape="rect" id="Node000001" title=" " alt="" coords="139,95,204,121"/>
+<area shape="rect" id="Node000001" title="A clickable UI button component that inherits from Rectangle." alt="" coords="139,95,204,121"/>
 <area shape="rect" id="Node000004" href="$classUI.html" title=" " alt="" coords="137,200,176,225"/>
 <area shape="poly" id="edge5_Node000004_Node000001" title=" " alt="" coords="127,122,107,132,91,148,86,161,91,175,100,186,112,194,138,205,136,210,110,199,97,189,86,177,81,161,86,145,103,128,124,117"/>
 <area shape="rect" id="Node000002" href="$classRectangle.html" title=" " alt="" coords="5,5,92,31"/>

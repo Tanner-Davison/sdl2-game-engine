@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         GameWindow.GetWidth() / 2 - 33,
                         GameWindow.GetHeight() / 2 - 46);
+
     PlayerSprite.SetAnimationSpeed(12.0f);
     PlayerSprite.SetLooping(true);
     // Enemy Sprites
