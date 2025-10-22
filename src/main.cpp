@@ -16,6 +16,7 @@
 #else
     #include <SDL.h>
 #endif
+
 #include <iostream>
 
 int main(int argc, char** argv) {
