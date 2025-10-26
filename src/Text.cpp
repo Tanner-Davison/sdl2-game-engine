@@ -22,6 +22,7 @@
  * TTF_RenderUTF8_LCD
  * --------------------------------------------------------------------
  * */
+
 Text::Text(std::string Content, int posX, int posY, int fontSize)
     : Text(Content, {255, 255, 255, 255}, std::nullopt, posX, posY, fontSize) {}
 
@@ -44,6 +45,11 @@ Text::Text(std::string              Content,
         std::cerr << "Error loading font: " << TTF_GetError() << '\n';
         return;
     }
+    int width, height;
+    TTF_SizeUTF8(mFont, Content.c_str(), &width, &height);
+    std::cout << "Width: " << width << " \nHeight: " << height << "\n"
+              << std::endl;
+    ;
     CreateSurface(Content);
 }
 
@@ -93,4 +99,7 @@ void Text::CreateSurface(std::string Content) {
     } else {
         std::cerr << "Error creating text surface: " << TTF_GetError() << '\n';
     }
+}
+void Text::SetFontSize(int fontsize) {
+    this->mFontSize = fontsize;
 }

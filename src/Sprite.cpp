@@ -92,8 +92,8 @@ void Sprite::LoadFramesFromSheet(SDL_Surface*                 spriteSheet,
     totalFrames  = frames.size();
     currentFrame = 0;
 
-    std::cout << "Loaded " << totalFrames << " frames from sprite sheet"
-              << std::endl;
+    // std::cout << "Loaded " << totalFrames << " frames from sprite sheet"
+    //           << std::endl;
 }
 void Sprite::LoadFrames(const std::vector<std::string>& framePaths,
                         SDL_PixelFormat*                format) {

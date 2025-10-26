@@ -1,6 +1,7 @@
 /*Copyright (c) 2025 Tanner Davison. All Rights Reserved.*/
 #include "Button.hpp"
 #include "Image.hpp"
+#include "ScaledText.h"
 #include "Sprite.hpp"
 #include "SpriteSheet.hpp"
 #include "Text.h"
@@ -35,7 +36,12 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
 
-    Text LocationText{"You are in space!!", 20, 20};
+    Text       LocationText{"You are in space!!", 20, 20};
+    ScaledText ScaledExample{
+        "How big is this going to be needed? what if i kept on adding text ",
+        0,
+        200,
+        GameWindow.GetWidth()};
     Text ActionText{"Float Around", {100, 100, 100, 0}, 20, 80, 20};
 
     // Player sprite
@@ -131,6 +137,7 @@ int main(int argc, char** argv) {
         GameWindow.Render();
         BackgroundImg.Render(GameWindow.GetSurface());
         LocationText.Render(GameWindow.GetSurface());
+        ScaledExample.Render(GameWindow.GetSurface());
         ActionText.Render(GameWindow.GetSurface());
 
         // Render all enemies

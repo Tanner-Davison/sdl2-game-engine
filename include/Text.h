@@ -118,7 +118,7 @@ class Text {
      */
     void Render(SDL_Surface* DestinationSurface);
 
-  private:
+    TTF_Font* mFont = nullptr; ///< TrueType font handle
     /**
      * @brief Creates the text surface from the given content string
      *
@@ -130,14 +130,14 @@ class Text {
      * @throws std::runtime_error if surface creation fails
      */
     void CreateSurface(std::string content);
+    void SetFontSize(int fontsize);
+    int  mFontSize = 24; ///< Font size in points
 
   private:
-    TTF_Font*    mFont        = nullptr;            ///< TrueType font handle
     SDL_Surface* mTextSurface = nullptr;            ///< Rendered text surface
     SDL_Rect     mDestinationRectangle{0, 0, 0, 0}; ///< Render destination
     SDL_Color mColor{255, 255, 255, 255}; ///< Foreground color (white default)
     std::optional<SDL_Color> mColorBg;    ///< Optional background color
-    int                      mFontSize = 24; ///< Font size in points
-    int                      mPosX     = 0;  ///< X position
-    int                      mPosY     = 0;  ///< Y position
+    int                      mPosX = 0;   ///< X position
+    int                      mPosY = 0;   ///< Y position
 };

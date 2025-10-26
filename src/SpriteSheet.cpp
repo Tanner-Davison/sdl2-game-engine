@@ -61,8 +61,8 @@ void SpriteSheet::LoadTextFormat(const std::string& coordFile) {
         }
     }
 
-    std::cout << "Loaded " << frames.size() << " frames from sprite sheet"
-              << std::endl;
+    // std::cout << "Loaded " << frames.size() << " frames from sprite sheet"
+    //           << std::endl;
 }
 
 void SpriteSheet::LoadXMLFormat(const std::string& coordFile) {
@@ -133,8 +133,9 @@ void SpriteSheet::LoadXMLFormat(const std::string& coordFile) {
         }
     }
 
-    std::cout << "Loaded " << frames.size() << " frames from XML sprite sheet"
-              << std::endl;
+    // std::cout << "Loaded " << frames.size() << " frames from XML sprite
+    // sheet"
+    //           << std::endl;
 }
 
 SDL_Rect SpriteSheet::GetFrame(const std::string& name) const {
