@@ -19,7 +19,7 @@
  *
  * LCD -> SubPixel rendering optimized for LCD screens (best quality but is also
  * the slowest)
- *
+ * TTF_RenderUTF8_LCD
  * --------------------------------------------------------------------
  * */
 Text::Text(std::string Content, int posX, int posY, int fontSize)
