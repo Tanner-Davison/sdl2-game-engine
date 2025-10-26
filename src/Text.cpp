@@ -5,6 +5,23 @@
 #include <optional>
 #include <string>
 
+/*
+ * SDL2  Text Rendering Options-----------------------
+ *
+ * Solid -> fastest (but jagged edges) this is best for debug text:
+ * TTF_RenderText_Solid()
+ *
+ * Shaded -> anti-aliased but is opaque slightly Slower than Solid:
+ * TTF_RednerText_Shaded()
+ *
+ * Blended -> Highest Quality with alpha blending and anti-aliased:
+ * TTF_RenderText_Blended()
+ *
+ * LCD -> SubPixel rendering optimized for LCD screens (best quality but is also
+ * the slowest)
+ *
+ * --------------------------------------------------------------------
+ * */
 Text::Text(std::string Content, int posX, int posY, int fontSize)
     : Text(Content, {255, 255, 255, 255}, std::nullopt, posX, posY, fontSize) {}
 
