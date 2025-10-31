@@ -26,6 +26,7 @@ class ScaledText : public Text {
         mFontSize = newFontSize;
 
         SetFontSize(BaseFontSize * Ratio);
+
         CreateSurface(Content);
     }
 
