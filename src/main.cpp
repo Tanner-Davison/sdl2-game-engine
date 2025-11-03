@@ -36,7 +36,8 @@ int main(int argc, char** argv) {
                         GameWindow.GetSurface()->format,
                         FitMode::COVER};
 
-    Text       LocationText{"You are in space!!", 20, 20};
+    Text LocationText{"You are in space!!", 20, 20};
+
     ScaledText ScaledExample{
         "How big is this going to be needed? what if i kept on adding text ",
         0,
