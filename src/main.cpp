@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
     // Player sprite
     SpriteSheet playerSheet("game_assets/base_pack/Player/p1_spritesheet.png",
                             "game_assets/base_pack/Player/p1_spritesheet.txt");
+
     std::vector<SDL_Rect> walkFrames = playerSheet.GetAnimation("p1_walk");
 
     Sprite PlayerSprite(playerSheet.GetSurface(),
