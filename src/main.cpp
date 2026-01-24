@@ -103,7 +103,6 @@ int main(int argc, char** argv) {
 
     UI        UIManager;
     SDL_Event E;
-
     // Timer setup
     Uint64 frequency = SDL_GetPerformanceFrequency();
     Uint64 lastTime  = SDL_GetPerformanceCounter();
