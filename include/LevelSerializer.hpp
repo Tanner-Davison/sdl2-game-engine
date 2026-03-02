@@ -11,7 +11,9 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
     json j;
     j["name"]        = level.name;
     j["background"]  = level.background;
-    j["gravityMode"] = (level.gravityMode == GravityMode::WallRun) ? "wallrun" : "platformer";
+    j["gravityMode"] = (level.gravityMode == GravityMode::WallRun)  ? "wallrun"
+                      : (level.gravityMode == GravityMode::OpenWorld) ? "openworld"
+                                                                       : "platformer";
     j["player"]      = {{"x", level.player.x}, {"y", level.player.y}};
 
     j["coins"] = json::array();
@@ -36,7 +38,12 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                               {"ladder", t.ladder},
                               {"action", t.action},
                               {"actionGroup", t.actionGroup},
-                              {"slope", slopeStr}});
+                              {"slope", slopeStr},
+                              {"rotation", t.rotation},
+                              {"hitboxOffX", t.hitboxOffX},
+                              {"hitboxOffY", t.hitboxOffY},
+                              {"hitboxW",    t.hitboxW},
+                              {"hitboxH",    t.hitboxH}});
     }
 
     std::ofstream file(path);
@@ -66,8 +73,12 @@ inline bool LoadLevel(const std::string& path, Level& out) {
 
     out.name        = j.value("name", "Untitled");
     out.background  = j.value("background", "game_assets/backgrounds/deepspace_scene.png");
-    out.gravityMode = (j.value("gravityMode", "platformer") == "wallrun")
-                      ? GravityMode::WallRun : GravityMode::Platformer;
+    {
+        std::string gm = j.value("gravityMode", "platformer");
+        out.gravityMode = (gm == "wallrun")   ? GravityMode::WallRun
+                        : (gm == "openworld") ? GravityMode::OpenWorld
+                                              : GravityMode::Platformer;
+    }
 
     if (j.contains("player")) {
         out.player.x = j["player"].value("x", 0.0f);
@@ -98,7 +109,12 @@ inline bool LoadLevel(const std::string& path, Level& out) {
                              t.value("ladder", false),
                              t.value("action", false),
                              t.value("actionGroup", 0),
-                             slope});
+                             slope,
+                             t.value("rotation", 0),
+                             t.value("hitboxOffX", 0),
+                             t.value("hitboxOffY", 0),
+                             t.value("hitboxW",    0),
+                             t.value("hitboxH",    0)});
     }
 
     std::print("Level loaded: {} ({} coins, {} enemies)\n",

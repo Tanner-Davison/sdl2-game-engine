@@ -26,9 +26,16 @@ struct TileSpawn {
                                              // All action tiles sharing the same non-zero group
                                              // are triggered simultaneously when any one is touched.
     SlopeType slope       = SlopeType::None; // diagonal slope — collision rides the hypotenuse
+    int       rotation    = 0;               // clockwise degrees: 0, 90, 180, 270
+    // Custom hitbox — all zero means "use full tile rect" (default).
+    // When non-zero, the collider is this sub-rect relative to (x,y).
+    int hitboxOffX = 0;
+    int hitboxOffY = 0;
+    int hitboxW    = 0;  // 0 = use tile w
+    int hitboxH    = 0;  // 0 = use tile h
 };
 
-enum class GravityMode { Platformer, WallRun };
+enum class GravityMode { Platformer, WallRun, OpenWorld };
 
 struct Level {
     std::string             name        = "Untitled";

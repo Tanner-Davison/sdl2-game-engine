@@ -32,18 +32,20 @@ inline void PlayerStateSystem(entt::registry& reg) {
         bool                         looping = true;
         AnimationID                  id      = AnimationID::NONE;
 
-        bool moving = std::abs(v.dx) > 1.0f || std::abs(v.dy) > 1.0f;
+        bool moving    = std::abs(v.dx) > 1.0f || std::abs(v.dy) > 1.0f;
+        bool openWorld = reg.all_of<OpenWorldTag>(entity);
 
         if (inv.isInvincible) {
             frames  = &set.hurt;
             fps     = 12.0f;
             looping = false;
             id      = AnimationID::HURT;
-        } else if (g.active && !g.isGrounded) {
+        } else if (!openWorld && g.active && !g.isGrounded) {
+            // OpenWorld has no gravity, so we never show the jump animation
             frames = &set.jump;
             fps    = 4.0f;
             id     = AnimationID::JUMP;
-        } else if (g.isCrouching) {
+        } else if (!openWorld && g.isCrouching) {
             frames = &set.duck;
             fps    = 12.0f;
             id     = AnimationID::DUCK;

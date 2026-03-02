@@ -1,0 +1,130 @@
+{
+    "background": "game_assets/backgrounds/deepspace_scene.png",
+    "coins": [],
+    "enemies": [],
+    "gravityMode": "platformer",
+    "name": "tanner",
+    "player": {
+        "x": 0.0,
+        "y": 744.0
+    },
+    "tiles": [
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Brick_01.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 96.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Brick_01.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 96.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Brick_01.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 144.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Brick_01.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 192.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Brick_01.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 240.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 144,
+            "img": "game_assets/tiles/Dungeon-assets/Cage.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 180,
+            "slope": "none",
+            "w": 144,
+            "x": 96.0,
+            "y": 168.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Chains.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 240.0,
+            "y": 168.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 48,
+            "img": "game_assets/tiles/Dungeon-assets/Column.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 48,
+            "x": 288.0,
+            "y": 120.0
+        },
+        {
+            "action": false,
+            "actionGroup": 0,
+            "h": 192,
+            "img": "game_assets/tiles/Dungeon-assets/Column.png",
+            "ladder": false,
+            "prop": false,
+            "rotation": 0,
+            "slope": "none",
+            "w": 192,
+            "x": 576.0,
+            "y": 696.0
+        }
+    ]
+}

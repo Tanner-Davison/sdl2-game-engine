@@ -8,8 +8,17 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                          bool wallRunEnabled = false) {
     auto view = reg.view<Transform, Collider, GravityState, Velocity, AnimationState, PlayerTag>();
     view.each(
-        [dt, windowW, windowH, wallRunEnabled](Transform& t, Collider& c, GravityState& g,
+        [&reg, dt, windowW, windowH, wallRunEnabled](entt::entity ent,
+                                               Transform& t, Collider& c, GravityState& g,
                                                Velocity& v, AnimationState& anim) {
+            // ── Open-world: just clamp to screen, no gravity logic ────────────────
+            if (reg.all_of<OpenWorldTag>(ent)) {
+                if (t.x < 0.0f)            t.x = 0.0f;
+                if (t.x + c.w > windowW)   t.x = static_cast<float>(windowW - c.w);
+                if (t.y < 0.0f)            t.y = 0.0f;
+                if (t.y + c.h > windowH)   t.y = static_cast<float>(windowH - c.h);
+                return;
+            }
             // ── Punishment timer tick ─────────────────────────────────────────
             if (g.punishmentTimer > 0.0f) {
                 g.punishmentTimer -= dt;

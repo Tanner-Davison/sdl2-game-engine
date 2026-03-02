@@ -3,6 +3,7 @@
 #include "GameEvents.hpp"
 #include "LevelTwo.hpp"
 #include "PauseMenuScene.hpp"
+#include "SurfaceUtils.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <cmath>
 #include <cstdlib>
@@ -160,18 +161,17 @@ void GameScene::Update(float dt) {
     stompCount += collision.enemiesStomped;
     if (collision.playerDied) gameOver = true;
 
-    // Jump fires here — after CollisionSystem has settled isGrounded for both
-    // window walls and editor tiles.  jumpHeld is set/cleared by InputSystem.
-    // We consume it the first frame it's true while grounded so the jump fires
-    // exactly once per press regardless of frame timing.
-    auto jumpView = reg.view<PlayerTag, GravityState>();
-    jumpView.each([](GravityState& g) {
-        if (g.active && g.jumpHeld && g.isGrounded) {
-            g.velocity   = -JUMP_FORCE;
-            g.isGrounded = false;
-            g.jumpHeld   = false;
-        }
-    });
+    // Jump — skipped in OpenWorld mode (no gravity, no jumping)
+    if (mLevel.gravityMode != GravityMode::OpenWorld) {
+        auto jumpView = reg.view<PlayerTag, GravityState>();
+        jumpView.each([](GravityState& g) {
+            if (g.active && g.jumpHeld && g.isGrounded) {
+                g.velocity   = -JUMP_FORCE;
+                g.isGrounded = false;
+                g.jumpHeld   = false;
+            }
+        });
+    }
 
     if (totalCoins > 0 && coinCount >= totalCoins)
         levelComplete = true;
@@ -277,7 +277,16 @@ void GameScene::Spawn() {
     reg.emplace<Collider>(player, PLAYER_STAND_WIDTH, PLAYER_STAND_HEIGHT);
     reg.emplace<RenderOffset>(player, PLAYER_STAND_ROFF_X, PLAYER_STAND_ROFF_Y);
     reg.emplace<InvincibilityTimer>(player);
-    reg.emplace<GravityState>(player);
+    {
+        GravityState gs;
+        if (mLevel.gravityMode == GravityMode::OpenWorld) {
+            gs.active     = false;   // no gravity in open-world mode
+            gs.isGrounded = true;    // never in a "falling" state
+        }
+        reg.emplace<GravityState>(player, gs);
+    }
+    if (mLevel.gravityMode == GravityMode::OpenWorld)
+        reg.emplace<OpenWorldTag>(player);
     reg.emplace<ClimbState>(player);
     reg.emplace<AnimationSet>(player, AnimationSet{
         .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetSurface(),
@@ -313,28 +322,46 @@ void GameScene::Spawn() {
         SDL_DestroySurface(converted);
         SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
 
+        // Apply rotation if non-zero
+        if (ts.rotation != 0) {
+            SDL_Surface* rotated = RotateSurfaceDeg(scaled, ts.rotation);
+            if (rotated) {
+                SDL_DestroySurface(scaled);
+                scaled = rotated;
+            }
+        }
+
         auto tile = reg.create();
         reg.emplace<Transform>(tile, ts.x, ts.y);
         // Props: visual only. Ladders: passthrough but tagged for climb detection.
         // Action tiles: rendered + solid until player contact, then invisible + passthrough.
         // Solid tiles: full collision.
+        // Resolve effective hitbox size — custom if set, otherwise full tile
+        bool hasCustomHitbox = (ts.hitboxW > 0 || ts.hitboxH > 0);
+        int  colW = hasCustomHitbox ? (ts.hitboxW > 0 ? ts.hitboxW : ts.w) : ts.w;
+        int  colH = hasCustomHitbox ? (ts.hitboxH > 0 ? ts.hitboxH : ts.h) : ts.h;
+
         if (ts.ladder) {
             reg.emplace<LadderTag>(tile);
-            reg.emplace<Collider>(tile, ts.w, ts.h); // collider needed for overlap test
+            reg.emplace<Collider>(tile, colW, colH);
         } else if (ts.prop) {
             reg.emplace<PropTag>(tile);
         } else if (ts.action) {
             reg.emplace<ActionTag>(tile, ts.actionGroup);
-            reg.emplace<TileTag>(tile);              // solid until triggered
-            reg.emplace<Collider>(tile, ts.w, ts.h);
+            reg.emplace<TileTag>(tile);
+            reg.emplace<Collider>(tile, colW, colH);
         } else if (ts.slope != SlopeType::None) {
-            reg.emplace<TileTag>(tile);              // included in tile collision passes
-            reg.emplace<Collider>(tile, ts.w, ts.h); // AABB used for broad-phase culling
-            reg.emplace<SlopeCollider>(tile, ts.slope); // precise slope surface
+            reg.emplace<TileTag>(tile);
+            reg.emplace<Collider>(tile, colW, colH);
+            reg.emplace<SlopeCollider>(tile, ts.slope);
         } else {
-            reg.emplace<Collider>(tile, ts.w, ts.h);
+            reg.emplace<Collider>(tile, colW, colH);
             reg.emplace<TileTag>(tile);
         }
+
+        // Attach offset component when the hitbox doesn't start at tile origin
+        if (hasCustomHitbox && (ts.hitboxOffX != 0 || ts.hitboxOffY != 0))
+            reg.emplace<ColliderOffset>(tile, ts.hitboxOffX, ts.hitboxOffY);
         std::vector<SDL_Rect> tileFrame = {{0, 0, ts.w, ts.h}};
         reg.emplace<Renderable>(tile, scaled, tileFrame, false);
         reg.emplace<AnimationState>(tile, 0, 1, 0.0f, 1.0f, false);

@@ -161,6 +161,53 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             if (!onWindow) g.isGrounded = false;
         }
 
+        // ── Open-world mode: simple 4-sided AABB push-out, no gravity ──────────
+        // Push out on the smallest overlap axis from all 4 sides equally.
+        // This runs instead of all the gravity-axis passes below.
+        if (reg.all_of<OpenWorldTag>(playerEnt)) {
+            auto owTileView = reg.view<TileTag, Transform, Collider>(entt::exclude<SlopeCollider, ActionTag>);
+            owTileView.each([&](const Transform& tt, const Collider& tc) {
+                if (pt.x + pw <= tt.x || pt.x >= tt.x + tc.w) return;
+                if (pt.y + ph <= tt.y || pt.y >= tt.y + tc.h) return;
+
+                float oTop    = (pt.y + ph) - tt.y;
+                float oBottom = (tt.y + tc.h) - pt.y;
+                float oLeft   = (pt.x + pw)  - tt.x;
+                float oRight  = (tt.x + tc.w) - pt.x;
+
+                // Push out on the axis with the smallest penetration
+                float minH = oLeft < oRight ? oLeft : oRight;
+                float minV = oTop  < oBottom ? oTop  : oBottom;
+                if (minV <= minH) {
+                    // Vertical push
+                    if (oTop < oBottom)  pt.y = tt.y - ph;
+                    else                 pt.y = tt.y + tc.h;
+                } else {
+                    // Horizontal push
+                    if (oLeft < oRight)  pt.x = tt.x - pw;
+                    else                 pt.x = tt.x + tc.w;
+                }
+            });
+
+            // Action tile triggers
+            {
+                auto actionView = reg.view<ActionTag, Transform, Collider>();
+                actionView.each([&](entt::entity at, const ActionTag&,
+                                    const Transform& tt, const Collider& tc) {
+                    if (aabb(tt, tc))
+                        result.actionTilesTriggered.push_back(at);
+                });
+            }
+            // Coin collection
+            coinView.each([&](entt::entity coin, const Transform& ct, const Collider& cc) {
+                if (aabb(ct, cc)) {
+                    toDestroy.push_back(coin);
+                    result.coinsCollected++;
+                }
+            });
+            return; // skip all gravity-based collision logic
+        }
+
         // -- Slope pass (FIRST) -----------------------------------------------
         // Determines onSlopeThisFrame before any flat-tile passes so that
         // Pass 1 and Pass 2 can suppress lateral corrections while on a slope.
@@ -221,14 +268,21 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         // player and any lateral push here would fight it and cause sticking.
         auto tileView = reg.view<TileTag, Transform, Collider>(entt::exclude<SlopeCollider, ActionTag>);
 
-        tileView.each([&](const Transform& tt, const Collider& tc) {
-            if (pt.x + pw <= tt.x || pt.x >= tt.x + tc.w) return;
-            if (pt.y + ph <= tt.y || pt.y >= tt.y + tc.h) return;
+        tileView.each([&](entt::entity te, const Transform& tt, const Collider& tc) {
+            // Apply ColliderOffset if present (custom hitbox position)
+            float tax = tt.x, tay = tt.y;
+            if (const auto* co = reg.try_get<ColliderOffset>(te)) {
+                tax += co->x;
+                tay += co->y;
+            }
 
-            float oTop    = (pt.y + ph) - tt.y;
-            float oBottom = (tt.y + tc.h) - pt.y;
-            float oLeft   = (pt.x + pw)  - tt.x;
-            float oRight  = (tt.x + tc.w) - pt.x;
+            if (pt.x + pw <= tax || pt.x >= tax + tc.w) return;
+            if (pt.y + ph <= tay || pt.y >= tay + tc.h) return;
+
+            float oTop    = (pt.y + ph) - tay;
+            float oBottom = (tay + tc.h) - pt.y;
+            float oLeft   = (pt.x + pw)  - tax;
+            float oRight  = (tax + tc.w) - pt.x;
 
             switch (g.direction) {
                 case GravityDir::DOWN:
@@ -287,17 +341,22 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         // Step-up also requires oTop in [0, STEP_UP_HEIGHT] to prevent
         // stepping up full walls.
 
-        tileView.each([&](const Transform& tt, const Collider& tc) {
-            if (pt.x + pw <= tt.x || pt.x >= tt.x + tc.w) return;
-            if (pt.y + ph <= tt.y || pt.y >= tt.y + tc.h) return;
+        tileView.each([&](entt::entity te, const Transform& tt, const Collider& tc) {
+            float tax = tt.x, tay = tt.y;
+            if (const auto* co = reg.try_get<ColliderOffset>(te)) {
+                tax += co->x;
+                tay += co->y;
+            }
+            if (pt.x + pw <= tax || pt.x >= tax + tc.w) return;
+            if (pt.y + ph <= tay || pt.y >= tay + tc.h) return;
 
             switch (g.direction) {
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
-                    float oTop    = (pt.y + ph) - tt.y;
-                    float oBottom = (tt.y + tc.h) - pt.y;
-                    float oLeft   = (pt.x + pw)  - tt.x;
-                    float oRight  = (tt.x + tc.w) - pt.x;
+                    float oTop    = (pt.y + ph) - tay;
+                    float oBottom = (tay + tc.h) - pt.y;
+                    float oLeft   = (pt.x + pw)  - tax;
+                    float oRight  = (tax + tc.w) - pt.x;
 
                     if (onSlopeThisFrame) {
                         // On slope: ceiling only, never lateral.
@@ -333,9 +392,9 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 }
                 case GravityDir::LEFT:
                 case GravityDir::RIGHT: {
-                    float oTop    = (pt.y + ph) - tt.y;
-                    float oBottom = (tt.y + tc.h) - pt.y;
-                    pt.y = oTop < oBottom ? tt.y - ph : tt.y + tc.h;
+                    float oTop    = (pt.y + ph) - tay;
+                    float oBottom = (tay + tc.h) - pt.y;
+                    pt.y = oTop < oBottom ? tay - ph : tay + tc.h;
                     break;
                 }
             }

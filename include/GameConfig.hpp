@@ -1,9 +1,5 @@
 #pragma once
 
-// -----------------------------------------------------------------------------
-// GameConfig.hpp
-// -----------------------------------------------------------------------------
-
 // -- Player stats -------------------------------------------------------------
 inline constexpr float PLAYER_HIT_DAMAGE    = 15.0f;
 inline constexpr float PLAYER_INVINCIBILITY = 1.5f;
@@ -27,10 +23,11 @@ inline constexpr int PLAYER_BODY_INSET_TOP    = 33;
 inline constexpr int PLAYER_BODY_INSET_BOTTOM = 26;
 
 // -- Player collider dimensions (derived) -------------------------------------
-inline constexpr int PLAYER_STAND_WIDTH  = PLAYER_SPRITE_WIDTH  - PLAYER_BODY_INSET_X * 2;
-inline constexpr int PLAYER_STAND_HEIGHT = PLAYER_SPRITE_HEIGHT - PLAYER_BODY_INSET_TOP - PLAYER_BODY_INSET_BOTTOM;
-inline constexpr int PLAYER_DUCK_WIDTH   = PLAYER_STAND_WIDTH;
-inline constexpr int PLAYER_DUCK_HEIGHT  = PLAYER_STAND_HEIGHT / 2;
+inline constexpr int PLAYER_STAND_WIDTH = PLAYER_SPRITE_WIDTH - PLAYER_BODY_INSET_X * 2;
+inline constexpr int PLAYER_STAND_HEIGHT =
+    PLAYER_SPRITE_HEIGHT - PLAYER_BODY_INSET_TOP - PLAYER_BODY_INSET_BOTTOM;
+inline constexpr int PLAYER_DUCK_WIDTH  = PLAYER_STAND_WIDTH;
+inline constexpr int PLAYER_DUCK_HEIGHT = PLAYER_STAND_HEIGHT / 2;
 
 // -- Player render offsets (derived) ------------------------------------------
 inline constexpr int PLAYER_STAND_ROFF_X = -PLAYER_BODY_INSET_X;
@@ -52,7 +49,9 @@ inline constexpr float CLIMB_SPEED        = 350.0f;
 inline constexpr float CLIMB_STRAFE_SPEED = 150.0f;
 
 // -- Tile step-up -------------------------------------------------------------
-inline constexpr float STEP_UP_HEIGHT = 64.0f;
+// Matches the editor grid size so the player can walk onto a single tile
+// placed at floor level without being laterally blocked.
+inline constexpr float STEP_UP_HEIGHT = 48.0f;
 
 // -- Slope ground-stick -------------------------------------------------------
 inline constexpr float SLOPE_SNAP_LOOKAHEAD = 40.0f;

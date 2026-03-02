@@ -8,8 +8,12 @@ std::unique_ptr<Scene> TitleScene::NextScene() {
         return std::make_unique<GameScene>(mChosenLevel);
     }
     if (openEditor) {
-        openEditor = false;
-        return std::make_unique<LevelEditorScene>();
+        openEditor   = false;
+        bool force   = mEditorForce;
+        mEditorForce = false;
+        std::string name = mEditorName;
+        mEditorName.clear();
+        return std::make_unique<LevelEditorScene>(mEditorPath, force, name);
     }
     return nullptr;
 }

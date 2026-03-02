@@ -1,10 +1,25 @@
 #include "Window.hpp"
 #include "ErrorHandling.hpp"
 #include <SDL3_image/SDL_image.h>
+#include <algorithm>
 #include <stdexcept>
 
 Window::Window() {
-    SDL_Window* Ptr = SDL_CreateWindow("SDL3 Sandbox", 1440, 1080,
+    // Query the usable display area (excludes taskbar/dock) on the primary
+    // display so the window fits correctly on any screen size or DPI.
+    SDL_Rect usable{};
+    SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    if (primary == 0 || !SDL_GetDisplayUsableBounds(primary, &usable)) {
+        // Fallback if the query fails
+        usable = {0, 0, 1280, 800};
+    }
+
+    // Cap at a comfortable maximum so the window isn’t absurdly large on
+    // ultra-wide monitors, while still filling smaller laptop screens fully.
+    int winW = std::min(usable.w, 1600);
+    int winH = std::min(usable.h, 1050);
+
+    SDL_Window* Ptr = SDL_CreateWindow("SDL3 Sandbox", winW, winH,
                                        SDL_WINDOW_RESIZABLE);
     CheckSDLError("Creating Window");
 
@@ -14,6 +29,10 @@ Window::Window() {
     }
 
     SDLWindow.reset(Ptr);
+
+    // Position the window at the top-left of the usable area so it sits
+    // neatly inside the dock/taskbar boundaries on every platform.
+    SDL_SetWindowPosition(Ptr, usable.x, usable.y);
 
     // Note: SDL3 enables drop file events by default — no opt-in call needed.
     // Note: do not call SDL_CreateRenderer on this window.
@@ -57,15 +76,16 @@ void Window::Update() {
 }
 
 int Window::GetWidth() const {
-    int w;
-    SDL_GetWindowSize(SDLWindow.get(), &w, nullptr);
-    return w;
+    // Use the surface pixel dimensions so all rendering math works in actual
+    // pixels on every platform — including Retina/HiDPI Macs where the logical
+    // window size differs from the surface size.
+    SDL_Surface* surf = GetSurface();
+    return surf ? surf->w : 0;
 }
 
 int Window::GetHeight() const {
-    int h;
-    SDL_GetWindowSize(SDLWindow.get(), nullptr, &h);
-    return h;
+    SDL_Surface* surf = GetSurface();
+    return surf ? surf->h : 0;
 }
 
 void Window::TakeScreenshot(std::string Location) {

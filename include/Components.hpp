@@ -110,6 +110,13 @@ struct Collider {
     int h = 0;
 };
 
+// Optional offset for tiles whose hitbox doesn't start at their top-left corner.
+// CollisionSystem adds this to the tile's Transform position before testing.
+struct ColliderOffset {
+    int x = 0;
+    int y = 0;
+};
+
 // ── Gameplay state ────────────────────────────────────────────────────────────
 
 struct Health {
@@ -143,8 +150,9 @@ struct EnemyTag {};  // marks a live enemy entity
 struct CoinTag {};   // marks a collectible coin
 struct DeadTag {};   // marks a stomped enemy — no longer harmful, acts as a platform
 struct TileTag {};   // marks a solid tile — blocks movement
-struct LadderTag {}; // marks a ladder tile — passthrough, player can climb with W/S
-struct PropTag {};   // marks a prop tile — rendered only, no collision, no interaction
+struct LadderTag {};    // marks a ladder tile — passthrough, player can climb with W/S
+struct PropTag {};      // marks a prop tile — rendered only, no collision, no interaction
+struct OpenWorldTag {}; // marks the player as running in open-world (top-down) mode
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
                      // makes contact, then Renderable and Collider are removed so it
                      // disappears and stops blocking (e.g. a door that opens on touch)
