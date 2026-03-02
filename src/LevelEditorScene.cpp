@@ -213,7 +213,7 @@ void LevelEditorScene::Load(Window& window) {
     // ── Toolbar ───────────────────────────────────────────────────────────────
     int bw=80, bh=44, pad=6, sx=pad, y0=8;
     auto nb = [&]() -> SDL_Rect { SDL_Rect r={sx,y0,bw,bh}; sx+=bw+pad; return r; };
-    btnCoin=nb(); btnEnemy=nb(); btnTile=nb(); btnResize=nb(); btnProp=nb(); btnLadder=nb(); btnErase=nb(); btnPlayerStart=nb();
+    btnCoin=nb(); btnEnemy=nb(); btnTile=nb(); btnResize=nb(); btnProp=nb(); btnLadder=nb(); btnAction=nb(); btnSlope=nb(); btnErase=nb(); btnPlayerStart=nb();
     sx+=pad; btnSave=nb(); btnLoad=nb(); sx+=pad; btnClear=nb(); sx+=pad; btnPlay=nb(); sx+=pad; btnGravity=nb();
 
     auto mkLbl = [](const std::string& s, SDL_Rect r) {
@@ -222,7 +222,7 @@ void LevelEditorScene::Load(Window& window) {
     };
     lblCoin=mkLbl("Coin",btnCoin); lblEnemy=mkLbl("Enemy",btnEnemy);
     lblTile=mkLbl("Tile",btnTile); lblResize=mkLbl("Resize",btnResize);
-    lblProp=mkLbl("Prop",btnProp); lblLadder=mkLbl("Ladder",btnLadder); lblErase=mkLbl("Erase",btnErase);
+    lblProp=mkLbl("Prop",btnProp); lblLadder=mkLbl("Ladder",btnLadder); lblAction=mkLbl("Action",btnAction); lblSlope=mkLbl("Slope",btnSlope); lblErase=mkLbl("Erase",btnErase);
     lblPlayer=mkLbl("Player",btnPlayerStart); lblSave=mkLbl("Save",btnSave);
     lblLoad=mkLbl("Load",btnLoad); lblClear=mkLbl("Clear",btnClear);
     lblPlay=mkLbl("Play",btnPlay);
@@ -338,6 +338,13 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             case SDLK_L:
                 mActiveTool=Tool::Ladder; lblTool->CreateSurface("Tool: Ladder");
                 break;
+            case SDLK_0:
+            case SDLK_T:
+                mActiveTool=Tool::Action; lblTool->CreateSurface("Tool: Action");
+                break;
+            case SDLK_MINUS:
+                mActiveTool=Tool::Slope; lblTool->CreateSurface("Tool: Slope");
+                break;
             case SDLK_G: {
                 // Toggle gravity mode
                 mLevel.gravityMode = (mLevel.gravityMode == GravityMode::Platformer)
@@ -386,6 +393,22 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     }
 
     // ── Mouse button down ─────────────────────────────────────────────────────
+    // ── Right-click: group cycling for action tiles ──────────────────────────
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
+        int mx=(int)e.button.x, my=(int)e.button.y;
+        if (mActiveTool == Tool::Action && my >= TOOLBAR_H && mx < CanvasW()) {
+            int ti = HitTile(mx, my);
+            if (ti >= 0 && mLevel.tiles[ti].action) {
+                // Cycle group: 0 → 1 → 2 → … → 9 → 0
+                int& grp = mLevel.tiles[ti].actionGroup;
+                grp = (grp + 1) % 10;
+                SetStatus("Tile " + std::to_string(ti) +
+                          " group → " + (grp == 0 ? "standalone" : std::to_string(grp)));
+                return true;
+            }
+        }
+    }
+
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx=(int)e.button.x, my=(int)e.button.y;
 
@@ -406,7 +429,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (tb(btnResize,Tool::Resize,"Resize"))     { mIsResizing=false; mHoverEdge=ResizeEdge::None; mHoverTileIdx=-1; return true; }
         if (tb(btnProp,Tool::Prop,"Prop"))           return true;
         if (tb(btnLadder,Tool::Ladder,"Ladder"))      return true;
-        if (tb(btnErase,Tool::Erase,"Erase"))        return true;
+        if (tb(btnAction,Tool::Action,"Action"))      return true;
+        if (tb(btnSlope,Tool::Slope,"Slope"))          return true;
+        if (tb(btnErase,Tool::Erase,"Erase"))          return true;
         if (tb(btnPlayerStart,Tool::PlayerStart,"Player")) return true;
 
         if (HitTest(btnSave,mx,my)) {
@@ -534,8 +559,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 if (ti >= 0) {
                     bool nowProp = !mLevel.tiles[ti].prop;
                     mLevel.tiles[ti].prop = nowProp;
-                    // Prop and Ladder are mutually exclusive
-                    if (nowProp) mLevel.tiles[ti].ladder = false;
+                    // Prop, Ladder, and Action are mutually exclusive
+                    if (nowProp) { mLevel.tiles[ti].ladder = false; mLevel.tiles[ti].action = false; mLevel.tiles[ti].slope = SlopeType::None; }
                     SetStatus(std::string("Tile ") + std::to_string(ti) +
                               (nowProp ? " → prop (no collision)" : " → solid (collision on)"));
                 }
@@ -546,10 +571,42 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 if (ti >= 0) {
                     bool nowLadder = !mLevel.tiles[ti].ladder;
                     mLevel.tiles[ti].ladder = nowLadder;
-                    // Ladder and Prop are mutually exclusive
-                    if (nowLadder) mLevel.tiles[ti].prop = false;
+                    // Ladder, Prop, and Action are mutually exclusive
+                    if (nowLadder) { mLevel.tiles[ti].prop = false; mLevel.tiles[ti].action = false; mLevel.tiles[ti].slope = SlopeType::None; }
                     SetStatus(std::string("Tile ") + std::to_string(ti) +
                               (nowLadder ? " → ladder (climbable)" : " → solid (ladder removed)"));
+                }
+                return true;
+            }
+            case Tool::Action: {
+                int ti = HitTile(mx, my);
+                if (ti >= 0) {
+                    bool nowAction = !mLevel.tiles[ti].action;
+                    mLevel.tiles[ti].action = nowAction;
+                    // Action, Prop, Ladder, and Slope are mutually exclusive
+                    if (nowAction) { mLevel.tiles[ti].prop = false; mLevel.tiles[ti].ladder = false; mLevel.tiles[ti].slope = SlopeType::None; }
+                    SetStatus(std::string("Tile ") + std::to_string(ti) +
+                              (nowAction ? " → action (disappears on contact)" : " → solid (action removed)"));
+                }
+                return true;
+            }
+            case Tool::Slope: {
+                int ti = HitTile(mx, my);
+                if (ti >= 0) {
+                    // Cycle: None → DiagUpRight → DiagUpLeft → None
+                    SlopeType next;
+                    std::string label;
+                    if (mLevel.tiles[ti].slope == SlopeType::None) {
+                        next = SlopeType::DiagUpRight; label = "DiagUpRight (rises left→right)";
+                    } else if (mLevel.tiles[ti].slope == SlopeType::DiagUpRight) {
+                        next = SlopeType::DiagUpLeft;  label = "DiagUpLeft  (rises right→left)";
+                    } else {
+                        next = SlopeType::None;         label = "slope removed";
+                    }
+                    mLevel.tiles[ti].slope = next;
+                    // Slope, Prop, Ladder, and Action are mutually exclusive
+                    if (next != SlopeType::None) { mLevel.tiles[ti].prop = false; mLevel.tiles[ti].ladder = false; mLevel.tiles[ti].action = false; }
+                    SetStatus(std::string("Tile ") + std::to_string(ti) + " → " + label);
                 }
                 return true;
             }
@@ -656,16 +713,18 @@ void LevelEditorScene::Render(Window& window) {
         if (ts) {
             if (t.prop)   SDL_SetSurfaceColorMod(ts, 120, 255, 120); // green tint
             if (t.ladder) SDL_SetSurfaceColorMod(ts, 120, 220, 255); // cyan tint
+            if (t.action) SDL_SetSurfaceColorMod(ts, 255, 160,  80); // orange tint
             SDL_BlitSurfaceScaled(ts,nullptr,screen,&dst,SDL_SCALEMODE_LINEAR);
-            if (t.prop || t.ladder) SDL_SetSurfaceColorMod(ts, 255, 255, 255); // reset
+            if (t.prop || t.ladder || t.action) SDL_SetSurfaceColorMod(ts, 255, 255, 255); // reset
         } else {
             SDL_Surface* l=IMG_Load(t.imagePath.c_str());
             if(l){SDL_BlitSurfaceScaled(l,nullptr,screen,&dst,SDL_SCALEMODE_LINEAR);SDL_DestroySurface(l);}
             else DrawRect(screen,dst,{80,80,120,200});
         }
-        // Outline colour: cyan for ladder, green for prop, blue for solid
+        // Outline colour: cyan for ladder, green for prop, orange for action, blue for solid
         SDL_Color outlineCol = t.ladder ? SDL_Color{0,220,220,255}
                              : t.prop   ? SDL_Color{80,255,80,255}
+                             : t.action ? SDL_Color{255,160,60,255}
                                         : SDL_Color{100,180,255,255};
         DrawOutline(screen,dst,outlineCol);
         // Prop badge
@@ -680,6 +739,41 @@ void LevelEditorScene::Render(Window& window) {
             Text ladderBadge("L",SDL_Color{255,255,255,255},(int)t.x+4,(int)t.y+2,10);
             ladderBadge.Render(screen);
         }
+        // Action badge — shows group number when non-zero
+        if (t.action) {
+            std::string abadge = (t.actionGroup > 0)
+                ? "A" + std::to_string(t.actionGroup) : "A";
+            int bw = (t.actionGroup > 0) ? 20 : 14;
+            DrawRect(screen,{(int)t.x+2,(int)t.y+2,bw,14},{200,100,0,200});
+            Text actionBadge(abadge,SDL_Color{255,255,255,255},(int)t.x+4,(int)t.y+2,10);
+            actionBadge.Render(screen);
+        }
+        // Slope: draw diagonal line and badge
+        if (t.slope != SlopeType::None) {
+            // Diagonal line across the tile
+            int tx=(int)t.x, ty2=(int)t.y, tw=t.w, th=t.h;
+            int lx0, ly0, lx1, ly1;
+            if (t.slope == SlopeType::DiagUpRight) {
+                lx0=tx;     ly0=ty2+th;  lx1=tx+tw; ly1=ty2;
+            } else {
+                lx0=tx;     ly0=ty2;     lx1=tx+tw; ly1=ty2+th;
+            }
+            int ddx=lx1-lx0, ddy=ly1-ly0;
+            int steps=std::abs(ddx)>std::abs(ddy)?std::abs(ddx):std::abs(ddy);
+            if (steps>0) {
+                float ssx=(float)ddx/steps, ssy=(float)ddy/steps;
+                float ccx=(float)lx0, ccy=(float)ly0;
+                for (int s=0;s<=steps;++s) {
+                    DrawRect(screen,{(int)ccx,(int)ccy,2,2},{255,220,50,220});
+                    ccx+=ssx; ccy+=ssy;
+                }
+            }
+            // Badge
+            DrawRect(screen,{tx+2,ty2+2,14,14},{160,120,0,200});
+            std::string badge = (t.slope==SlopeType::DiagUpRight) ? "/" : "\\";
+            Text slopeBadge(badge,SDL_Color{255,255,255,255},tx+5,ty2+2,10);
+            slopeBadge.Render(screen);
+        }
     }
 
     // Coins, enemies, player marker
@@ -689,8 +783,10 @@ void LevelEditorScene::Render(Window& window) {
     auto slimeFrames=enemySheet->GetAnimation("slimeWalk");
     if (!slimeFrames.empty())
         for (const auto& en:mLevel.enemies){SDL_Rect s=slimeFrames[0],d={(int)en.x,(int)en.y,ICON_SIZE,ICON_SIZE};SDL_BlitSurfaceScaled(enemySheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);DrawOutline(screen,d,{255,80,80,255});}
-    DrawRect(screen,{(int)mLevel.player.x,(int)mLevel.player.y,32,20},{0,200,80,180});
-    DrawOutline(screen,{(int)mLevel.player.x,(int)mLevel.player.y,32,20},{0,255,100,255},2);
+    // Draw player marker at the actual collider size so placement in the editor
+    // matches the in-game hitbox exactly (PLAYER_STAND_WIDTH x PLAYER_STAND_HEIGHT).
+    DrawRect(screen,{(int)mLevel.player.x,(int)mLevel.player.y,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,200,80,180});
+    DrawOutline(screen,{(int)mLevel.player.x,(int)mLevel.player.y,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,255,100,255},2);
 
     // ── Resize tool feedback ─────────────────────────────────────────────────
     if (mActiveTool == Tool::Resize) {
@@ -737,9 +833,11 @@ void LevelEditorScene::Render(Window& window) {
     drawBtn(btnEnemy,      {55,55,65,255},{180,180,180,255},lblEnemy.get(),  mActiveTool==Tool::Enemy);
     drawBtn(btnTile,       {55,55,65,255},{180,180,180,255},lblTile.get(),   mActiveTool==Tool::Tile);
     drawBtn(btnResize,     {55,55,65,255},{180,180,180,255},lblResize.get(), mActiveTool==Tool::Resize);
-    drawBtn(btnProp,       {30,80,30,255},  {80,200,80,255},   lblProp.get(),   mActiveTool==Tool::Prop);
-    drawBtn(btnLadder,     {20,100,120,255},{60,200,220,255},  lblLadder.get(), mActiveTool==Tool::Ladder);
-    drawBtn(btnErase,      {55,55,65,255},  {180,180,180,255}, lblErase.get(),  mActiveTool==Tool::Erase);
+    drawBtn(btnProp,       {30,80,30,255},    {80,200,80,255},   lblProp.get(),   mActiveTool==Tool::Prop);
+    drawBtn(btnLadder,     {20,100,120,255},  {60,200,220,255},  lblLadder.get(), mActiveTool==Tool::Ladder);
+    drawBtn(btnAction,     {130,70,10,255},   {255,160,60,255},  lblAction.get(), mActiveTool==Tool::Action);
+    drawBtn(btnSlope,      {80,60,20,255},    {255,220,50,255},  lblSlope.get(),  mActiveTool==Tool::Slope);
+    drawBtn(btnErase,      {55,55,65,255},    {180,180,180,255}, lblErase.get(),  mActiveTool==Tool::Erase);
     drawBtn(btnPlayerStart,{55,55,65,255},{180,180,180,255},lblPlayer.get(), mActiveTool==Tool::PlayerStart);
     drawBtn(btnSave,  {40,110,40,255},{120,230,120,255},lblSave.get(),  false);
     drawBtn(btnLoad,  {40,70,120,255},{120,160,230,255},lblLoad.get(),  false);
@@ -900,7 +998,7 @@ void LevelEditorScene::Render(Window& window) {
     // ── Bottom hint bar ────────────────────────────────────────────────────────
     Text cntT(std::to_string(mLevel.coins.size())+"c  "+std::to_string(mLevel.enemies.size())+"e  "+std::to_string(mLevel.tiles.size())+"t",SDL_Color{160,160,160,255},6,window.GetHeight()-22,12);
     cntT.Render(screen);
-    Text hintT("1-5:Tools 6:BG 7:Resize 8:Prop 9:Ladder G:Gravity  I:Import  Ctrl+S:Save  Ctrl+Z:Undo  Esc:FolderUp",SDL_Color{100,100,100,255},150,window.GetHeight()-22,11);
+    Text hintT("1-5:Tools 6:BG 7:Resize 8:Prop 9:Ladder 0:Action(R-click=group) -:Slope G:Gravity  I:Import  Ctrl+S:Save  Ctrl+Z:Undo",SDL_Color{100,100,100,255},150,window.GetHeight()-22,11);
     hintT.Render(screen);
 
     // ── Import input bar ──────────────────────────────────────────────────────

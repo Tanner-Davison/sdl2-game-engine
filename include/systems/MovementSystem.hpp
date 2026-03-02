@@ -15,15 +15,20 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
             // While climbing or parked at top, LadderSystem owns v.dy entirely.
             // Only apply horizontal movement here — never touch v.dy.
             if (climb.climbing || climb.atTop) {
-                // LadderSystem already moved t.y directly this frame.
-                // We only handle horizontal movement here — never touch t.y.
+                // Horizontal movement is allowed but capped to CLIMB_STRAFE_SPEED
+                // so the player shuffles slowly left/right instead of running at
+                // full speed while on the ladder.
                 bool movingH = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D];
                 if (!movingH) {
                     v.dx -= v.dx * friction * dt;
                     if (std::abs(v.dx) < 0.5f) v.dx = 0.0f;
                 }
+                // Clamp — InputSystem/event path may have set a full-speed v.dx
+                // before the player grabbed the ladder.
+                if (v.dx >  CLIMB_STRAFE_SPEED) v.dx =  CLIMB_STRAFE_SPEED;
+                if (v.dx < -CLIMB_STRAFE_SPEED) v.dx = -CLIMB_STRAFE_SPEED;
                 t.x += v.dx * dt;
-                // t.y intentionally NOT touched here
+                // t.y intentionally NOT touched here — LadderSystem owns it.
                 return;
             }
             // Free-float mode (gravity off for other reasons, e.g. wall-run punishment)
@@ -88,6 +93,13 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
 
         if (!g.isGrounded) {
             g.velocity = std::min(g.velocity + GRAVITY_FORCE * dt, MAX_FALL_SPEED);
+        } else if (g.direction == GravityDir::DOWN && std::abs(v.dx) > 0.5f) {
+            // Ground-stick: apply a small constant downward nudge while the player
+            // is grounded and moving horizontally.  This pins them to descending
+            // slopes so lateral movement alone can't carry them off the surface
+            // before gravity catches them.  CollisionSystem resets g.velocity to
+            // 0 on any flat-tile or slope snap, so this never accumulates.
+            g.velocity = std::min(g.velocity + SLOPE_STICK_VELOCITY, MAX_FALL_SPEED);
         }
 
         if (g.jumpHeld && !g.isGrounded && g.velocity < 0.0f) {

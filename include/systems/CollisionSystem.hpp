@@ -5,18 +5,40 @@
 #include <entt/entt.hpp>
 #include <vector>
 
-// ─────────────────────────────────────────────────────────────────────────────
+// -----------------------------------------------------------------------------
 // CollisionSystem
 //
-// Resolves all collisions for one frame and returns a CollisionResult.
-// The Scene is responsible for accumulating the result into its own state
-// (gameOver, coinCount, stompCount).  This system no longer holds raw
-// references into the Scene, making it self-contained and testable.
-// ─────────────────────────────────────────────────────────────────────────────
+// Pass order:
+//   1. Slope pass   -- snap to diagonal surface, sets onSlopeThisFrame
+//   2. Flat tile Pass 1  -- gravity axis snap (vertical + ceiling/floor)
+//   3. Flat tile Pass 2  -- lateral push-out with step-up
+//
+// The slope pass MUST run first so onSlopeThisFrame is known before Pass 1.
+// Without this, Pass 1's lateral corrections fire against tiles the slope would
+// have lifted the player above, causing slope-to-slope seam sticking.
+//
+// Key design decisions:
+//
+//   * onSlopeThisFrame suppresses ALL lateral corrections in both Pass 1 and
+//     Pass 2.  The slope snap already placed the player at the correct surface
+//     height; any lateral push from a tile whose top the slope put them above
+//     is wrong and causes the seam-sticking and corner-catching bugs.
+//
+//   * STEP_UP_HEIGHT == tile height (64 px): in Pass 2, the player can walk
+//     from the base of a slope (a full tile below the adjacent flat top) onto
+//     that platform without being laterally blocked.
+//
+//   * Pass 2 step-up uses overlap-axis comparison (oTop <= oLeft && oTop <=
+//     oRight) to distinguish floor contacts from wall contacts, preventing
+//     the "walking up vertical walls" bug that a sinkDepth-only check caused.
+//
+//   * The slope proximity guard uses OR (either foot-edge within lookahead)
+//     so valley joins, peak joins, and slope<->flat transitions from either
+//     direction are all handled uniformly.
+// -----------------------------------------------------------------------------
 inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int windowW, int windowH) {
     CollisionResult result;
 
-    // ── Tick invincibility timers ─────────────────────────────────────────────
     auto timerView = reg.view<InvincibilityTimer>();
     timerView.each([dt](InvincibilityTimer& inv) {
         if (inv.isInvincible) {
@@ -38,13 +60,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
     toKill.reserve(4);
     toDestroy.reserve(8);
 
-    playerView.each([&](GravityState& g, Transform& pt, const Collider& pc,
-                        Health& health, InvincibilityTimer& inv) {
+    playerView.each([&](entt::entity playerEnt, GravityState& g, Transform& pt,
+                        const Collider& pc, Health& health, InvincibilityTimer& inv) {
         bool  sidewall = g.direction == GravityDir::LEFT || g.direction == GravityDir::RIGHT;
         float pw       = sidewall ? (float)pc.h : (float)pc.w;
         float ph       = sidewall ? (float)pc.w : (float)pc.h;
 
-        // ── AABB helpers ──────────────────────────────────────────────────────
         auto aabb = [&](const Transform& et, const Collider& ec) -> bool {
             return pt.x < et.x + ec.w && pt.x + pw > et.x &&
                    pt.y < et.y + ec.h && pt.y + ph > et.y;
@@ -61,7 +82,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             return false;
         };
 
-        // ── Live enemy collisions ─────────────────────────────────────────────
+        // -- Live enemy collisions ---------------------------------------------
         liveEnemyView.each([&](entt::entity enemy, const Transform& et, const Collider& ec) {
             if (isStomp(et, ec)) {
                 toKill.push_back(enemy);
@@ -71,7 +92,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             } else if (!inv.isInvincible && aabb(et, ec)) {
                 health.current -= PLAYER_HIT_DAMAGE;
                 if (health.current <= 0.0f) {
-                    health.current   = 0.0f;
+                    health.current    = 0.0f;
                     result.playerDied = true;
                 }
                 inv.isInvincible  = true;
@@ -83,7 +104,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             }
         });
 
-        // ── Dead enemy platforms ──────────────────────────────────────────────
+        // -- Dead enemy platforms ---------------------------------------------
         bool onDeadEnemy = false;
         deadEnemyView.each([&](const Transform& et, const Collider& ec) {
             if (g.velocity < 0.0f) return;
@@ -92,7 +113,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     float bottom = pt.y + pc.h;
                     if (pt.x < et.x + ec.w && pt.x + pc.w > et.x &&
                         bottom >= et.y && bottom <= et.y + ec.h) {
-                        pt.y = et.y - pc.h;
+                        pt.y         = et.y - pc.h;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
                     }
@@ -101,7 +122,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 case GravityDir::UP: {
                     if (pt.x < et.x + ec.w && pt.x + pc.w > et.x &&
                         pt.y <= et.y + ec.h && pt.y >= et.y) {
-                        pt.y = et.y + ec.h;
+                        pt.y         = et.y + ec.h;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
                     }
@@ -110,7 +131,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 case GravityDir::LEFT: {
                     if (pt.y < et.y + ec.h && pt.y + pc.h > et.y &&
                         pt.x <= et.x + ec.w && pt.x >= et.x) {
-                        pt.x = et.x + ec.w;
+                        pt.x         = et.x + ec.w;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
                     }
@@ -120,7 +141,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     float right = pt.x + pc.h;
                     if (pt.y < et.y + ec.h && pt.y + pc.w > et.y &&
                         right >= et.x && right <= et.x + ec.w) {
-                        pt.x = et.x - pc.h;
+                        pt.x         = et.x - pc.h;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
                     }
@@ -129,8 +150,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             }
         });
 
-        // If player was grounded last frame but is no longer on a dead enemy or a
-        // window wall, clear the grounded flag so gravity can resume.
         if (!onDeadEnemy && g.isGrounded) {
             bool onWindow = false;
             switch (g.direction) {
@@ -142,64 +161,132 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             if (!onWindow) g.isGrounded = false;
         }
 
-        // ── Tile collisions — two passes ──────────────────────────────────────
-        auto tileView = reg.view<TileTag, Transform, Collider>();
+        // -- Slope pass (FIRST) -----------------------------------------------
+        // Determines onSlopeThisFrame before any flat-tile passes so that
+        // Pass 1 and Pass 2 can suppress lateral corrections while on a slope.
+        bool onSlopeThisFrame = false;
 
-        // Pass 1 — gravity axis: snap feet/head to floors/ceilings.
+        if (g.direction == GravityDir::DOWN) {
+            float pFeet    = pt.y + pc.h;
+            float bestSnap = pFeet + SLOPE_SNAP_LOOKAHEAD;
+            bool  onSlope  = false;
+
+            auto slopeView = reg.view<SlopeCollider, TileTag, Transform, Collider>();
+            slopeView.each([&](const SlopeCollider& sc, const Transform& tt, const Collider& tc) {
+                float pLeft  = pt.x;
+                float pRight = pt.x + pc.w;
+
+                if (pRight <= tt.x || pLeft >= tt.x + tc.w) return;
+                if (pFeet  <  tt.y - SLOPE_SNAP_LOOKAHEAD)  return;
+                if (pt.y   >  tt.y + tc.h)                   return;
+
+                auto surfaceAtX = [&](float wx) -> float {
+                    float t = (wx - tt.x) / (float)tc.w;
+                    t = std::max(0.0f, std::min(1.0f, t));
+                    return (sc.slopeType == SlopeType::DiagUpRight)
+                        ? (tt.y + tc.h) - t * tc.h  // high-left -> low-right
+                        : tt.y + t * tc.h;           // low-left  -> high-right
+                };
+
+                float snapSurface = surfaceAtX(pt.x + pc.w * 0.5f);
+
+                // Proximity guard: either foot-edge must be within lookahead of
+                // the surface at that edge.  OR catches all approach directions
+                // including valley/peak slope joins.
+                float sL          = surfaceAtX(pLeft  + 1.0f);
+                float sR          = surfaceAtX(pRight - 1.0f);
+                bool  closeEnough = (pFeet >= sL - SLOPE_SNAP_LOOKAHEAD) ||
+                                    (pFeet >= sR - SLOPE_SNAP_LOOKAHEAD);
+
+                // Pick the highest (smallest Y) candidate -- correct for both
+                // ascending and the converging surface at slope joins.
+                if (closeEnough && snapSurface < bestSnap) {
+                    bestSnap = snapSurface;
+                    onSlope  = true;
+                }
+            });
+
+            if (onSlope) {
+                pt.y             = bestSnap - pc.h;
+                g.velocity       = 0.0f;
+                g.isGrounded     = true;
+                onSlopeThisFrame = true;
+            }
+        }
+
+        // -- Flat tile Pass 1: gravity-axis snap -------------------------------
+        // Handles floor, ceiling, and (for LEFT/RIGHT gravity) wall grounding.
+        // When onSlopeThisFrame is true, lateral corrections (the else-if
+        // branches) are skipped entirely -- the slope already positioned the
+        // player and any lateral push here would fight it and cause sticking.
+        auto tileView = reg.view<TileTag, Transform, Collider>(entt::exclude<SlopeCollider, ActionTag>);
+
         tileView.each([&](const Transform& tt, const Collider& tc) {
             if (pt.x + pw <= tt.x || pt.x >= tt.x + tc.w) return;
             if (pt.y + ph <= tt.y || pt.y >= tt.y + tc.h) return;
 
             float oTop    = (pt.y + ph) - tt.y;
             float oBottom = (tt.y + tc.h) - pt.y;
-            float oLeft   = (pt.x + pw) - tt.x;
+            float oLeft   = (pt.x + pw)  - tt.x;
             float oRight  = (tt.x + tc.w) - pt.x;
 
             switch (g.direction) {
                 case GravityDir::DOWN:
                     if (oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.y = tt.y - ph;
+                        pt.y       = tt.y - ph;
                         g.velocity = 0.0f;
-                    } else if (oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
-                        pt.y = tt.y + tc.h;
+                    } else if (!onSlopeThisFrame
+                               && oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
+                        // ceiling hit -- only when not on slope
+                        pt.y       = tt.y + tc.h;
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::UP:
                     if (oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.y = tt.y + tc.h;
+                        pt.y       = tt.y + tc.h;
                         g.velocity = 0.0f;
-                    } else if (oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
-                        pt.y = tt.y - ph;
+                    } else if (!onSlopeThisFrame
+                               && oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
+                        pt.y       = tt.y - ph;
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::LEFT:
                     if (oRight < oLeft && oRight <= oTop && oRight <= oBottom) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.x = tt.x + tc.w;
+                        pt.x       = tt.x + tc.w;
                         g.velocity = 0.0f;
-                    } else if (oLeft < oRight && oLeft <= oTop && oLeft <= oBottom) {
-                        pt.x = tt.x - pw;
+                    } else if (!onSlopeThisFrame
+                               && oLeft < oRight && oLeft <= oTop && oLeft <= oBottom) {
+                        pt.x       = tt.x - pw;
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::RIGHT:
                     if (oLeft < oRight && oLeft <= oTop && oLeft <= oBottom) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.x = tt.x - pw;
+                        pt.x       = tt.x - pw;
                         g.velocity = 0.0f;
-                    } else if (oRight < oLeft && oRight <= oTop && oRight <= oBottom) {
-                        pt.x = tt.x + tc.w;
+                    } else if (!onSlopeThisFrame
+                               && oRight < oLeft && oRight <= oTop && oRight <= oBottom) {
+                        pt.x       = tt.x + tc.w;
                         g.velocity = 0.0f;
                     }
                     break;
             }
         });
 
-        // Pass 2 — lateral axis: push out walls now that vertical position is settled.
+        // -- Flat tile Pass 2: lateral push-out with step-up ------------------
+        // When onSlopeThisFrame: only ceiling correction, no lateral push.
+        // When not on slope: overlap-axis comparison decides step-up vs wall.
+        //   oTop <= oLeft && oTop <= oRight  -> contact is from above -> step-up
+        //   otherwise                         -> lateral wall -> push out
+        // Step-up also requires oTop in [0, STEP_UP_HEIGHT] to prevent
+        // stepping up full walls.
+
         tileView.each([&](const Transform& tt, const Collider& tc) {
             if (pt.x + pw <= tt.x || pt.x >= tt.x + tc.w) return;
             if (pt.y + ph <= tt.y || pt.y >= tt.y + tc.h) return;
@@ -207,8 +294,40 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             switch (g.direction) {
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
-                    float oLeft  = (pt.x + pw) - tt.x;
-                    float oRight = (tt.x + tc.w) - pt.x;
+                    float oTop    = (pt.y + ph) - tt.y;
+                    float oBottom = (tt.y + tc.h) - pt.y;
+                    float oLeft   = (pt.x + pw)  - tt.x;
+                    float oRight  = (tt.x + tc.w) - pt.x;
+
+                    if (onSlopeThisFrame) {
+                        // On slope: ceiling only, never lateral.
+                        if (g.direction == GravityDir::DOWN
+                            && oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
+                            pt.y       = tt.y + tc.h;
+                            g.velocity = 0.0f;
+                        }
+                        break;
+                    }
+
+                    // Floor contact from above: step up.
+                    if (g.direction == GravityDir::DOWN
+                        && oTop >= 0.0f
+                        && oTop <= STEP_UP_HEIGHT
+                        && oTop <= oLeft && oTop <= oRight) {
+                        pt.y         = tt.y - ph;
+                        g.velocity   = 0.0f;
+                        g.isGrounded = true;
+                        break;
+                    }
+                    // Ceiling contact from below (UP gravity).
+                    if (g.direction == GravityDir::UP
+                        && oBottom > 0.0f
+                        && oBottom <= oLeft && oBottom <= oRight) {
+                        pt.y       = tt.y + tc.h;
+                        g.velocity = 0.0f;
+                        break;
+                    }
+                    // Lateral wall: push out on shallower horizontal axis.
                     pt.x = oLeft < oRight ? tt.x - pw : tt.x + tc.w;
                     break;
                 }
@@ -222,7 +341,17 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             }
         });
 
-        // ── Coin collection ───────────────────────────────────────────────────
+        // -- Action tile trigger ----------------------------------------------
+        {
+            auto actionView = reg.view<ActionTag, Transform, Collider>();
+            actionView.each([&](entt::entity at, const ActionTag& /*tag*/,
+                                const Transform& tt, const Collider& tc) {
+                if (aabb(tt, tc))
+                    result.actionTilesTriggered.push_back(at);
+            });
+        }
+
+        // -- Coin collection --------------------------------------------------
         if (g.active) {
             coinView.each([&](entt::entity coin, const Transform& ct, const Collider& cc) {
                 if (aabb(ct, cc)) {
@@ -233,7 +362,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         }
     });
 
-    // ── Commit deferred mutations ─────────────────────────────────────────────
+    // -- Commit deferred mutations --------------------------------------------
     for (auto e : toKill) {
         if (reg.all_of<Velocity>(e)) {
             auto& v = reg.get<Velocity>(e);
@@ -257,6 +386,37 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
 
     for (auto e : toDestroy)
         reg.destroy(e);
+
+    // -- Strip triggered action tiles (and their groups) ----------------------
+    auto stripTile = [&](entt::entity e) {
+        if (!reg.valid(e)) return;
+        if (reg.all_of<Renderable>(e)) reg.remove<Renderable>(e);
+        if (reg.all_of<TileTag>(e))    reg.remove<TileTag>(e);
+        if (reg.all_of<Collider>(e))   reg.remove<Collider>(e);
+    };
+
+    {
+        auto& v = result.actionTilesTriggered;
+        std::sort(v.begin(), v.end());
+        v.erase(std::unique(v.begin(), v.end()), v.end());
+    }
+
+    for (auto e : result.actionTilesTriggered) {
+        if (!reg.valid(e)) continue;
+        if (!reg.all_of<ActionTag>(e)) continue;
+        int grp = reg.get<ActionTag>(e).group;
+        stripTile(e);
+        if (grp != 0) {
+            std::vector<entt::entity> groupMembers;
+            auto groupView = reg.view<ActionTag>();
+            groupView.each([&](entt::entity other, const ActionTag& at) {
+                if (other != e && at.group == grp)
+                    groupMembers.push_back(other);
+            });
+            for (auto gm : groupMembers)
+                stripTile(gm);
+        }
+    }
 
     return result;
 }

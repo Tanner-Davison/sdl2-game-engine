@@ -4,7 +4,6 @@
 #include <GameEvents.hpp>
 #include <systems/AnimationSystem.hpp>
 #include <systems/BoundsSystem.hpp>
-#include <systems/CenterPullSystem.hpp>
 #include <systems/CollisionSystem.hpp>
 #include <systems/HUDSystem.hpp>
 #include <systems/InputSystem.hpp>

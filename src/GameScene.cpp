@@ -4,6 +4,7 @@
 #include "LevelTwo.hpp"
 #include "PauseMenuScene.hpp"
 #include <SDL3_image/SDL_image.h>
+#include <cmath>
 #include <cstdlib>
 #include <print>
 
@@ -27,7 +28,9 @@ void GameScene::Load(Window& window) {
         LoadLevel(mLevelPath, mLevel);
 
     // ── Frost Knight — individual PNG sequences, zero-padded 3-digit frame numbers ──
-    constexpr int KW = 80, KH = 80;
+    // KW/KH drive the actual rendered sprite size; collider dims are independent.
+    const int KW = PLAYER_SPRITE_WIDTH;
+    const int KH = PLAYER_SPRITE_HEIGHT;
     auto loadAnim = [&](const std::string& folder, const std::string& prefix, int count) {
         return std::make_unique<SpriteSheet>(
             "game_assets/frost_knight_png_sequences/" + folder + "/",
@@ -53,8 +56,12 @@ void GameScene::Load(Window& window) {
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
     enemyWalkFrames = enemySheet->GetAnimation("slimeWalk");
 
-    background   = std::make_unique<Image>(
-        "game_assets/backgrounds/deepspace_scene.png", nullptr, FitMode::PRESCALED);
+    // Use the background from the level file if one was loaded, otherwise
+    // fall back to the default so sandbox/freeplay mode still has a background.
+    std::string bgPath = (!mLevelPath.empty() && !mLevel.background.empty())
+                           ? mLevel.background
+                           : "game_assets/backgrounds/deepspace_scene.png";
+    background = std::make_unique<Image>(bgPath, nullptr, FitMode::PRESCALED);
     locationText = std::make_unique<Text>("You are in space!!", 20, 20);
     actionText   = std::make_unique<Text>(
         "Level 1: Collect ALL the coins!", SDL_Color{255, 255, 255, 0}, 20, 80, 20);
@@ -142,7 +149,6 @@ void GameScene::Update(float dt) {
 
     LadderSystem(reg, dt);
     MovementSystem(reg, dt, mWindow->GetWidth());
-    CenterPullSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
     BoundsSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight(),
                  mLevel.gravityMode == GravityMode::WallRun);
     PlayerStateSystem(reg);
@@ -258,7 +264,7 @@ void GameScene::Spawn() {
                       ? (float)(mWindow->GetWidth() / 2 - 33)
                       : mLevel.player.x;
     float playerY = mLevelPath.empty()
-                      ? (float)(mWindow->GetHeight() - PLAYER_SPRITE_HEIGHT)
+                      ? (float)(mWindow->GetHeight() - PLAYER_STAND_HEIGHT)
                       : mLevel.player.y;
 
     auto player = reg.create();
@@ -269,7 +275,7 @@ void GameScene::Spawn() {
     reg.emplace<PlayerTag>(player);
     reg.emplace<Health>(player);
     reg.emplace<Collider>(player, PLAYER_STAND_WIDTH, PLAYER_STAND_HEIGHT);
-    reg.emplace<RenderOffset>(player, PLAYER_STAND_ROFF_X, -10);
+    reg.emplace<RenderOffset>(player, PLAYER_STAND_ROFF_X, PLAYER_STAND_ROFF_Y);
     reg.emplace<InvincibilityTimer>(player);
     reg.emplace<GravityState>(player);
     reg.emplace<ClimbState>(player);
@@ -310,12 +316,21 @@ void GameScene::Spawn() {
         auto tile = reg.create();
         reg.emplace<Transform>(tile, ts.x, ts.y);
         // Props: visual only. Ladders: passthrough but tagged for climb detection.
+        // Action tiles: rendered + solid until player contact, then invisible + passthrough.
         // Solid tiles: full collision.
         if (ts.ladder) {
             reg.emplace<LadderTag>(tile);
             reg.emplace<Collider>(tile, ts.w, ts.h); // collider needed for overlap test
         } else if (ts.prop) {
             reg.emplace<PropTag>(tile);
+        } else if (ts.action) {
+            reg.emplace<ActionTag>(tile, ts.actionGroup);
+            reg.emplace<TileTag>(tile);              // solid until triggered
+            reg.emplace<Collider>(tile, ts.w, ts.h);
+        } else if (ts.slope != SlopeType::None) {
+            reg.emplace<TileTag>(tile);              // included in tile collision passes
+            reg.emplace<Collider>(tile, ts.w, ts.h); // AABB used for broad-phase culling
+            reg.emplace<SlopeCollider>(tile, ts.slope); // precise slope surface
         } else {
             reg.emplace<Collider>(tile, ts.w, ts.h);
             reg.emplace<TileTag>(tile);

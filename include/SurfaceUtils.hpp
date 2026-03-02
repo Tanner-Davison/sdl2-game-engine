@@ -1,6 +1,7 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <cmath>
 #include <string>
 
 /// Rotates an SDL_Surface 90 degrees clockwise.
@@ -83,6 +84,47 @@ inline SDL_Surface* RotateSurface90CCW(SDL_Surface* src) {
             Uint32* dstPx = reinterpret_cast<Uint32*>(static_cast<Uint8*>(dst->pixels) +
                                                       (src->w - 1 - x) * dst->pitch + y * 4);
             *dstPx        = *srcPx;
+        }
+    }
+    SDL_UnlockSurface(src);
+    SDL_UnlockSurface(dst);
+    return dst;
+}
+
+/// Rotates an SDL_Surface by an arbitrary angle (degrees, clockwise).
+/// The output surface is the same size as the input; pixels outside the
+/// rotated bounds are transparent.  Uses nearest-neighbour sampling.
+/// Returns a new surface — caller is responsible for freeing it.
+inline SDL_Surface* RotateSurfaceAngle(SDL_Surface* src, float angleDeg) {
+    const float rad  = angleDeg * 3.14159265f / 180.0f;
+    const float cosA = std::cos(-rad); // negative: SDL y-axis is flipped
+    const float sinA = std::sin(-rad);
+    const int   w    = src->w;
+    const int   h    = src->h;
+    const float cx   = w * 0.5f;
+    const float cy   = h * 0.5f;
+
+    SDL_Surface* dst = SDL_CreateSurface(w, h, src->format);
+    SDL_SetSurfaceBlendMode(dst, SDL_BLENDMODE_BLEND);
+    // Clear to transparent
+    SDL_FillSurfaceRect(dst, nullptr, SDL_MapRGBA(
+        SDL_GetPixelFormatDetails(dst->format), nullptr, 0, 0, 0, 0));
+
+    SDL_LockSurface(src);
+    SDL_LockSurface(dst);
+    for (int dy = 0; dy < h; dy++) {
+        for (int dx = 0; dx < w; dx++) {
+            // Map destination pixel back to source space
+            float fx = (dx - cx) * cosA - (dy - cy) * sinA + cx;
+            float fy = (dx - cx) * sinA + (dy - cy) * cosA + cy;
+            int   sx = (int)(fx + 0.5f);
+            int   sy = (int)(fy + 0.5f);
+            if (sx < 0 || sx >= w || sy < 0 || sy >= h) continue;
+            Uint32* sp = reinterpret_cast<Uint32*>(
+                static_cast<Uint8*>(src->pixels) + sy * src->pitch + sx * 4);
+            Uint32* dp = reinterpret_cast<Uint32*>(
+                static_cast<Uint8*>(dst->pixels) + dy * dst->pitch + dx * 4);
+            *dp = *sp;
         }
     }
     SDL_UnlockSurface(src);

@@ -5,6 +5,11 @@
 #include <SDL3/SDL.h>
 #include <vector>
 
+// ── Slope type ────────────────────────────────────────────────────────────────────
+// Defined here (rather than Level.hpp) so CollisionSystem and other engine
+// headers can reference it without pulling in Level.hpp.
+enum class SlopeType { None, DiagUpRight, DiagUpLeft };
+
 // ── Core transform / physics ──────────────────────────────────────────────────
 
 // Position in world space (top-left of collider)
@@ -140,10 +145,24 @@ struct DeadTag {};   // marks a stomped enemy — no longer harmful, acts as a p
 struct TileTag {};   // marks a solid tile — blocks movement
 struct LadderTag {}; // marks a ladder tile — passthrough, player can climb with W/S
 struct PropTag {};   // marks a prop tile — rendered only, no collision, no interaction
+struct ActionTag {   // marks an action tile — rendered + collidable until the player
+                     // makes contact, then Renderable and Collider are removed so it
+                     // disappears and stops blocking (e.g. a door that opens on touch)
+    int group = 0;   // 0 = standalone; matching non-zero groups trigger together
+};
+
+// ── Slope collision data ──────────────────────────────────────────────────────
+// Attached to slope tiles.  CollisionSystem uses slopeType to compute the
+// floor Y at the player's horizontal centre instead of using a flat AABB.
+struct SlopeCollider {
+    SlopeType slopeType = SlopeType::None;
+};
 
 // ── Ladder / climbing state ───────────────────────────────────────────────────
 struct ClimbState {
-    bool onLadder = false; // true while player overlaps a ladder tile this frame
-    bool climbing = false; // true while actively climbing (gravity suspended)
-    bool atTop    = false; // true when player reached the top and is hanging there
+    bool onLadder  = false; // true while player overlaps a ladder tile this frame
+    bool climbing  = false; // true while actively climbing (gravity suspended)
+    bool atTop     = false; // true when player reached the top and is hanging there
+    bool wPressed  = false; // event-driven: true while W is held on the ladder
+    bool sPressed  = false; // event-driven: true while S is held on the ladder
 };

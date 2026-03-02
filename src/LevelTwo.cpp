@@ -100,7 +100,6 @@ void LevelTwo::Update(float dt) {
     if (gameOver) return;
 
     MovementSystem(reg, dt, mWindow->GetWidth());
-    CenterPullSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
     PlayerStateSystem(reg);
     BoundsSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
     AnimationSystem(reg, dt);

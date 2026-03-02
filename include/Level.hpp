@@ -1,4 +1,5 @@
 #pragma once
+#include "Components.hpp" // for SlopeType
 #include <string>
 #include <vector>
 
@@ -19,6 +20,12 @@ struct TileSpawn {
     std::string imagePath;
     bool prop   = false; // rendered, no collision — background decoration
     bool ladder = false; // rendered, no solid collision — player can climb with W
+    bool      action      = false;           // rendered and collidable until the player touches it,
+                                             // then stops rendering and stops blocking (e.g. a door)
+    int       actionGroup = 0;              // 0 = standalone; non-zero = group ID.
+                                             // All action tiles sharing the same non-zero group
+                                             // are triggered simultaneously when any one is touched.
+    SlopeType slope       = SlopeType::None; // diagonal slope — collision rides the hypotenuse
 };
 
 enum class GravityMode { Platformer, WallRun };

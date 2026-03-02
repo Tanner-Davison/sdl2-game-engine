@@ -36,23 +36,24 @@ inline void PlayerStateSystem(entt::registry& reg) {
 
         if (inv.isInvincible) {
             frames  = &set.hurt;
-            fps     = 8.0f;
+            fps     = 12.0f;
             looping = false;
             id      = AnimationID::HURT;
         } else if (g.active && !g.isGrounded) {
             frames = &set.jump;
-            fps    = 10.0f;
+            fps    = 4.0f;
             id     = AnimationID::JUMP;
         } else if (g.isCrouching) {
             frames = &set.duck;
-            fps    = 8.0f;
+            fps    = 12.0f;
             id     = AnimationID::DUCK;
         } else if (moving) {
             frames = &set.walk;
+            fps    = 24.0f;
             id     = AnimationID::WALK;
         } else {
             frames = &set.idle;
-            fps    = 8.0f;
+            fps    = 12.0f;
             id     = AnimationID::IDLE;
         }
 
@@ -80,8 +81,10 @@ inline void PlayerStateSystem(entt::registry& reg) {
                 col.h = wantH;
 
                 if (g.direction == GravityDir::DOWN) {
-                    if (auto* roff = reg.try_get<RenderOffset>(entity))
-                        roff->x = ducking ? PLAYER_DUCK_ROFF_X : PLAYER_STAND_ROFF_X;
+                    if (auto* roff = reg.try_get<RenderOffset>(entity)) {
+                        roff->x = ducking ? PLAYER_DUCK_ROFF_X  : PLAYER_STAND_ROFF_X;
+                        roff->y = ducking ? PLAYER_DUCK_ROFF_Y  : PLAYER_STAND_ROFF_Y;
+                    }
                 }
             }
         }

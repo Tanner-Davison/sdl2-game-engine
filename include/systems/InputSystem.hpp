@@ -4,8 +4,8 @@
 #include <entt/entt.hpp>
 
 inline void InputSystem(entt::registry& reg, SDL_Event& e) {
-    auto view = reg.view<PlayerTag, Velocity, Renderable, GravityState>();
-    view.each([&e](Velocity& v, Renderable& r, GravityState& g) {
+    auto view = reg.view<PlayerTag, Velocity, Renderable, GravityState, ClimbState>();
+    view.each([&e](Velocity& v, Renderable& r, GravityState& g, ClimbState& climb) {
         // On the top wall the sprite is rotated 180 so left/right facing is inverted
         bool invertFlip = g.active && g.direction == GravityDir::UP;
         if (e.type == SDL_EVENT_KEY_DOWN) {
@@ -56,15 +56,27 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         if (e.type == SDL_EVENT_KEY_UP && e.key.key == SDLK_LCTRL)
             g.isCrouching = false;
 
+        // ── Event-driven W/S tracking for ladder climbing ─────────────────────────
+        // These flags are set/cleared by events so LadderSystem never polls the
+        // keyboard state — a tap only moves for exactly the frames the key is down.
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            if (e.key.key == SDLK_W) climb.wPressed = true;
+            if (e.key.key == SDLK_S) climb.sPressed = true;
+        }
+        if (e.type == SDL_EVENT_KEY_UP) {
+            if (e.key.key == SDLK_W) climb.wPressed = false;
+            if (e.key.key == SDLK_S) climb.sPressed = false;
+        }
+
         if (!g.active) {
-            if (e.type == SDL_EVENT_KEY_DOWN) {
-                switch (e.key.key) {
-                    case SDLK_W:
-                        v.dy = -v.speed;
-                        break;
-                    case SDLK_S:
-                        v.dy = v.speed;
-                        break;
+            // Only drive v.dy from input in free-float mode (wall-run gravity off).
+            // During ladder climbing LadderSystem owns all vertical movement.
+            if (!climb.climbing && !climb.atTop) {
+                if (e.type == SDL_EVENT_KEY_DOWN) {
+                    switch (e.key.key) {
+                        case SDLK_W: v.dy = -v.speed; break;
+                        case SDLK_S: v.dy =  v.speed; break;
+                    }
                 }
             }
         } else {

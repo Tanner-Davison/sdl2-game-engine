@@ -26,7 +26,7 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder };
+    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope };
     enum class PaletteTab { Tiles, Backgrounds };
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -120,11 +120,11 @@ class LevelEditorScene : public Scene {
 
     // ── Toolbar buttons ───────────────────────────────────────────────────────
     SDL_Rect btnCoin{}, btnEnemy{}, btnErase{}, btnPlayerStart{};
-    SDL_Rect btnTile{}, btnResize{}, btnProp{}, btnLadder{}, btnSave{}, btnLoad{}, btnPlay{}, btnClear{}, btnGravity{};
+    SDL_Rect btnTile{}, btnResize{}, btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnSave{}, btnLoad{}, btnPlay{}, btnClear{}, btnGravity{};
 
     // ── Labels ────────────────────────────────────────────────────────────────
     std::unique_ptr<Text> lblCoin, lblEnemy, lblErase, lblPlayer;
-    std::unique_ptr<Text> lblTile, lblResize, lblProp, lblLadder, lblSave, lblLoad, lblPlay, lblClear, lblGravity;
+    std::unique_ptr<Text> lblTile, lblResize, lblProp, lblLadder, lblAction, lblSlope, lblSave, lblLoad, lblPlay, lblClear, lblGravity;
     std::unique_ptr<Text> lblStatus, lblTool;
 
     // ── Helpers ───────────────────────────────────────────────────────────────

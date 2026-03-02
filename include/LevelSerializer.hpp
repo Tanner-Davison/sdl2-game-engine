@@ -23,14 +23,21 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
         j["enemies"].push_back({{"x", e.x}, {"y", e.y}, {"speed", e.speed}});
 
     j["tiles"] = json::array();
-    for (const auto& t : level.tiles)
+    for (const auto& t : level.tiles) {
+        std::string slopeStr = "none";
+        if (t.slope == SlopeType::DiagUpRight) slopeStr = "diagupright";
+        if (t.slope == SlopeType::DiagUpLeft)  slopeStr = "diagupleft";
         j["tiles"].push_back({{"x", t.x},
                               {"y", t.y},
                               {"w", t.w},
                               {"h", t.h},
                               {"img", t.imagePath},
                               {"prop", t.prop},
-                              {"ladder", t.ladder}});
+                              {"ladder", t.ladder},
+                              {"action", t.action},
+                              {"actionGroup", t.actionGroup},
+                              {"slope", slopeStr}});
+    }
 
     std::ofstream file(path);
     if (!file.is_open()) {
@@ -77,14 +84,22 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             {e.value("x", 0.0f), e.value("y", 0.0f), e.value("speed", 120.0f)});
 
     out.tiles.clear();
-    for (const auto& t : j.value("tiles", json::array()))
+    for (const auto& t : j.value("tiles", json::array())) {
+        std::string slopeStr = t.value("slope", std::string{"none"});
+        SlopeType slope = SlopeType::None;
+        if (slopeStr == "diagupright") slope = SlopeType::DiagUpRight;
+        if (slopeStr == "diagupleft")  slope = SlopeType::DiagUpLeft;
         out.tiles.push_back({t.value("x", 0.0f),
                              t.value("y", 0.0f),
                              t.value("w", 40),
                              t.value("h", 40),
                              t.value("img", std::string{}),
                              t.value("prop", false),
-                             t.value("ladder", false)});
+                             t.value("ladder", false),
+                             t.value("action", false),
+                             t.value("actionGroup", 0),
+                             slope});
+    }
 
     std::print("Level loaded: {} ({} coins, {} enemies)\n",
                out.name,
