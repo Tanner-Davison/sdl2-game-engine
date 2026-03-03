@@ -6,12 +6,27 @@
 #include <cmath>
 #include <entt/entt.hpp>
 #include <vector>
-#define DEBUG_HITBOXES
-inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
+
+// camX/camY: world-space position of the top-left corner of the viewport.
+// All world positions are offset by (-camX, -camY) before blitting.
+// Entities whose bounding rect lies fully outside the viewport are culled.
+inline void RenderSystem(entt::registry& reg, SDL_Surface* screen,
+                         float camX = 0.0f, float camY = 0.0f) {
+    const int vw = screen->w;
+    const int vh = screen->h;
+
     // Cache format details once per frame — same for all entities
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
 
-    // ── Pass 1: draw tiles in strict spawn order (lower entity ID = placed first = drawn first)
+    // Returns true when a world-space rect is completely off-screen.
+    auto culled = [&](float wx, float wy, int w, int h) -> bool {
+        return wx + w  <= camX      ||
+               wx      >= camX + vw ||
+               wy + h  <= camY      ||
+               wy      >= camY + vh;
+    };
+
+    // ── Pass 1: tiles in strict spawn order ──────────────────────────────────
     {
         auto tileView   = reg.view<Transform, Renderable, AnimationState, TileTag>();
         auto ladderView = reg.view<Transform, Renderable, AnimationState, LadderTag>();
@@ -29,76 +44,78 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
             auto& r    = reg.get<Renderable>(entity);
             auto& anim = reg.get<AnimationState>(entity);
             if (r.frames.empty()) continue;
-            const SDL_Rect& src  = r.frames[anim.currentFrame];
-            SDL_Rect        dest = {(int)t.x, (int)t.y, src.w, src.h};
-            SDL_BlitSurface(r.sheet, &src, screen, &dest);
+            if (culled(t.x, t.y, r.frames[anim.currentFrame].w,
+                                  r.frames[anim.currentFrame].h)) continue;
 
-// Slope diagonal debug line intentionally removed -- it was visually
-// misleading at slope-to-slope seams and not needed for gameplay.
+            const SDL_Rect& src  = r.frames[anim.currentFrame];
+            int sx = (int)(t.x - camX);
+            int sy = (int)(t.y - camY);
+            SDL_Rect dest = {sx, sy, src.w, src.h};
+
+            if (const auto* fs = reg.try_get<FloatState>(entity);
+                fs && std::abs(fs->spinAngle) > 0.1f) {
+                SDL_Surface* rotated = RotateSurfaceDeg(r.sheet, (int)fs->spinAngle);
+                if (rotated) {
+                    SDL_BlitSurfaceScaled(rotated, nullptr, screen, &dest, SDL_SCALEMODE_LINEAR);
+                    SDL_DestroySurface(rotated);
+                } else {
+                    SDL_BlitSurface(r.sheet, &src, screen, &dest);
+                }
+            } else {
+                SDL_BlitSurface(r.sheet, &src, screen, &dest);
+            }
         }
     }
 
-    // ── Pass 2: draw everything else (player, enemies, coins) — always on top of tiles
+    // ── Pass 2: player, enemies, coins — always on top of tiles ─────────────
     auto view = reg.view<Transform, Renderable, AnimationState>(
         entt::exclude<TileTag, LadderTag, PropTag>);
-    view.each([&reg, screen, fmt](entt::entity          entity,
-                                  const Transform&      t,
-                                  Renderable&           r,
-                                  const AnimationState& anim) {
+
+    view.each([&](entt::entity entity, const Transform& t, Renderable& r,
+                  const AnimationState& anim) {
         if (r.frames.empty()) return;
 
         const SDL_Rect& src = r.frames[anim.currentFrame];
-        auto*           g   = reg.try_get<GravityState>(entity);
-        auto*           inv = reg.try_get<InvincibilityTimer>(entity);
-        auto*           col = reg.try_get<Collider>(entity);
 
-        // Fast path: no flip, no rotation — blit directly from sheet to screen
+        // Sprite size for culling — use the raw src rect; rotated frames are the same area
+        if (culled(t.x, t.y, src.w, src.h)) return;
+
+        auto* g   = reg.try_get<GravityState>(entity);
+        auto* inv = reg.try_get<InvincibilityTimer>(entity);
+        auto* col = reg.try_get<Collider>(entity);
+
         bool needsFlip     = r.flipH;
         bool needsRotation = g && g->active && g->direction != GravityDir::DOWN;
+
         if (!needsFlip && !needsRotation) {
-            if (inv && inv->isInvincible)
+            auto* hz   = reg.try_get<HazardState>(entity);
+            if (inv && inv->isInvincible) {
                 if (static_cast<int>(inv->remaining * 10.0f) % 2 == 0)
                     SDL_SetSurfaceColorMod(r.sheet, 255, 0, 0);
+            } else if (hz && hz->active) {
+                if (static_cast<int>(hz->flashTimer * 8.0f) % 2 == 0)
+                    SDL_SetSurfaceColorMod(r.sheet, 255, 80, 80);
+            }
 
-            auto*    roff2 = reg.try_get<RenderOffset>(entity);
-            int      rx    = static_cast<int>(t.x) + (roff2 ? roff2->x : 0);
-            int      ry    = static_cast<int>(t.y) + (roff2 ? roff2->y : 0);
-            SDL_Rect dest  = {rx, ry, src.w, src.h};
+            auto* roff = reg.try_get<RenderOffset>(entity);
+            int   rx   = (int)(t.x - camX) + (roff ? roff->x : 0);
+            int   ry   = (int)(t.y - camY) + (roff ? roff->y : 0);
+            SDL_Rect dest = {rx, ry, src.w, src.h};
             SDL_BlitSurface(r.sheet, &src, screen, &dest);
             SDL_SetSurfaceColorMod(r.sheet, 255, 255, 255);
-
-#ifdef DEBUG_HITBOXES
-            if (col) {
-                Uint32        color = reg.all_of<PlayerTag>(entity)
-                                          ? SDL_MapRGB(fmt, nullptr, 0, 255, 0)
-                                          : SDL_MapRGB(fmt, nullptr, 255, 0, 0);
-                constexpr int thick = 1;
-                int           hx = static_cast<int>(t.x), hy = static_cast<int>(t.y);
-                SDL_Rect      top    = {hx, hy, col->w, thick};
-                SDL_Rect      bottom = {hx, hy + col->h, col->w, thick};
-                SDL_Rect      left_  = {hx, hy, thick, col->h};
-                SDL_Rect      right_ = {hx + col->w, hy, thick, col->h};
-                SDL_FillSurfaceRect(screen, &top, color);
-                SDL_FillSurfaceRect(screen, &bottom, color);
-                SDL_FillSurfaceRect(screen, &left_, color);
-                SDL_FillSurfaceRect(screen, &right_, color);
-            }
-#endif
             return;
         }
 
-        // Slow path: needs flip and/or rotation — extract frame into temp surface
+        // Slow path: flip / rotation
         SDL_Surface* frame    = SDL_CreateSurface(src.w, src.h, r.sheet->format);
         bool         ownFrame = true;
         SDL_SetSurfaceBlendMode(frame, SDL_BLENDMODE_BLEND);
         SDL_BlitSurface(r.sheet, &src, frame, nullptr);
 
-        // Horizontal flip — build per-frame cache lazily, invalidate on anim change
         if (r.flipH) {
             auto* cache = reg.try_get<FlipCache>(entity);
             if (cache && static_cast<int>(cache->frames.size()) != anim.totalFrames) {
-                for (auto* s : cache->frames)
-                    if (s) SDL_DestroySurface(s);
+                for (auto* s : cache->frames) if (s) SDL_DestroySurface(s);
                 cache->frames.assign(anim.totalFrames, nullptr);
             }
             if (!cache) {
@@ -129,7 +146,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
             ownFrame = false;
         }
 
-        // Gravity rotation
         if (g && g->active) {
             SDL_Surface* rotated = nullptr;
             switch (g->direction) {
@@ -145,9 +161,8 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
             }
         }
 
-        // Wall-flush position adjustment
-        int   renderX = static_cast<int>(t.x);
-        int   renderY = static_cast<int>(t.y);
+        int   renderX = (int)(t.x - camX);
+        int   renderY = (int)(t.y - camY);
         auto* roff    = reg.try_get<RenderOffset>(entity);
 
         if (g && g->active) {
@@ -167,7 +182,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
                         renderY += cx;
                         break;
                     case GravityDir::RIGHT:
-                        renderX = static_cast<int>(t.x) + col->h - frame->w - fy;
+                        renderX = (int)(t.x - camX) + col->h - frame->w - fy;
                         renderY += cx;
                         break;
                 }
@@ -176,39 +191,20 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen) {
             if (roff) { renderX += roff->x; renderY += roff->y; }
         }
 
-        // Invincibility flash
-        if (inv && inv->isInvincible)
-            if (static_cast<int>(inv->remaining * 10.0f) % 2 == 0)
-                SDL_SetSurfaceColorMod(frame, 255, 0, 0);
+        {
+            auto* hz2 = reg.try_get<HazardState>(entity);
+            if (inv && inv->isInvincible) {
+                if (static_cast<int>(inv->remaining * 10.0f) % 2 == 0)
+                    SDL_SetSurfaceColorMod(frame, 255, 0, 0);
+            } else if (hz2 && hz2->active) {
+                if (static_cast<int>(hz2->flashTimer * 8.0f) % 2 == 0)
+                    SDL_SetSurfaceColorMod(frame, 255, 80, 80);
+            }
+        }
 
         SDL_Rect dest = {renderX, renderY, frame->w, frame->h};
         SDL_BlitSurface(frame, nullptr, screen, &dest);
         SDL_SetSurfaceColorMod(frame, 255, 255, 255);
         if (ownFrame) SDL_DestroySurface(frame);
-
-#ifdef DEBUG_HITBOXES
-        if (col) {
-            Uint32        color = reg.all_of<PlayerTag>(entity)
-                                      ? SDL_MapRGB(fmt, nullptr, 0, 255, 0)
-                                      : SDL_MapRGB(fmt, nullptr, 255, 0, 0);
-            constexpr int thick = 1;
-            int hx = static_cast<int>(t.x);
-            int hy = static_cast<int>(t.y);
-            int cw = col->w;
-            int ch = col->h;
-            if (g && g->active &&
-                (g->direction == GravityDir::LEFT || g->direction == GravityDir::RIGHT)) {
-                cw = col->h; ch = col->w;
-            }
-            SDL_Rect top    = {hx, hy, cw, thick};
-            SDL_Rect bottom = {hx, hy + ch, cw, thick};
-            SDL_Rect left_  = {hx, hy, thick, ch};
-            SDL_Rect right_ = {hx + cw, hy, thick, ch};
-            SDL_FillSurfaceRect(screen, &top, color);
-            SDL_FillSurfaceRect(screen, &bottom, color);
-            SDL_FillSurfaceRect(screen, &left_, color);
-            SDL_FillSurfaceRect(screen, &right_, color);
-        }
-#endif
     });
 }

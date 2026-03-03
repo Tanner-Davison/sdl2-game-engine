@@ -44,6 +44,7 @@ void GameScene::Load(Window& window) {
     knightJumpSheet  = loadAnim("Jump Start",    "0_Knight_Jump Start_",    6);
     knightFallSheet  = loadAnim("Falling Down",  "0_Knight_Falling Down_",  6);
     knightSlideSheet = loadAnim("Sliding",       "0_Knight_Sliding_",       6);
+    knightSlashSheet = loadAnim("Slashing",      "0_Knight_Slashing_",      12);
 
     idleFrames  = knightIdleSheet->GetAnimation("0_Knight_Idle_");
     walkFrames  = knightWalkSheet->GetAnimation("0_Knight_Walking_");
@@ -51,6 +52,7 @@ void GameScene::Load(Window& window) {
     hurtFrames  = knightHurtSheet->GetAnimation("0_Knight_Hurt_");
     duckFrames  = knightSlideSheet->GetAnimation("0_Knight_Sliding_");
     frontFrames = knightFallSheet->GetAnimation("0_Knight_Falling Down_");
+    slashFrames = knightSlashSheet->GetAnimation("0_Knight_Slashing_");
 
     enemySheet      = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
@@ -148,18 +150,63 @@ void GameScene::Update(float dt) {
     }
     if (gameOver) return;
 
+    FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
     MovementSystem(reg, dt, mWindow->GetWidth());
     BoundsSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight(),
-                 mLevel.gravityMode == GravityMode::WallRun);
+                 mLevel.gravityMode == GravityMode::WallRun,
+                 mLevelW, mLevelH);
     PlayerStateSystem(reg);
     AnimationSystem(reg, dt);
 
     // CollisionSystem now returns a result instead of mutating our variables directly
     CollisionResult collision = CollisionSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
     coinCount  += collision.coinsCollected;
-    stompCount += collision.enemiesStomped;
+    stompCount += collision.enemiesStomped + collision.enemiesSlashed;
     if (collision.playerDied) gameOver = true;
+
+    // ── Hazard damage ─────────────────────────────────────────────────────────
+    // While on a hazard tile: drain HP at HAZARD_DAMAGE_PER_SEC, advance flash
+    // timer, and force the hurt animation via HazardState.  The moment the
+    // player steps off, active is cleared and the animation reverts naturally
+    // through PlayerStateSystem next frame.
+    {
+        auto hView = reg.view<PlayerTag, Health, HazardState, AnimationState,
+                              Renderable, AnimationSet>();
+        hView.each([&](Health& hp, HazardState& hz,
+                       AnimationState& anim, Renderable& r,
+                       const AnimationSet& set) {
+            hz.active = collision.onHazard;
+            if (hz.active) {
+                // Drain HP
+                hp.current -= HAZARD_DAMAGE_PER_SEC * dt;
+                if (hp.current <= 0.0f) { hp.current = 0.0f; gameOver = true; }
+
+                // Advance flash timer — 8 Hz pulse
+                hz.flashTimer += dt;
+
+                // Force hurt animation while on hazard
+                if (anim.currentAnim != AnimationID::HURT) {
+                    r.sheet           = set.hurtSheet;
+                    r.frames          = set.hurt;
+                    anim.currentFrame = 0;
+                    anim.timer        = 0.0f;
+                    anim.fps          = 12.0f;
+                    anim.looping      = true;
+                    anim.totalFrames  = (int)set.hurt.size();
+                    anim.currentAnim  = AnimationID::HURT;
+                }
+            } else {
+                // Reset flash timer so the flash stops instantly when leaving
+                hz.flashTimer = 0.0f;
+                // Let PlayerStateSystem restore the correct animation next frame
+                if (anim.currentAnim == AnimationID::HURT) {
+                    // Nudge the anim ID to NONE so PlayerStateSystem re-evaluates
+                    anim.currentAnim = AnimationID::NONE;
+                }
+            }
+        });
+    }
 
     // Jump — skipped in OpenWorld mode (no gravity, no jumping)
     if (mLevel.gravityMode != GravityMode::OpenWorld) {
@@ -175,6 +222,18 @@ void GameScene::Update(float dt) {
 
     if (totalCoins > 0 && coinCount >= totalCoins)
         levelComplete = true;
+
+    // ── Camera update ───────────────────────────────────────────────────────────
+    {
+        auto pView = reg.view<PlayerTag, Transform, Collider>();
+        pView.each([&](const Transform& pt, const Collider& pc) {
+            float cx = pt.x + pc.w * 0.5f;
+            float cy = pt.y + pc.h * 0.5f;
+            mCamera.Update(cx, cy,
+                           mWindow->GetWidth(), mWindow->GetHeight(),
+                           mLevelW, mLevelH, dt);
+        });
+    }
 }
 
 void GameScene::Render(Window& window) {
@@ -182,7 +241,7 @@ void GameScene::Render(Window& window) {
     background->Render(window.GetSurface());
 
     if (levelComplete) {
-        RenderSystem(reg, window.GetSurface());
+        RenderSystem(reg, window.GetSurface(), mCamera.x, mCamera.y);
         HUDSystem(reg, window.GetSurface(), window.GetWidth(),
                   healthText.get(), gravityText.get(),
                   coinText.get(), coinCount,
@@ -197,7 +256,8 @@ void GameScene::Render(Window& window) {
     } else {
         locationText->Render(window.GetSurface());
         actionText->Render(window.GetSurface());
-        RenderSystem(reg, window.GetSurface());
+        RenderSystem(reg, window.GetSurface(), mCamera.x, mCamera.y);
+
         HUDSystem(reg, window.GetSurface(), window.GetWidth(),
                   healthText.get(), gravityText.get(),
                   coinText.get(), coinCount,
@@ -259,6 +319,34 @@ void GameScene::Spawn() {
 
     totalCoins = static_cast<int>(reg.view<CoinTag>().size());
 
+    // ── Compute level bounds from tile extents ────────────────────────────────
+    // Use screen size as the minimum so single-screen levels still clamp correctly.
+    mLevelW = static_cast<float>(mWindow->GetWidth());
+    mLevelH = static_cast<float>(mWindow->GetHeight());
+    for (const auto& ts : mLevel.tiles) {
+        float right  = ts.x + ts.w;
+        float bottom = ts.y + ts.h;
+        if (right  > mLevelW) mLevelW = right;
+        if (bottom > mLevelH) mLevelH = bottom;
+    }
+    // Add one screen of padding so tiles at the far edge aren't flush against the boundary
+    mLevelW += static_cast<float>(mWindow->GetWidth())  * 0.25f;
+    mLevelH += static_cast<float>(mWindow->GetHeight()) * 0.25f;
+
+    // Snap camera to player position immediately so first frame has no black borders
+    {
+        float px = mLevel.player.x + PLAYER_STAND_WIDTH  * 0.5f;
+        float py = mLevel.player.y + PLAYER_STAND_HEIGHT * 0.5f;
+        mCamera.x = px - mWindow->GetWidth()  * 0.5f;
+        mCamera.y = py - mWindow->GetHeight() * 0.5f;
+        if (mCamera.x < 0.0f) mCamera.x = 0.0f;
+        if (mCamera.y < 0.0f) mCamera.y = 0.0f;
+        if (mCamera.x + mWindow->GetWidth()  > mLevelW) mCamera.x = mLevelW - mWindow->GetWidth();
+        if (mCamera.y + mWindow->GetHeight() > mLevelH) mCamera.y = mLevelH - mWindow->GetHeight();
+        if (mCamera.x < 0.0f) mCamera.x = 0.0f;
+        if (mCamera.y < 0.0f) mCamera.y = 0.0f;
+    }
+
     // ── Player spawn ──────────────────────────────────────────────────────────
     float playerX = mLevelPath.empty()
                       ? (float)(mWindow->GetWidth() / 2 - 33)
@@ -288,6 +376,8 @@ void GameScene::Spawn() {
     if (mLevel.gravityMode == GravityMode::OpenWorld)
         reg.emplace<OpenWorldTag>(player);
     reg.emplace<ClimbState>(player);
+    reg.emplace<HazardState>(player);
+    reg.emplace<AttackState>(player);
     reg.emplace<AnimationSet>(player, AnimationSet{
         .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetSurface(),
         .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetSurface(),
@@ -295,6 +385,7 @@ void GameScene::Spawn() {
         .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetSurface(),
         .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetSurface(),
         .front      = frontFrames, .frontSheet = knightFallSheet->GetSurface(),
+        .slash      = slashFrames, .slashSheet = knightSlashSheet->GetSurface(),
     });
 
     // ── Spawn tiles — only from level file ────────────────────────────────────
@@ -354,9 +445,25 @@ void GameScene::Spawn() {
             reg.emplace<TileTag>(tile);
             reg.emplace<Collider>(tile, colW, colH);
             reg.emplace<SlopeCollider>(tile, ts.slope);
+        } else if (ts.hazard) {
+            // Hazard: passthrough tile (no TileTag) — the player walks into it
+            // and takes damage.  No push-out; overlap is detected by CollisionSystem.
+            reg.emplace<HazardTag>(tile);
+            reg.emplace<Collider>(tile, colW, colH);
         } else {
             reg.emplace<Collider>(tile, colW, colH);
             reg.emplace<TileTag>(tile);
+        }
+
+        // Anti-gravity tiles float and are pushable
+        if (ts.antiGravity) {
+            reg.emplace<FloatTag>(tile);
+            FloatState fs;
+            fs.baseY    = ts.y;
+            fs.bobAmp   = 4.0f + (rand() % 50) * 0.08f; // 4–8 px
+            fs.bobSpeed = 1.4f + (rand() % 80) * 0.01f;
+            fs.bobPhase = (rand() % 628) * 0.01f;
+            reg.emplace<FloatState>(tile, fs);
         }
 
         // Attach offset component when the hitbox doesn't start at tile origin
@@ -369,7 +476,7 @@ void GameScene::Spawn() {
     }
 
     // ── Spawn enemies ─────────────────────────────────────────────────────────
-    auto spawnEnemy = [&](float x, float y, float speed) {
+    auto spawnEnemy = [&](float x, float y, float speed, bool antiGrav = false) {
         float dx    = (rand() % 2 == 0) ? speed : -speed;
         auto  enemy = reg.create();
         reg.emplace<Transform>(enemy, x, y);
@@ -378,12 +485,23 @@ void GameScene::Spawn() {
         reg.emplace<Renderable>(enemy, enemySheet->GetSurface(), enemyWalkFrames, false);
         reg.emplace<Collider>(enemy, SLIME_SPRITE_WIDTH, SLIME_SPRITE_HEIGHT);
         reg.emplace<EnemyTag>(enemy);
+        Health eh; eh.current = SLIME_MAX_HEALTH; eh.max = SLIME_MAX_HEALTH;
+        reg.emplace<Health>(enemy, eh);
+        if (antiGrav) {
+            reg.emplace<FloatTag>(enemy);
+            FloatState fs;
+            fs.baseY     = y;
+            fs.bobAmp    = 5.0f + (rand() % 40) * 0.1f; // 5–9 px
+            fs.bobSpeed  = 1.6f + (rand() % 60) * 0.01f; // 1.6–2.2 rad/s
+            fs.bobPhase  = (rand() % 628) * 0.01f;        // 0–2π
+            reg.emplace<FloatState>(enemy, fs);
+        }
     };
 
     if (!mLevelPath.empty()) {
         // Level file loaded — spawn only what the level defines (may be zero)
         for (const auto& e : mLevel.enemies)
-            spawnEnemy(e.x, e.y, e.speed);
+            spawnEnemy(e.x, e.y, e.speed, e.antiGravity);
     } else {
         // No level file — sandbox/freeplay mode, spawn random enemies
         for (int i = 0; i < GRAVITYSLUGSCOUNT; ++i) {
@@ -404,5 +522,6 @@ void GameScene::Respawn() {
     levelCompleteTimer = 2.0f;
     coinCount          = 0;
     stompCount         = 0;
+    mCamera            = Camera{}; // reset to origin; Spawn() will snap it to player
     Spawn();
 }

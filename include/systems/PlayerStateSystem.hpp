@@ -26,6 +26,37 @@ inline void PlayerStateSystem(entt::registry& reg) {
                      AnimationState&           anim,
                      const AnimationSet&       set,
                      const InvincibilityTimer& inv) {
+        // ── Attack state: start or continue slash ──────────────────────────
+        if (auto* atk = reg.try_get<AttackState>(entity)) {
+            if (atk->attackPressed && !inv.isInvincible) {
+                atk->attackPressed = false;
+                atk->isAttacking   = true;
+                r.sheet            = set.slashSheet;
+                r.frames           = set.slash;
+                anim.currentFrame  = 0;
+                anim.timer         = 0.0f;
+                anim.fps           = 18.0f;
+                anim.looping       = false;
+                anim.totalFrames   = (int)set.slash.size();
+                anim.currentAnim   = AnimationID::SLASH;
+                if (reg.all_of<FlipCache>(entity)) {
+                    auto& fc = reg.get<FlipCache>(entity);
+                    for (auto* s : fc.frames) if (s) SDL_DestroySurface(s);
+                    fc.frames.clear();
+                }
+                return;
+            }
+            if (atk->isAttacking) {
+                if (anim.currentAnim == AnimationID::SLASH &&
+                    anim.currentFrame >= anim.totalFrames - 1) {
+                    atk->isAttacking = false;
+                    anim.currentAnim = AnimationID::NONE;
+                } else if (!inv.isInvincible) {
+                    return; // hold slash until last frame
+                }
+            }
+        }
+
         // ── Determine target animation ────────────────────────────────────────
         const std::vector<SDL_Rect>* frames  = nullptr;
         float                        fps     = 12.0f;
@@ -114,6 +145,9 @@ inline void PlayerStateSystem(entt::registry& reg) {
                 break;
             case AnimationID::FRONT:
                 sheet = set.frontSheet;
+                break;
+            case AnimationID::SLASH:
+                sheet = set.slashSheet;
                 break;
             default:
                 break;

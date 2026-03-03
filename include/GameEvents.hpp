@@ -16,7 +16,9 @@ struct CollisionResult {
     bool                      playerDied           = false;
     int                       coinsCollected       = 0;
     int                       enemiesStomped       = 0;
-    // Action tiles whose Renderable/TileTag/Collider should be stripped this frame.
-    // CollisionSystem populates this; the Scene commits the mutations after iteration.
+    bool                      onHazard             = false; // true if player overlaps a HazardTag tile this frame
+    // Action tiles triggered by a slash this frame.
+    // CollisionSystem populates this; the Scene strips Renderable/TileTag/Collider after iteration.
     std::vector<entt::entity> actionTilesTriggered;
+    int                       enemiesSlashed = 0; // enemies killed by slash this frame
 };

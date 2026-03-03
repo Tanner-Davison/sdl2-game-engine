@@ -2,6 +2,7 @@
 #include "GameScene.hpp"
 #include "TitleScene.hpp"
 #include "SurfaceUtils.hpp"
+#include <climits>
 #include <print>
 
 namespace fs = std::filesystem;
@@ -112,6 +113,9 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
 LevelEditorScene::ResizeEdge LevelEditorScene::DetectResizeEdge(int idx, int mx, int my) const {
     if (idx < 0 || idx >= (int)mLevel.tiles.size()) return ResizeEdge::None;
     const auto& t = mLevel.tiles[idx];
+    // mx/my are screen-space; convert to world space to compare with tile world coords
+    mx = (int)(mx + mCamX);
+    my = (int)(my + mCamY);
     int rx = (int)t.x, ry = (int)t.y, rw = t.w, rh = t.h;
 
     // Must be inside (or very near) the tile first
@@ -211,8 +215,8 @@ void LevelEditorScene::Load(Window& window) {
     }
 
     if (mLevel.player.x == 0 && mLevel.player.y == 0) {
-        mLevel.player.x = static_cast<float>(CanvasW() / 2 - 16);
-        mLevel.player.y = static_cast<float>(window.GetHeight() - 60);
+        mLevel.player.x = static_cast<float>(CanvasW() / 2 - PLAYER_STAND_WIDTH / 2);
+        mLevel.player.y = static_cast<float>(window.GetHeight() - PLAYER_STAND_HEIGHT - GRID * 2);
     }
 
     // Load the generic folder icon once — shared by all folder palette cells.
@@ -255,6 +259,7 @@ void LevelEditorScene::Load(Window& window) {
         btnTile        = nextTool();
         btnErase       = nextTool();
         btnPlayerStart = nextTool();
+        btnSelect      = nextTool();
         gap();
         // Group 2 — Modifiers
         btnProp        = nextTool();
@@ -263,6 +268,8 @@ void LevelEditorScene::Load(Window& window) {
         btnSlope       = nextTool();
         btnResize      = nextTool();
         btnHitbox      = nextTool();
+        btnHazard        = nextTool();
+        btnAntiGrav      = nextTool();
         gap();
         // Group 3 — Actions (slightly wider)
         btnGravity     = nextAct();
@@ -291,11 +298,13 @@ void LevelEditorScene::Load(Window& window) {
     lblTile        = mkLbl("Tile",    btnTile);
     lblErase       = mkLbl("Erase",   btnErase);
     lblPlayer      = mkLbl("Player",  btnPlayerStart);
+    lblSelect      = mkLbl("Select",  btnSelect, 11);
     hintCoin       = mkHint("1", btnCoin);
     hintEnemy      = mkHint("2", btnEnemy);
     hintTile       = mkHint("3", btnTile);
     hintErase      = mkHint("4", btnErase);
     hintPlayer     = mkHint("5", btnPlayerStart);
+    hintSelect     = mkHint("Q", btnSelect);
 
     // Group 2 labels + hints
     lblProp        = mkLbl("Prop",    btnProp);
@@ -309,7 +318,9 @@ void LevelEditorScene::Load(Window& window) {
     hintSlope      = mkHint("-", btnSlope);
     hintResize     = mkHint("R", btnResize);
     lblHitbox      = mkLbl("Hitbox",  btnHitbox);
-    // (no shortcut hint for hitbox — button is already narrow)
+    lblHazard        = mkLbl("Hazard",  btnHazard);
+    lblAntiGrav      = mkLbl("Float",   btnAntiGrav,     11);
+    // (no shortcut hints for hitbox/hazard/break/float — buttons are narrow)
 
     // Group 3 labels (no shortcut hints — these are action buttons)
     lblSave        = mkLbl("Save",    btnSave);
@@ -388,6 +399,32 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
+    // ── Pan: middle-mouse drag OR Ctrl + left-mouse drag ────────────────────
+    auto startPan = [&](int mx, int my) {
+        mIsPanning    = true;
+        mPanStartX    = mx;
+        mPanStartY    = my;
+        mPanCamStartX = mCamX;
+        mPanCamStartY = mCamY;
+    };
+
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_MIDDLE) {
+        int mx = (int)e.button.x, my = (int)e.button.y;
+        if (mx < CanvasW() && my >= TOOLBAR_H) { startPan(mx, my); return true; }
+    }
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+        if (SDL_GetModState() & SDL_KMOD_CTRL) {
+            int mx = (int)e.button.x, my = (int)e.button.y;
+            if (mx < CanvasW() && my >= TOOLBAR_H) { startPan(mx, my); return true; }
+        }
+    }
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+        (e.button.button == SDL_BUTTON_MIDDLE || e.button.button == SDL_BUTTON_LEFT)) {
+        if (mIsPanning) { mIsPanning = false; return true; }
+    }
+    // Pan motion is handled in Update() by polling SDL_GetMouseState every frame
+    // for smoothness — no event handler needed here.
+
     // ── Mouse wheel ───────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
@@ -411,6 +448,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     // ── Key down ──────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_KEY_DOWN) {
         switch (e.key.key) {
+            case SDLK_Q:
+                mActiveTool=Tool::Select; lblTool->CreateSurface("Select");
+                mSelBoxing=false; mSelDragging=false;
+                break;
             case SDLK_1: mActiveTool=Tool::Coin;        lblTool->CreateSurface("Coin");   break;
             case SDLK_2: mActiveTool=Tool::Enemy;       lblTool->CreateSurface("Enemy");  break;
             case SDLK_3: mActiveTool=Tool::Tile;        lblTool->CreateSurface("Tile");
@@ -453,16 +494,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 SetStatus(gStatus);
                 break;
             }
-            case SDLK_ESCAPE:
-                // Navigate back up when pressing Esc in tile browser
-                if (mActiveTab == PaletteTab::Tiles && mTileCurrentDir != TILE_ROOT) {
-                    fs::path parent = fs::path(mTileCurrentDir).parent_path();
-                    std::string up = parent.string();
-                    // Don't go above root
-                    if (up.rfind(TILE_ROOT, 0) != 0) up = TILE_ROOT;
-                    LoadTileView(up);
-                }
-                break;
+
             case SDLK_I:
                 mImportInputActive = true; mImportInputText.clear();
                 SDL_StartTextInput(mWindow ? mWindow->GetRaw() : nullptr);
@@ -483,6 +515,32 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     if (!mLevel.tiles.empty())        { mLevel.tiles.pop_back();   SetStatus("Undo tile"); }
                     else if (!mLevel.coins.empty())   { mLevel.coins.pop_back();   SetStatus("Undo coin"); }
                     else if (!mLevel.enemies.empty()) { mLevel.enemies.pop_back(); SetStatus("Undo enemy"); }
+                }
+                break;
+            case SDLK_DELETE: case SDLK_BACKSPACE:
+                // Delete all selected tiles
+                if (!mSelIndices.empty()) {
+                    // Sort descending so erasing by index doesn't shift remaining indices
+                    std::sort(mSelIndices.begin(), mSelIndices.end(), std::greater<int>());
+                    for (int idx : mSelIndices)
+                        if (idx >= 0 && idx < (int)mLevel.tiles.size())
+                            mLevel.tiles.erase(mLevel.tiles.begin() + idx);
+                    SetStatus("Deleted " + std::to_string(mSelIndices.size()) + " tile(s)");
+                    mSelIndices.clear();
+                }
+                break;
+            case SDLK_ESCAPE:
+                if (mActiveTool == Tool::Select) {
+                    mSelIndices.clear(); mSelBoxing = false; mSelDragging = false;
+                    SetStatus("Selection cleared");
+                    break; // don't fall through to the tile-browser Esc handler
+                }
+                // Navigate back up in tile browser
+                if (mActiveTab == PaletteTab::Tiles && mTileCurrentDir != TILE_ROOT) {
+                    fs::path parent = fs::path(mTileCurrentDir).parent_path();
+                    std::string up = parent.string();
+                    if (up.rfind(TILE_ROOT, 0) != 0) up = TILE_ROOT;
+                    LoadTileView(up);
                 }
                 break;
             default: break;
@@ -540,6 +598,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         // Toolbar
         auto tb = [&](SDL_Rect r, Tool t, const std::string& l) {
             if (!HitTest(r,mx,my)) return false;
+            if (t != Tool::Select) { mSelIndices.clear(); mSelBoxing = false; mSelDragging = false; }
             mActiveTool = t; lblTool->CreateSurface(l); return true;
         };
         if (tb(btnCoin,        Tool::Coin,        "Coin"))   return true;
@@ -547,12 +606,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (tb(btnTile,        Tool::Tile,        "Tile"))   return true;
         if (tb(btnErase,       Tool::Erase,       "Erase"))  return true;
         if (tb(btnPlayerStart, Tool::PlayerStart, "Player")) return true;
+        if (HitTest(btnSelect,mx,my)) {
+            mActiveTool=Tool::Select; lblTool->CreateSurface("Select");
+            mSelBoxing=false; mSelDragging=false;
+            return true;
+        }
         if (tb(btnProp,        Tool::Prop,        "Prop"))   return true;
         if (tb(btnLadder,      Tool::Ladder,      "Ladder")) return true;
         if (tb(btnAction,      Tool::Action,      "Action")) return true;
         if (tb(btnSlope,       Tool::Slope,       "Slope"))  return true;
         if (HitTest(btnResize,mx,my)) { mActiveTool=Tool::Resize; lblTool->CreateSurface("Resize"); mIsResizing=false; mHoverEdge=ResizeEdge::None; mHoverTileIdx=-1; return true; }
         if (HitTest(btnHitbox,mx,my)) { mActiveTool=Tool::Hitbox; lblTool->CreateSurface("Hitbox"); mHitboxDragging=false; mHoverHitboxHdl=HitboxHandle::None; return true; }
+        if (HitTest(btnHazard,mx,my))   { mActiveTool=Tool::Hazard;   lblTool->CreateSurface("Hazard"); return true; }
+        if (HitTest(btnAntiGrav,mx,my)) { mActiveTool=Tool::AntiGrav; lblTool->CreateSurface("Float");  return true; }
 
         if (HitTest(btnSave,mx,my)) {
             fs::create_directories("levels");
@@ -566,6 +632,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 if (!mLevel.background.empty())
                     background=std::make_unique<Image>(mLevel.background,nullptr,FitMode::PRESCALED);
                 LoadBgPalette();
+                mCamX = mCamY = 0.0f; // reset editor camera on load
             } else SetStatus("No file: "+path);
             return true;
         }
@@ -774,6 +841,77 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 return true;
             }
+            case Tool::Hazard: {
+                int ti = HitTile(mx, my);
+                if (ti >= 0) {
+                    bool nowHazard = !mLevel.tiles[ti].hazard;
+                    mLevel.tiles[ti].hazard = nowHazard;
+                    if (nowHazard) {
+                        mLevel.tiles[ti].prop   = false;
+                        mLevel.tiles[ti].ladder = false;
+                        mLevel.tiles[ti].action = false;
+                        mLevel.tiles[ti].slope  = SlopeType::None;
+                    }
+                    SetStatus(std::string("Tile ") + std::to_string(ti) +
+                              (nowHazard ? " → hazard (30 HP/sec)" : " → solid (hazard removed)"));
+                }
+                return true;
+            }
+            case Tool::AntiGrav: {
+                // Toggle antiGravity on tiles. Enemies are toggled via HitEnemy.
+                int ti = HitTile(mx, my);
+                if (ti >= 0) {
+                    bool now = !mLevel.tiles[ti].antiGravity;
+                    mLevel.tiles[ti].antiGravity = now;
+                    SetStatus("Tile " + std::to_string(ti) +
+                              (now ? " → floating (anti-gravity)" : " → normal gravity"));
+                    return true;
+                }
+                int ei = HitEnemy(mx, my);
+                if (ei >= 0) {
+                    bool now = !mLevel.enemies[ei].antiGravity;
+                    mLevel.enemies[ei].antiGravity = now;
+                    SetStatus("Enemy " + std::to_string(ei) +
+                              (now ? " → floating" : " → normal gravity"));
+                    return true;
+                }
+                return true;
+            }
+            case Tool::Select: {
+                // Click on a selected tile: start moving. Click elsewhere: start rubber-band.
+                auto [wx, wy] = ScreenToWorld(mx, my);
+                int ti = HitTile(mx, my);
+                bool hitSelected = (ti >= 0 && std::find(mSelIndices.begin(), mSelIndices.end(), ti) != mSelIndices.end());
+                if (hitSelected) {
+                    // Begin drag-move of entire selection
+                    mSelDragging    = true;
+                    mSelDragStartWX = wx;
+                    mSelDragStartWY = wy;
+                    mSelOrigPositions.clear();
+                    for (int idx : mSelIndices)
+                        mSelOrigPositions.push_back({mLevel.tiles[idx].x, mLevel.tiles[idx].y});
+                } else {
+                    // Click on unselected tile: select just it (or begin rubber-band on empty space)
+                    if (ti >= 0) {
+                        // Shift-click: add/remove from selection
+                        if (SDL_GetModState() & SDL_KMOD_SHIFT) {
+                            auto it = std::find(mSelIndices.begin(), mSelIndices.end(), ti);
+                            if (it != mSelIndices.end()) mSelIndices.erase(it);
+                            else                         mSelIndices.push_back(ti);
+                        } else {
+                            mSelIndices = {ti};
+                        }
+                        SetStatus("Selected " + std::to_string(mSelIndices.size()) + " tile(s)");
+                    } else {
+                        // Empty space: begin rubber-band, clear selection unless Shift
+                        if (!(SDL_GetModState() & SDL_KMOD_SHIFT)) mSelIndices.clear();
+                        mSelBoxing = true;
+                        mSelBoxX0 = mSelBoxX1 = wx;
+                        mSelBoxY0 = mSelBoxY1 = wy;
+                    }
+                }
+                return true;
+            }
             case Tool::Resize:
                 // Mouse-down on a resize handle starts the drag
                 if (mHoverTileIdx >= 0 && mHoverEdge != ResizeEdge::None) {
@@ -815,10 +953,56 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                           + std::to_string(t.hitboxH) + ")");
             }
         }
+        // Commit rubber-band selection
+        if (mSelBoxing) {
+            mSelBoxing = false;
+            int rx0 = std::min(mSelBoxX0, mSelBoxX1);
+            int ry0 = std::min(mSelBoxY0, mSelBoxY1);
+            int rx1 = std::max(mSelBoxX0, mSelBoxX1);
+            int ry1 = std::max(mSelBoxY0, mSelBoxY1);
+            if (!(SDL_GetModState() & SDL_KMOD_SHIFT)) mSelIndices.clear();
+            for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
+                const auto& t = mLevel.tiles[i];
+                // Include tile if it overlaps the marquee rect
+                if ((int)t.x + t.w > rx0 && (int)t.x < rx1 &&
+                    (int)t.y + t.h > ry0 && (int)t.y < ry1) {
+                    if (std::find(mSelIndices.begin(), mSelIndices.end(), i) == mSelIndices.end())
+                        mSelIndices.push_back(i);
+                }
+            }
+            SetStatus("Selected " + std::to_string(mSelIndices.size()) + " tile(s)");
+        }
+        if (mSelDragging) {
+            mSelDragging = false;
+            SetStatus("Moved " + std::to_string(mSelIndices.size()) + " tile(s)");
+        }
     }
 
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx=(int)e.motion.x, my=(int)e.motion.y;
+
+        // ── Selection rubber-band / drag-move ────────────────────────────────────
+        if (mSelBoxing) {
+            auto [wx, wy] = ScreenToWorld(mx, my);
+            mSelBoxX1 = wx; mSelBoxY1 = wy;
+            return true;
+        }
+        if (mSelDragging && !mSelOrigPositions.empty()) {
+            auto [wx, wy] = ScreenToWorld(mx, my);
+            int dx = wx - mSelDragStartWX;
+            int dy = wy - mSelDragStartWY;
+            for (int i = 0; i < (int)mSelIndices.size(); i++) {
+                int idx = mSelIndices[i];
+                if (idx < (int)mLevel.tiles.size()) {
+                    // Snap each tile's displaced position to grid
+                    float rawX = mSelOrigPositions[i].first  + dx;
+                    float rawY = mSelOrigPositions[i].second + dy;
+                    mLevel.tiles[idx].x = (float)((int(rawX) / GRID) * GRID);
+                    mLevel.tiles[idx].y = (float)((int(rawY) / GRID) * GRID);
+                }
+            }
+            return true;
+        }
 
         // ── Resize drag ───────────────────────────────────────────────────────
         if (mIsResizing && mResizeTileIdx >= 0 && mResizeTileIdx < (int)mLevel.tiles.size()) {
@@ -909,8 +1093,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (mActiveTool == Tool::Hitbox && mHitboxTileIdx >= 0 && !mHitboxDragging) {
             mHoverHitboxHdl = HitboxHandle::None;
             const auto& t   = mLevel.tiles[mHitboxTileIdx];
-            int hx = (int)t.x + t.hitboxOffX;
-            int hy = (int)t.y + t.hitboxOffY;
+            // Hitbox is in world space; convert to screen space for mouse comparison
+            int hx = (int)(t.x - mCamX) + t.hitboxOffX;
+            int hy = (int)(t.y - mCamY) + t.hitboxOffY;
             int hw = t.hitboxW;
             int hh = t.hitboxH;
             const int H = HBOX_HANDLE;
@@ -956,6 +1141,17 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     return true;
 }
 
+// ─── Update ──────────────────────────────────────────────────────────────────
+void LevelEditorScene::Update(float /*dt*/) {
+    if (!mIsPanning) return;
+    float mx, my;
+    SDL_GetMouseState(&mx, &my);
+    mCamX = mPanCamStartX - (mx - mPanStartX);
+    mCamY = mPanCamStartY - (my - mPanStartY);
+    if (mCamX < 0.0f) mCamX = 0.0f;
+    if (mCamY < 0.0f) mCamY = 0.0f;
+}
+
 // ─── Render ───────────────────────────────────────────────────────────────────
 void LevelEditorScene::Render(Window& window) {
     window.Render();
@@ -964,19 +1160,32 @@ void LevelEditorScene::Render(Window& window) {
 
     background->Render(screen);
 
-    // Grid
+    // Grid — offset by camera so grid lines stay pinned to world coordinates
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
     Uint32 gridCol = SDL_MapRGBA(fmt,nullptr,255,255,255,20);
-    for (int x=0;x<cw;x+=GRID) { SDL_Rect l={x,TOOLBAR_H,1,window.GetHeight()-TOOLBAR_H}; SDL_FillSurfaceRect(screen,&l,gridCol); }
-    for (int y=TOOLBAR_H;y<window.GetHeight();y+=GRID) { SDL_Rect l={0,y,cw,1}; SDL_FillSurfaceRect(screen,&l,gridCol); }
+    // Grid lines are drawn at world-space multiples of GRID.
+    // Convert to screen space: screenX = worldX - camX.
+    // First visible world grid line >= camX: ceil(camX/GRID)*GRID
+    int camOffX = (int)mCamX;
+    int camOffY = (int)mCamY;
+    int gridStartX = (camOffX / GRID) * GRID - camOffX;  // screen X of first world grid column
+    int gridStartY = (camOffY / GRID) * GRID - camOffY;  // screen Y of first world grid row
+    // Clamp so lines never draw over the toolbar
+    for (int x = gridStartX; x < cw; x += GRID) { SDL_Rect l={x,TOOLBAR_H,1,window.GetHeight()-TOOLBAR_H}; SDL_FillSurfaceRect(screen,&l,gridCol); }
+    for (int y = gridStartY; y < window.GetHeight(); y += GRID) { if (y < TOOLBAR_H) continue; SDL_Rect l={0,y,cw,1}; SDL_FillSurfaceRect(screen,&l,gridCol); }
 
-    // Placed tiles
+    // Placed tiles — all positions are in world space; subtract camera offset for screen space
     for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
         const auto& t = mLevel.tiles[ti];
+        // Cull tiles fully outside the viewport
+        int tsx = (int)(t.x - mCamX);
+        int tsy = (int)(t.y - mCamY);
+        if (tsx + t.w <= 0 || tsx >= cw || tsy + t.h <= TOOLBAR_H || tsy >= window.GetHeight())
+            continue;
         SDL_Surface* ts = nullptr;
         for (const auto& item : mPaletteItems)
             if (item.path == t.imagePath) { ts = item.full ? item.full : item.thumb; break; }
-        SDL_Rect dst={(int)t.x,(int)t.y,t.w,t.h};
+        SDL_Rect dst={tsx, tsy, t.w, t.h};
         if (ts) {
             // Apply rotation: build a rotated copy, blit it, then free it
             SDL_Surface* rotated = (t.rotation != 0) ? RotateSurfaceDeg(ts, t.rotation) : nullptr;
@@ -984,8 +1193,9 @@ void LevelEditorScene::Render(Window& window) {
             if (t.prop)   SDL_SetSurfaceColorMod(draw, 120, 255, 120);
             if (t.ladder) SDL_SetSurfaceColorMod(draw, 120, 220, 255);
             if (t.action) SDL_SetSurfaceColorMod(draw, 255, 160,  80);
+            if (t.hazard)       SDL_SetSurfaceColorMod(draw, 255,  80,  80);
             SDL_BlitSurfaceScaled(draw,nullptr,screen,&dst,SDL_SCALEMODE_LINEAR);
-            if (t.prop || t.ladder || t.action) SDL_SetSurfaceColorMod(draw, 255, 255, 255);
+            if (t.prop || t.ladder || t.action || t.hazard) SDL_SetSurfaceColorMod(draw, 255, 255, 255);
             if (rotated) SDL_DestroySurface(rotated);
         } else {
             SDL_Surface* l=IMG_Load(t.imagePath.c_str());
@@ -998,41 +1208,47 @@ void LevelEditorScene::Render(Window& window) {
             } else DrawRect(screen,dst,{80,80,120,200});
         }
         // Outline colour: cyan for ladder, green for prop, orange for action, blue for solid
-        SDL_Color outlineCol = t.ladder ? SDL_Color{0,220,220,255}
-                             : t.prop   ? SDL_Color{80,255,80,255}
-                             : t.action ? SDL_Color{255,160,60,255}
+        SDL_Color outlineCol = t.ladder  ? SDL_Color{0,220,220,255}
+                             : t.prop    ? SDL_Color{80,255,80,255}
+                             : t.action  ? SDL_Color{255,160,60,255}
+                             : t.hazard  ? SDL_Color{255,60,60,255}
                                         : SDL_Color{100,180,255,255};
         DrawOutline(screen,dst,outlineCol);
-        // Prop badge
+        // Badges use tsx/tsy (screen space)
         if (t.prop) {
-            DrawRect(screen,{(int)t.x+2,(int)t.y+2,14,14},{0,180,0,200});
-            Text propBadge("P",SDL_Color{255,255,255,255},(int)t.x+4,(int)t.y+2,10);
+            DrawRect(screen,{tsx+2,tsy+2,14,14},{0,180,0,200});
+            Text propBadge("P",SDL_Color{255,255,255,255},tsx+4,tsy+2,10);
             propBadge.Render(screen);
         }
-        // Ladder badge
         if (t.ladder) {
-            DrawRect(screen,{(int)t.x+2,(int)t.y+2,14,14},{0,160,180,200});
-            Text ladderBadge("L",SDL_Color{255,255,255,255},(int)t.x+4,(int)t.y+2,10);
+            DrawRect(screen,{tsx+2,tsy+2,14,14},{0,160,180,200});
+            Text ladderBadge("L",SDL_Color{255,255,255,255},tsx+4,tsy+2,10);
             ladderBadge.Render(screen);
         }
-        // Action badge — shows group number when non-zero
         if (t.action) {
             std::string abadge = (t.actionGroup > 0)
                 ? "A" + std::to_string(t.actionGroup) : "A";
             int bw = (t.actionGroup > 0) ? 20 : 14;
-            DrawRect(screen,{(int)t.x+2,(int)t.y+2,bw,14},{200,100,0,200});
-            Text actionBadge(abadge,SDL_Color{255,255,255,255},(int)t.x+4,(int)t.y+2,10);
+            DrawRect(screen,{tsx+2,tsy+2,bw,14},{200,100,0,200});
+            Text actionBadge(abadge,SDL_Color{255,255,255,255},tsx+4,tsy+2,10);
             actionBadge.Render(screen);
         }
-        // Slope: draw diagonal line and badge
+        if (t.antiGravity) {
+            DrawRect(screen,{tsx+2,tsy+2,14,14},{0,180,200,220});
+            Text floatBadge("F",SDL_Color{255,255,255,255},tsx+4,tsy+2,10);
+            floatBadge.Render(screen);
+        }
+        if (t.hazard) {
+            DrawRect(screen,{tsx+2,tsy+2,14,14},{200,0,0,220});
+            Text hazardBadge("H",SDL_Color{255,255,255,255},tsx+4,tsy+2,10);
+            hazardBadge.Render(screen);
+        }
         if (t.slope != SlopeType::None) {
-            // Diagonal line across the tile
-            int tx=(int)t.x, ty2=(int)t.y, tw=t.w, th=t.h;
             int lx0, ly0, lx1, ly1;
             if (t.slope == SlopeType::DiagUpRight) {
-                lx0=tx;     ly0=ty2+th;  lx1=tx+tw; ly1=ty2;
+                lx0=tsx;       ly0=tsy+t.h;  lx1=tsx+t.w; ly1=tsy;
             } else {
-                lx0=tx;     ly0=ty2;     lx1=tx+tw; ly1=ty2+th;
+                lx0=tsx;       ly0=tsy;      lx1=tsx+t.w; ly1=tsy+t.h;
             }
             int ddx=lx1-lx0, ddy=ly1-ly0;
             int steps=std::abs(ddx)>std::abs(ddy)?std::abs(ddx):std::abs(ddy);
@@ -1044,35 +1260,90 @@ void LevelEditorScene::Render(Window& window) {
                     ccx+=ssx; ccy+=ssy;
                 }
             }
-            // Badge
-            DrawRect(screen,{tx+2,ty2+2,14,14},{160,120,0,200});
+            DrawRect(screen,{tsx+2,tsy+2,14,14},{160,120,0,200});
             std::string badge = (t.slope==SlopeType::DiagUpRight) ? "/" : "\\";
-            Text slopeBadge(badge,SDL_Color{255,255,255,255},tx+5,ty2+2,10);
+            Text slopeBadge(badge,SDL_Color{255,255,255,255},tsx+5,tsy+2,10);
             slopeBadge.Render(screen);
         }
-        // Rotation badge (bottom-right corner, only when non-zero)
         if (t.rotation != 0) {
             std::string rbadge = std::to_string(t.rotation);
             int rbw = 22;
-            int rbx = (int)t.x + t.w - rbw - 2;
-            int rby = (int)t.y + t.h - 14 - 2;
+            int rbx = tsx + t.w - rbw - 2;
+            int rby = tsy + t.h - 14 - 2;
             DrawRect(screen,{rbx,rby,rbw,14},{60,60,180,200});
             Text rotBadge(rbadge,SDL_Color{200,220,255,255},rbx+2,rby+1,9);
             rotBadge.Render(screen);
         }
     }
 
-    // Coins, enemies, player marker
+    // Coins, enemies, player marker — convert world positions to screen space
     auto coinFrames = coinSheet->GetAnimation("Gold_");
     if (!coinFrames.empty())
-        for (const auto& c:mLevel.coins){SDL_Rect s=coinFrames[0],d={(int)c.x,(int)c.y,ICON_SIZE,ICON_SIZE};SDL_BlitSurfaceScaled(coinSheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);DrawOutline(screen,d,{255,215,0,255});}
+        for (const auto& c:mLevel.coins){
+            int cx=(int)(c.x-mCamX), cy=(int)(c.y-mCamY);
+            if (cx+ICON_SIZE<=0||cx>=cw||cy+ICON_SIZE<=TOOLBAR_H||cy>=window.GetHeight()) continue;
+            SDL_Rect s=coinFrames[0],d={cx,cy,ICON_SIZE,ICON_SIZE};
+            SDL_BlitSurfaceScaled(coinSheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);
+            DrawOutline(screen,d,{255,215,0,255});
+        }
     auto slimeFrames=enemySheet->GetAnimation("slimeWalk");
     if (!slimeFrames.empty())
-        for (const auto& en:mLevel.enemies){SDL_Rect s=slimeFrames[0],d={(int)en.x,(int)en.y,ICON_SIZE,ICON_SIZE};SDL_BlitSurfaceScaled(enemySheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);DrawOutline(screen,d,{255,80,80,255});}
-    // Draw player marker at the actual collider size so placement in the editor
-    // matches the in-game hitbox exactly (PLAYER_STAND_WIDTH x PLAYER_STAND_HEIGHT).
-    DrawRect(screen,{(int)mLevel.player.x,(int)mLevel.player.y,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,200,80,180});
-    DrawOutline(screen,{(int)mLevel.player.x,(int)mLevel.player.y,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,255,100,255},2);
+        for (const auto& en:mLevel.enemies){
+            int ex=(int)(en.x-mCamX), ey=(int)(en.y-mCamY);
+            if (ex+ICON_SIZE<=0||ex>=cw||ey+ICON_SIZE<=TOOLBAR_H||ey>=window.GetHeight()) continue;
+            SDL_Rect s=slimeFrames[0],d={ex,ey,ICON_SIZE,ICON_SIZE};
+            SDL_BlitSurfaceScaled(enemySheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);
+            SDL_Color eOutline = en.antiGravity ? SDL_Color{0,220,220,255} : SDL_Color{255,80,80,255};
+            DrawOutline(screen,d,eOutline);
+            if (en.antiGravity) {
+                DrawRect(screen,{ex+ICON_SIZE/2-4,ey-10,8,8},{0,200,220,220});
+                Text fb("F",SDL_Color{255,255,255,255},ex+ICON_SIZE/2-3,ey-11,8);
+                fb.Render(screen);
+            }
+        }
+    // Player marker
+    int pmx=(int)(mLevel.player.x-mCamX), pmy=(int)(mLevel.player.y-mCamY);
+    DrawRect(screen,{pmx,pmy,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,200,80,180});
+    DrawOutline(screen,{pmx,pmy,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,255,100,255},2);
+
+    // ── Selection tool feedback ─────────────────────────────────────────────────
+    if (!mSelIndices.empty()) {
+        // Teal highlight overlay on each selected tile
+        for (int idx : mSelIndices) {
+            if (idx < 0 || idx >= (int)mLevel.tiles.size()) continue;
+            const auto& t = mLevel.tiles[idx];
+            int sx = (int)(t.x - mCamX), sy = (int)(t.y - mCamY);
+            DrawRect(screen, {sx, sy, t.w, t.h}, {0, 220, 220, 60});
+            DrawOutline(screen, {sx, sy, t.w, t.h}, {0, 255, 255, 220}, 2);
+        }
+        // Bounding box around entire selection
+        int bx0 = INT_MAX, by0 = INT_MAX, bx1 = INT_MIN, by1 = INT_MIN;
+        for (int idx : mSelIndices) {
+            if (idx < 0 || idx >= (int)mLevel.tiles.size()) continue;
+            const auto& t = mLevel.tiles[idx];
+            bx0 = std::min(bx0, (int)t.x); by0 = std::min(by0, (int)t.y);
+            bx1 = std::max(bx1, (int)t.x + t.w); by1 = std::max(by1, (int)t.y + t.h);
+        }
+        int sbx = bx0 - (int)mCamX, sby = by0 - (int)mCamY;
+        DrawOutline(screen, {sbx-2, sby-2, bx1-bx0+4, by1-by0+4}, {0, 255, 255, 180}, 1);
+        // Count label
+        std::string selLabel = std::to_string(mSelIndices.size()) + " selected";
+        DrawRect(screen, {sbx, sby-16, (int)selLabel.size()*7+4, 14}, {0, 60, 70, 200});
+        Text selT(selLabel, SDL_Color{0,255,255,255}, sbx+2, sby-15, 10);
+        selT.Render(screen);
+    }
+    // Rubber-band marquee rect
+    if (mSelBoxing) {
+        int rx0 = (int)(std::min(mSelBoxX0, mSelBoxX1) - mCamX);
+        int ry0 = (int)(std::min(mSelBoxY0, mSelBoxY1) - mCamY);
+        int rx1 = (int)(std::max(mSelBoxX0, mSelBoxX1) - mCamX);
+        int ry1 = (int)(std::max(mSelBoxY0, mSelBoxY1) - mCamY);
+        int rw  = rx1 - rx0, rh = ry1 - ry0;
+        if (rw > 0 && rh > 0) {
+            DrawRect(screen,    {rx0, ry0, rw, rh}, {100, 220, 255, 25});
+            DrawOutline(screen, {rx0, ry0, rw, rh}, {100, 220, 255, 200}, 1);
+        }
+    }
 
     // ── Resize tool feedback ─────────────────────────────────────────────────
     if (mActiveTool == Tool::Resize) {
@@ -1080,10 +1351,9 @@ void LevelEditorScene::Render(Window& window) {
         const SDL_Color dragCol    = {255, 220, 80, 180};
         const int HS = RESIZE_HANDLE;
 
-        // Highlight hovered edge/corner
         if (mHoverTileIdx >= 0 && !mIsResizing) {
             const auto& t = mLevel.tiles[mHoverTileIdx];
-            int rx=(int)t.x, ry=(int)t.y, rw=t.w, rh=t.h;
+            int rx=(int)(t.x-mCamX), ry=(int)(t.y-mCamY), rw=t.w, rh=t.h;
             if (mHoverEdge==ResizeEdge::Right || mHoverEdge==ResizeEdge::Corner)
                 DrawRect(screen,{rx+rw-HS, ry+HS, HS, rh-HS*2}, handleCol);
             if (mHoverEdge==ResizeEdge::Bottom || mHoverEdge==ResizeEdge::Corner)
@@ -1092,13 +1362,12 @@ void LevelEditorScene::Render(Window& window) {
                 DrawRect(screen,{rx+rw-HS, ry+rh-HS, HS, HS}, handleCol);
         }
 
-        // Ghost outline while dragging
         if (mIsResizing && mResizeTileIdx >= 0 && mResizeTileIdx < (int)mLevel.tiles.size()) {
             const auto& t = mLevel.tiles[mResizeTileIdx];
-            DrawOutline(screen,{(int)t.x,(int)t.y,t.w,t.h},{255,220,80,255},2);
-            // Size label
+            int rx=(int)(t.x-mCamX), ry=(int)(t.y-mCamY);
+            DrawOutline(screen,{rx,ry,t.w,t.h},{255,220,80,255},2);
             Text szT(std::to_string(t.w/GRID)+"x"+std::to_string(t.h/GRID)+" tiles",
-                     dragCol,(int)t.x+4,(int)t.y+4,12);
+                     dragCol,rx+4,ry+4,12);
             szT.Render(screen);
         }
     }
@@ -1107,8 +1376,8 @@ void LevelEditorScene::Render(Window& window) {
     if (mActiveTool == Tool::Hitbox && mHitboxTileIdx >= 0
         && mHitboxTileIdx < (int)mLevel.tiles.size()) {
         const auto& t  = mLevel.tiles[mHitboxTileIdx];
-        int hx = (int)t.x + t.hitboxOffX;
-        int hy = (int)t.y + t.hitboxOffY;
+        int hx = (int)(t.x - mCamX) + t.hitboxOffX;
+        int hy = (int)(t.y - mCamY) + t.hitboxOffY;
         int hw = t.hitboxW;
         int hh = t.hitboxH;
 
@@ -1118,7 +1387,7 @@ void LevelEditorScene::Render(Window& window) {
         DrawOutline(screen, {hx, hy, hw, hh}, {80, 180, 255, 255}, 2);
 
         // Draw a faint dashed outline of the visual tile for reference
-        DrawOutline(screen, {(int)t.x, (int)t.y, t.w, t.h}, {255, 255, 255, 60}, 1);
+        DrawOutline(screen, {(int)(t.x-mCamX), (int)(t.y-mCamY), t.w, t.h}, {255, 255, 255, 60}, 1);
 
         // 8 drag handles: corners + edge midpoints
         const int HS  = HBOX_HANDLE;          // half-side of handle square
@@ -1153,10 +1422,15 @@ void LevelEditorScene::Render(Window& window) {
         infoT.Render(screen);
     }
 
-    // Tile ghost
+    // Tile ghost — SnapToGrid returns world coords; convert to screen for drawing
     if (mActiveTool==Tool::Tile && !mPaletteItems.empty() && !mPaletteItems[mSelectedTile].isFolder) {
         float fmx,fmy; SDL_GetMouseState(&fmx,&fmy); int mx=(int)fmx,my=(int)fmy;
-        if (my>=TOOLBAR_H && mx<cw) { auto [sx,sy]=SnapToGrid(mx,my); DrawRect(screen,{sx,sy,mTileW,mTileH},{100,180,255,60}); DrawOutline(screen,{sx,sy,mTileW,mTileH},{100,180,255,200}); }
+        if (my>=TOOLBAR_H && mx<cw) {
+            auto [wx,wy]=SnapToGrid(mx,my); // world space
+            int gsx=(int)(wx-mCamX), gsy=(int)(wy-mCamY); // screen space
+            DrawRect(screen,{gsx,gsy,mTileW,mTileH},{100,180,255,60});
+            DrawOutline(screen,{gsx,gsy,mTileW,mTileH},{100,180,255,200});
+        }
     }
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
@@ -1202,6 +1476,7 @@ void LevelEditorScene::Render(Window& window) {
     drawBtn(btnTile,        ACCENT_PLACE, lblTile.get(),   hintTile.get(),   mActiveTool==Tool::Tile);
     drawBtn(btnErase,       ACCENT_PLACE, lblErase.get(),  hintErase.get(),  mActiveTool==Tool::Erase);
     drawBtn(btnPlayerStart, ACCENT_PLACE, lblPlayer.get(), hintPlayer.get(), mActiveTool==Tool::PlayerStart);
+    drawBtn(btnSelect,      ACCENT_PLACE, lblSelect.get(), hintSelect.get(), mActiveTool==Tool::Select);
 
     // Group 1/2 divider
     int div1x = btnPlayerStart.x + btnPlayerStart.w + BTN_GAP + GRP_GAP/2;
@@ -1214,9 +1489,11 @@ void LevelEditorScene::Render(Window& window) {
     drawBtn(btnSlope,   ACCENT_MODIFIER, lblSlope.get(),  hintSlope.get(),  mActiveTool==Tool::Slope);
     drawBtn(btnResize,  ACCENT_MODIFIER, lblResize.get(), hintResize.get(), mActiveTool==Tool::Resize);
     drawBtn(btnHitbox,  ACCENT_MODIFIER, lblHitbox.get(), nullptr,          mActiveTool==Tool::Hitbox);
+    drawBtn(btnHazard,   {220, 60,  60,  255}, lblHazard.get(),   nullptr, mActiveTool==Tool::Hazard);
+    drawBtn(btnAntiGrav, {0,   180, 200, 255}, lblAntiGrav.get(), nullptr, mActiveTool==Tool::AntiGrav);
 
     // Group 2/3 divider
-    int div2x = btnHitbox.x + btnHitbox.w + BTN_GAP + GRP_GAP/2;
+    int div2x = btnAntiGrav.x + btnAntiGrav.w + BTN_GAP + GRP_GAP/2;
     DrawRect(screen, {div2x, BTN_Y + 4, 1, BTN_H - 8}, {70, 70, 90, 255});
 
     // Group 3 — Actions (gravity cycles through 3 modes, special coloring)
@@ -1401,8 +1678,11 @@ void LevelEditorScene::Render(Window& window) {
                     + std::to_string(mLevel.tiles.size()) + " tiles";
     Text cntT(cnt, SDL_Color{120,120,150,255}, 8, window.GetHeight()-18, 11);
     cntT.Render(screen);
-    Text hintT("Right-click tile: rotate   G:Mode   I:Import   Ctrl+S:Save   Ctrl+Z:Undo",
-               SDL_Color{70,70,90,255}, cw/2 - 150, window.GetHeight()-18, 11);
+    std::string camStr = "Cam: " + std::to_string((int)mCamX) + "," + std::to_string((int)mCamY);
+    Text camT(camStr, SDL_Color{70,70,90,255}, cw - 100, window.GetHeight()-18, 11);
+    camT.Render(screen);
+    Text hintT("RClick:rotate  MMB:pan  G:Mode  I:Import  Ctrl+S:Save  Ctrl+Z:Undo",
+               SDL_Color{70,70,90,255}, cw/2 - 170, window.GetHeight()-18, 11);
     hintT.Render(screen);
 
     // ── Import input bar ──────────────────────────────────────────────────────

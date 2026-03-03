@@ -19,10 +19,11 @@
 //
 // Key design decisions:
 //
-//   * onSlopeThisFrame suppresses ALL lateral corrections in both Pass 1 and
-//     Pass 2.  The slope snap already placed the player at the correct surface
-//     height; any lateral push from a tile whose top the slope put them above
-//     is wrong and causes the seam-sticking and corner-catching bugs.
+//   * onSlopeThisFrame suppresses ALL floor, ceiling, and lateral corrections
+//     in both Pass 1 and Pass 2.  The slope snap already placed the player at
+//     the correct surface height; any floor snap from an underlying fill tile
+//     (or lateral push from a tile the slope lifted the player above) would
+//     overwrite the slope result and re-introduce stair-stepping.
 //
 //   * STEP_UP_HEIGHT == tile height (64 px): in Pass 2, the player can walk
 //     from the base of a slope (a full tile below the adjacent flat top) onto
@@ -189,15 +190,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 }
             });
 
-            // Action tile triggers
-            {
-                auto actionView = reg.view<ActionTag, Transform, Collider>();
-                actionView.each([&](entt::entity at, const ActionTag&,
-                                    const Transform& tt, const Collider& tc) {
-                    if (aabb(tt, tc))
-                        result.actionTilesTriggered.push_back(at);
-                });
-            }
             // Coin collection
             coinView.each([&](entt::entity coin, const Transform& ct, const Collider& cc) {
                 if (aabb(ct, cc)) {
@@ -209,52 +201,64 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         }
 
         // -- Slope pass (FIRST) -----------------------------------------------
-        // Determines onSlopeThisFrame before any flat-tile passes so that
-        // Pass 1 and Pass 2 can suppress lateral corrections while on a slope.
+        // Surface formula: anchored at each tile's own top-left (DiagUpLeft) or
+        // top-right (DiagUpRight) corner, using world-space X.
+        //
+        // This produces a CONTINUOUS value at tile seams because adjacent tiles
+        // in the standard staircase layout each start where the previous ended:
+        //
+        //   DiagUpLeft  (high-left, descends right):
+        //     surfaceY = tt.y + (playerX - tt.x) * (tc.h / tc.w)
+        //     Seam proof with 48x48 tiles at x=912,y=768 and x=960,y=816:
+        //       Tile1 at wx=960: 768 + (960-912)*1 = 816
+        //       Tile2 at wx=960: 816 + (960-960)*1 = 816  ✓
+        //
+        //   DiagUpRight (high-right, descends left):
+        //     surfaceY = tt.y + (tt.x + tc.w - playerX) * (tc.h / tc.w)
         bool onSlopeThisFrame = false;
 
         if (g.direction == GravityDir::DOWN) {
-            float pFeet    = pt.y + pc.h;
-            float bestSnap = pFeet + SLOPE_SNAP_LOOKAHEAD;
-            bool  onSlope  = false;
+            float pFeet      = pt.y + pc.h;
+            float pLeft      = pt.x;
+            float pRight     = pt.x + pc.w;
+            float bestSurface = pFeet + SLOPE_SNAP_LOOKAHEAD; // sentinel (far below)
+            bool  onSlope    = false;
 
             auto slopeView = reg.view<SlopeCollider, TileTag, Transform, Collider>();
             slopeView.each([&](const SlopeCollider& sc, const Transform& tt, const Collider& tc) {
-                float pLeft  = pt.x;
-                float pRight = pt.x + pc.w;
-
                 if (pRight <= tt.x || pLeft >= tt.x + tc.w) return;
-                if (pFeet  <  tt.y - SLOPE_SNAP_LOOKAHEAD)  return;
-                if (pt.y   >  tt.y + tc.h)                   return;
 
-                auto surfaceAtX = [&](float wx) -> float {
-                    float t = (wx - tt.x) / (float)tc.w;
-                    t = std::max(0.0f, std::min(1.0f, t));
-                    return (sc.slopeType == SlopeType::DiagUpRight)
-                        ? (tt.y + tc.h) - t * tc.h  // high-left -> low-right
-                        : tt.y + t * tc.h;           // low-left  -> high-right
-                };
+                // Surface formula anchored at the tile's HIGH corner.
+                // Produces identical Y at tile seams for the standard staircase layout.
+                float ratio = (float)tc.h / (float)tc.w;
+                float playerCX = pLeft + pc.w * 0.5f;
+                float surface;
+                if (sc.slopeType == SlopeType::DiagUpLeft) {
+                    // HIGH = top-left (tt.x, tt.y), LOW = bot-right (tt.x+w, tt.y+h)
+                    surface = tt.y + (playerCX - tt.x) * ratio;
+                } else {
+                    // DiagUpRight: HIGH = top-right (tt.x+w, tt.y), LOW = bot-left (tt.x, tt.y+h)
+                    surface = tt.y + (tt.x + tc.w - playerCX) * ratio;
+                }
 
-                float snapSurface = surfaceAtX(pt.x + pc.w * 0.5f);
+                // Never let the slope snap push the player BELOW the tile's own
+                // bottom edge.  This is the only guard needed: it prevents the
+                // formula from extrapolating past the low corner when the player
+                // is transitioning off the end of the slope onto flat ground,
+                // without clamping playerCX (which would break seam continuity).
+                if (surface > tt.y + tc.h) return;
 
-                // Proximity guard: either foot-edge must be within lookahead of
-                // the surface at that edge.  OR catches all approach directions
-                // including valley/peak slope joins.
-                float sL          = surfaceAtX(pLeft  + 1.0f);
-                float sR          = surfaceAtX(pRight - 1.0f);
-                bool  closeEnough = (pFeet >= sL - SLOPE_SNAP_LOOKAHEAD) ||
-                                    (pFeet >= sR - SLOPE_SNAP_LOOKAHEAD);
+                if (pFeet < surface - SLOPE_SNAP_LOOKAHEAD) return;
+                if (pt.y  > tt.y + tc.h + SLOPE_SNAP_LOOKAHEAD) return;
 
-                // Pick the highest (smallest Y) candidate -- correct for both
-                // ascending and the converging surface at slope joins.
-                if (closeEnough && snapSurface < bestSnap) {
-                    bestSnap = snapSurface;
-                    onSlope  = true;
+                if (surface < bestSurface) {
+                    bestSurface = surface;
+                    onSlope     = true;
                 }
             });
 
             if (onSlope) {
-                pt.y             = bestSnap - pc.h;
+                pt.y             = bestSurface - pc.h;
                 g.velocity       = 0.0f;
                 g.isGrounded     = true;
                 onSlopeThisFrame = true;
@@ -286,47 +290,49 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
 
             switch (g.direction) {
                 case GravityDir::DOWN:
-                    if (oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
+                    if (!onSlopeThisFrame
+                        && oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
+                        // Floor snap: suppressed while on slope so the slope pass
+                        // result isn't overwritten by underlying fill tiles.
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.y       = tt.y - ph;
+                        pt.y       = tay - ph;   // snap to hitbox top, not visual top
                         g.velocity = 0.0f;
                     } else if (!onSlopeThisFrame
                                && oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
-                        // ceiling hit -- only when not on slope
-                        pt.y       = tt.y + tc.h;
+                        pt.y       = tay + tc.h; // snap to hitbox bottom
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::UP:
                     if (oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.y       = tt.y + tc.h;
+                        pt.y       = tay + tc.h;
                         g.velocity = 0.0f;
                     } else if (!onSlopeThisFrame
                                && oTop < oBottom && oTop <= oLeft && oTop <= oRight) {
-                        pt.y       = tt.y - ph;
+                        pt.y       = tay - ph;
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::LEFT:
                     if (oRight < oLeft && oRight <= oTop && oRight <= oBottom) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.x       = tt.x + tc.w;
+                        pt.x       = tax + tc.w;
                         g.velocity = 0.0f;
                     } else if (!onSlopeThisFrame
                                && oLeft < oRight && oLeft <= oTop && oLeft <= oBottom) {
-                        pt.x       = tt.x - pw;
+                        pt.x       = tax - pw;
                         g.velocity = 0.0f;
                     }
                     break;
                 case GravityDir::RIGHT:
                     if (oLeft < oRight && oLeft <= oTop && oLeft <= oBottom) {
                         if (g.velocity >= 0.0f) g.isGrounded = true;
-                        pt.x       = tt.x - pw;
+                        pt.x       = tax - pw;
                         g.velocity = 0.0f;
                     } else if (!onSlopeThisFrame
                                && oRight < oLeft && oRight <= oTop && oRight <= oBottom) {
-                        pt.x       = tt.x + tc.w;
+                        pt.x       = tax + tc.w;
                         g.velocity = 0.0f;
                     }
                     break;
@@ -359,10 +365,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     float oRight  = (tax + tc.w) - pt.x;
 
                     if (onSlopeThisFrame) {
-                        // On slope: ceiling only, never lateral.
+                        // On slope: ceiling push only — never floor snap or lateral.
+                        // The slope pass already placed pt.y correctly; any floor
+                        // contact here is a fill tile the slope lifted us above.
                         if (g.direction == GravityDir::DOWN
                             && oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
-                            pt.y       = tt.y + tc.h;
+                            pt.y       = tay + tc.h;
                             g.velocity = 0.0f;
                         }
                         break;
@@ -373,7 +381,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         && oTop >= 0.0f
                         && oTop <= STEP_UP_HEIGHT
                         && oTop <= oLeft && oTop <= oRight) {
-                        pt.y         = tt.y - ph;
+                        pt.y         = tay - ph;
                         g.velocity   = 0.0f;
                         g.isGrounded = true;
                         break;
@@ -382,12 +390,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     if (g.direction == GravityDir::UP
                         && oBottom > 0.0f
                         && oBottom <= oLeft && oBottom <= oRight) {
-                        pt.y       = tt.y + tc.h;
+                        pt.y       = tay + tc.h;
                         g.velocity = 0.0f;
                         break;
                     }
                     // Lateral wall: push out on shallower horizontal axis.
-                    pt.x = oLeft < oRight ? tt.x - pw : tt.x + tc.w;
+                    pt.x = oLeft < oRight ? tax - pw : tax + tc.w;
                     break;
                 }
                 case GravityDir::LEFT:
@@ -400,13 +408,105 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             }
         });
 
-        // -- Action tile trigger ----------------------------------------------
+        // -- Hazard overlap ---------------------------------------------------
+        // Simple AABB check against all HazardTag tiles every frame.
+        // No invincibility gating — damage is continuous while overlapping.
         {
-            auto actionView = reg.view<ActionTag, Transform, Collider>();
-            actionView.each([&](entt::entity at, const ActionTag& /*tag*/,
-                                const Transform& tt, const Collider& tc) {
-                if (aabb(tt, tc))
-                    result.actionTilesTriggered.push_back(at);
+            auto hazardView = reg.view<HazardTag, Transform, Collider>();
+            hazardView.each([&](const Transform& ht, const Collider& hc) {
+                float hx = ht.x, hy = ht.y;
+                if (pt.x < hx + hc.w && pt.x + pw > hx &&
+                    pt.y < hy + hc.h && pt.y + ph > hy)
+                    result.onHazard = true;
+            });
+        }
+
+        // -- Sword slash-hit detection --------------------------------------
+        // Builds a directional sword hitbox and tests it against:
+        //   - ActionTag tiles  (unified slash-trigger; strips Renderable+TileTag+Collider)
+        //   - Live enemies     (applies SLASH_DAMAGE; kills when HP reaches 0)
+        //
+        // Facing is determined by:
+        //   - Horizontal gravity (DOWN/UP): Renderable::flipH  false=right, true=left
+        //   - Left-wall gravity:            player faces UP the wall
+        //   - Right-wall gravity:           player faces UP the wall (opposite side)
+        if (const auto* atk = reg.try_get<AttackState>(playerEnt); atk && atk->isAttacking) {
+            // SWORD_REACH and SWORD_HEIGHT are defined in GameConfig.hpp
+
+            // Determine facing direction as a unit vector (fx, fy)
+            const auto* rend = reg.try_get<Renderable>(playerEnt);
+            float fx = 0.0f, fy = 0.0f;
+            switch (g.direction) {
+                case GravityDir::DOWN:
+                case GravityDir::UP:
+                    // flipH=false → facing right (+x), flipH=true → facing left (-x)
+                    fx = (rend && rend->flipH) ? -1.0f : 1.0f;
+                    fy = 0.0f;
+                    break;
+                case GravityDir::LEFT:  fx =  0.0f; fy = -1.0f; break; // faces up-left wall
+                case GravityDir::RIGHT: fx =  0.0f; fy = -1.0f; break; // faces up-right wall
+            }
+
+            // Build sword rect: starts at the leading edge of the player collider
+            // and extends SWORD_REACH px forward. Perpendicular coverage matches
+            // the player's height with a small inset so short enemies still register.
+            float swordX, swordY, swordW, swordH;
+            if (fx != 0.0f) {
+                // Horizontal swing
+                float insetY = pc.h * (1.0f - SWORD_HEIGHT) * 0.5f;
+                swordW = SWORD_REACH;
+                swordH = pc.h * SWORD_HEIGHT;
+                swordY = pt.y + insetY;
+                swordX = (fx > 0.0f) ? pt.x + pc.w          // right-facing: start at right edge
+                                     : pt.x - SWORD_REACH;   // left-facing:  extend left
+            } else {
+                // Vertical swing (wall gravity)
+                float insetX = pc.w * (1.0f - SWORD_HEIGHT) * 0.5f;
+                swordW = pc.w * SWORD_HEIGHT;
+                swordH = SWORD_REACH;
+                swordX = pt.x + insetX;
+                swordY = (fy > 0.0f) ? pt.y + pc.h          // downward: start at bottom
+                                     : pt.y - SWORD_REACH;   // upward:   extend up
+            }
+
+            // Sword AABB helper
+            auto swordHits = [&](float tx, float ty, float tw, float th) -> bool {
+                return swordX          < tx + tw &&
+                       swordX + swordW > tx      &&
+                       swordY          < ty + th  &&
+                       swordY + swordH > ty;
+            };
+
+            // Test every ActionTag tile against the sword rect.
+            // Action tiles are the unified slash-trigger: they disappear on hit
+            // (Renderable, TileTag, and Collider stripped by the Scene after iteration).
+            {
+                auto actionView = reg.view<ActionTag, Transform, Collider>();
+                actionView.each([&](entt::entity at, const ActionTag& /*tag*/,
+                                    const Transform& tt, const Collider& tc) {
+                    if (swordHits(tt.x, tt.y, (float)tc.w, (float)tc.h))
+                        result.actionTilesTriggered.push_back(at);
+                });
+            }
+
+            // Test every live enemy against the sword rect
+            liveEnemyView.each([&](entt::entity enemy,
+                                   const Transform& et, const Collider& ec) {
+                if (!swordHits(et.x, et.y, (float)ec.w, (float)ec.h)) return;
+                // Apply slash damage to the enemy's health
+                auto* eh = reg.try_get<Health>(enemy);
+                if (!eh) {
+                    // No health component — one-shot kill (legacy behaviour)
+                    toKill.push_back(enemy);
+                    result.enemiesSlashed++;
+                    return;
+                }
+                eh->current -= SLASH_DAMAGE;
+                if (eh->current <= 0.0f) {
+                    eh->current = 0.0f;
+                    toKill.push_back(enemy);
+                    result.enemiesSlashed++;
+                }
             });
         }
 
@@ -422,6 +522,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
     });
 
     // -- Commit deferred mutations --------------------------------------------
+    // Deduplicate toKill — an entity can be pushed by both stomp and slash
+    // in the same frame; emplace<DeadTag> on an already-tagged entity would assert.
+    {
+        std::sort(toKill.begin(), toKill.end());
+        toKill.erase(std::unique(toKill.begin(), toKill.end()), toKill.end());
+    }
     for (auto e : toKill) {
         if (reg.all_of<Velocity>(e)) {
             auto& v = reg.get<Velocity>(e);
@@ -475,6 +581,28 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             for (auto gm : groupMembers)
                 stripTile(gm);
         }
+    }
+
+    // -- Hazard tile overlap -----------------------------------------------
+    // Hazard tiles have no TileTag so the player is never pushed out of them.
+    // We use a small TOUCH expansion so standing flush on the surface of a
+    // hazard tile (e.g. spikes on the ground) also registers.
+    {
+        constexpr float TOUCH = 6.0f; // px — standing within this of the tile counts
+        auto hazardView = reg.view<HazardTag, Transform, Collider>();
+        auto pView      = reg.view<PlayerTag, Transform, Collider>();
+        pView.each([&](const Transform& pt, const Collider& pc) {
+            if (result.onHazard) return;
+            hazardView.each([&](const Transform& ht, const Collider& hc) {
+                if (result.onHazard) return;
+                // Expand the hazard rect by TOUCH on all sides before testing
+                if (pt.x          < ht.x + hc.w + TOUCH &&
+                    pt.x + pc.w   > ht.x          - TOUCH &&
+                    pt.y          < ht.y + hc.h + TOUCH &&
+                    pt.y + pc.h   > ht.y          - TOUCH)
+                    result.onHazard = true;
+            });
+        });
     }
 
     return result;

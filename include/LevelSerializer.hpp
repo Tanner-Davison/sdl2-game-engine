@@ -22,7 +22,8 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
 
     j["enemies"] = json::array();
     for (const auto& e : level.enemies)
-        j["enemies"].push_back({{"x", e.x}, {"y", e.y}, {"speed", e.speed}});
+        j["enemies"].push_back({{"x", e.x}, {"y", e.y}, {"speed", e.speed},
+                                  {"antiGravity", e.antiGravity}});
 
     j["tiles"] = json::array();
     for (const auto& t : level.tiles) {
@@ -40,6 +41,8 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                               {"actionGroup", t.actionGroup},
                               {"slope", slopeStr},
                               {"rotation", t.rotation},
+                              {"hazard", t.hazard},
+                              {"antiGravity", t.antiGravity},
                               {"hitboxOffX", t.hitboxOffX},
                               {"hitboxOffY", t.hitboxOffY},
                               {"hitboxW",    t.hitboxW},
@@ -92,7 +95,8 @@ inline bool LoadLevel(const std::string& path, Level& out) {
     out.enemies.clear();
     for (const auto& e : j.value("enemies", json::array()))
         out.enemies.push_back(
-            {e.value("x", 0.0f), e.value("y", 0.0f), e.value("speed", 120.0f)});
+            {e.value("x", 0.0f), e.value("y", 0.0f), e.value("speed", 120.0f),
+             e.value("antiGravity", false)});
 
     out.tiles.clear();
     for (const auto& t : j.value("tiles", json::array())) {
@@ -111,6 +115,8 @@ inline bool LoadLevel(const std::string& path, Level& out) {
                              t.value("actionGroup", 0),
                              slope,
                              t.value("rotation", 0),
+                             t.value("hazard", false),
+                             t.value("antiGravity", false),
                              t.value("hitboxOffX", 0),
                              t.value("hitboxOffY", 0),
                              t.value("hitboxW",    0),

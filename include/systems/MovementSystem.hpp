@@ -124,7 +124,9 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
         g.timer += dt;
     });
 
-    auto tileView  = reg.view<TileTag, Transform, Collider>();
+    // Enemies only turn around on solid tiles — exclude props (visual-only, no collision)
+    // and action tiles (slash-triggered; they may have TileTag while still present).
+    auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<PropTag, ActionTag>);
     auto enemyView = reg.view<EnemyTag, Transform, Velocity, Collider, Renderable>(
         entt::exclude<DeadTag>);
     enemyView.each([&](Transform& t, Velocity& v, const Collider& c, Renderable& r) {

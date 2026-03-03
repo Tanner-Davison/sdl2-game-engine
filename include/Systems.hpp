@@ -8,6 +8,7 @@
 #include <systems/HUDSystem.hpp>
 #include <systems/InputSystem.hpp>
 #include <systems/LadderSystem.hpp>
+#include <systems/FloatingSystem.hpp>
 #include <systems/MovementSystem.hpp>
 #include <systems/PlayerStateSystem.hpp>
 #include <systems/RenderSystem.hpp>

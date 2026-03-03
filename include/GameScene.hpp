@@ -6,6 +6,7 @@
 #include "Rectangle.hpp"
 #include "Scene.hpp"
 #include "SpriteSheet.hpp"
+#include "GameConfig.hpp"
 #include "Systems.hpp"
 #include "Text.hpp"
 #include "Window.hpp"
@@ -39,6 +40,9 @@ class GameScene : public Scene {
 
   private:
     entt::registry reg;
+    Camera         mCamera;
+    float          mLevelW            = 0.0f; // computed from tile extents on Spawn
+    float          mLevelH            = 0.0f;
     bool           gameOver           = false;
     bool           levelComplete      = false;
     float          levelCompleteTimer = 2.0f;
@@ -59,6 +63,7 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> knightJumpSheet;
     std::unique_ptr<SpriteSheet> knightFallSheet;
     std::unique_ptr<SpriteSheet> knightSlideSheet;
+    std::unique_ptr<SpriteSheet> knightSlashSheet;
     std::unique_ptr<SpriteSheet> enemySheet;
     std::unique_ptr<SpriteSheet> coinSheet;
     std::vector<SDL_Surface*>    tileScaledSurfaces; // owned; freed on Unload/Respawn
@@ -68,6 +73,7 @@ class GameScene : public Scene {
     std::vector<SDL_Rect>        hurtFrames;
     std::vector<SDL_Rect>        duckFrames;
     std::vector<SDL_Rect>        frontFrames;
+    std::vector<SDL_Rect>        slashFrames;
     std::vector<SDL_Rect>        enemyWalkFrames;
 
     std::unique_ptr<Image>     background;

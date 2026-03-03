@@ -4,6 +4,14 @@
 #include <entt/entt.hpp>
 
 inline void InputSystem(entt::registry& reg, SDL_Event& e) {
+    // F key — set attackPressed on the player's AttackState
+    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F) {
+        auto atk = reg.view<PlayerTag, AttackState>();
+        atk.each([](AttackState& a) {
+            if (!a.isAttacking) a.attackPressed = true;
+        });
+    }
+
     auto view = reg.view<PlayerTag, Velocity, Renderable, GravityState, ClimbState>();
     view.each([&e](Velocity& v, Renderable& r, GravityState& g, ClimbState& climb) {
         // On the top wall the sprite is rotated 180 so left/right facing is inverted

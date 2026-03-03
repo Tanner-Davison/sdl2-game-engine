@@ -27,7 +27,7 @@ struct Velocity {
 
 // ── Animation ─────────────────────────────────────────────────────────────────
 
-enum class AnimationID { IDLE, WALK, JUMP, HURT, DUCK, FRONT, NONE };
+enum class AnimationID { IDLE, WALK, JUMP, HURT, DUCK, FRONT, SLASH, NONE };
 
 struct AnimationState {
     int         currentFrame = 0;
@@ -53,6 +53,8 @@ struct AnimationSet {
     SDL_Surface*          duckSheet = nullptr;
     std::vector<SDL_Rect> front;
     SDL_Surface*          frontSheet = nullptr;
+    std::vector<SDL_Rect> slash;
+    SDL_Surface*          slashSheet = nullptr;
 };
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -143,6 +145,23 @@ struct GravityState {
     float      punishmentTimer = 0.0f; // counts down after a hit; gravity locked off until 0
 };
 
+// ── Hazard state ──────────────────────────────────────────────────────────────
+// Attached to the player. active=true while overlapping any HazardTag tile.
+// RenderSystem reads flashTimer to pulse the sprite red independently of
+// InvincibilityTimer (which must stay unaffected so the hit-flash still works).
+struct HazardState {
+    bool  active     = false;  // true while player overlaps any hazard tile this frame
+    float flashTimer = 0.0f;   // counts up at ~8 Hz; drives the red flash pulse
+};
+
+// ── Attack state ─────────────────────────────────────────────────────────────
+// Attached to the player. attackPressed fires the slash; isAttacking blocks
+// any other animation swap until the slash plays to completion.
+struct AttackState {
+    bool attackPressed = false; // set by InputSystem on F key-down
+    bool isAttacking   = false; // true while slash anim is playing
+};
+
 // ── Tags (marker components — no data) ───────────────────────────────────────
 
 struct PlayerTag {}; // marks the player entity
@@ -152,6 +171,40 @@ struct DeadTag {};   // marks a stomped enemy — no longer harmful, acts as a p
 struct TileTag {};   // marks a solid tile — blocks movement
 struct LadderTag {};    // marks a ladder tile — passthrough, player can climb with W/S
 struct PropTag {};      // marks a prop tile — rendered only, no collision, no interaction
+struct HazardTag {};    // marks a hazard tile — solid + drains player HP while overlapping
+
+// Marks a tile as slash-destructible.
+// breakSurface is a non-owning pointer into GameScene::tileScaledSurfaces.
+// Stored as a pointer (not passed through EnTT view.each) — always accessed
+// via reg.try_get<DestructibleTag> to avoid EnTT's copy/move restrictions.
+// Anti-gravity tag — attached to enemies and tiles that should float.
+// FloatState tracks the bob oscillation, drift velocity, and spin angle.
+struct FloatTag {};
+
+struct FloatState {
+    float bobTimer   = 0.0f;   // accumulates time for sin-wave bob
+    float bobAmp     = 6.0f;   // pixels of vertical oscillation
+    float bobSpeed   = 2.0f;   // radians/sec  (each entity gets a random phase offset)
+    float bobPhase   = 0.0f;   // random phase so not all entities bob in sync
+    float baseY      = 0.0f;   // Y the entity was spawned at (bob centre)
+    float driftVx    = 0.0f;   // horizontal push velocity (decays with drag)
+    float driftVy    = 0.0f;   // vertical push velocity   (decays with drag)
+    float spinAngle  = 0.0f;   // current visual rotation in degrees (render-only)
+    float spinSpeed  = 0.0f;   // degrees/sec, decays to 0
+    static constexpr float DRAG = 1.8f; // drag coefficient applied each second
+};
+
+struct DestructibleTag {
+    SDL_Surface* breakSurface = nullptr;
+
+    // Non-copyable: EnTT storage uses move-only path; prevents accidental copies.
+    DestructibleTag() = default;
+    explicit DestructibleTag(SDL_Surface* s) : breakSurface(s) {}
+    DestructibleTag(const DestructibleTag&)            = delete;
+    DestructibleTag& operator=(const DestructibleTag&) = delete;
+    DestructibleTag(DestructibleTag&&)                 = default;
+    DestructibleTag& operator=(DestructibleTag&&)      = default;
+};
 struct OpenWorldTag {}; // marks the player as running in open-world (top-down) mode
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
                      // makes contact, then Renderable and Collider are removed so it

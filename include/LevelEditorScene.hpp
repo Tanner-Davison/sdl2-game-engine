@@ -33,12 +33,13 @@ class LevelEditorScene : public Scene {
     void                   Load(Window& window) override;
     void                   Unload() override;
     bool                   HandleEvent(SDL_Event& e) override;
-    void                   Update(float dt) override {}
+    void                   Update(float dt) override;
     void                   Render(Window& window) override;
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope, Hitbox };
+    // Destructible has been removed — Action tool is the one unified slash-trigger.
+    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope, Hitbox, Hazard, AntiGrav, Select };
     enum class PaletteTab { Tiles, Backgrounds };
 
     // -------------------------------------------------------------------------
@@ -125,6 +126,30 @@ class LevelEditorScene : public Scene {
     bool        mImportInputActive = false;
     std::string mImportInputText;
 
+    // ── Selection tool state ───────────────────────────────────────────────
+    std::vector<int> mSelIndices;      // indices into mLevel.tiles that are selected
+    // Rubber-band marquee
+    bool  mSelBoxing   = false;        // dragging a selection rect
+    int   mSelBoxX0    = 0;            // world-space anchor corner
+    int   mSelBoxY0    = 0;
+    int   mSelBoxX1    = 0;            // world-space live corner
+    int   mSelBoxY1    = 0;
+    // Moving the selection
+    bool  mSelDragging = false;
+    int   mSelDragStartWX = 0;         // world-space mouse position at drag start
+    int   mSelDragStartWY = 0;
+    // Per-tile original positions captured at drag-start
+    std::vector<std::pair<float,float>> mSelOrigPositions;
+
+    // Editor camera pan
+    float mCamX = 0.0f;  // world-space offset applied to all canvas rendering
+    float mCamY = 0.0f;
+    bool  mIsPanning    = false; // true while middle-mouse is held
+    int   mPanStartX    = 0;
+    int   mPanStartY    = 0;
+    float mPanCamStartX = 0.0f;
+    float mPanCamStartY = 0.0f;
+
     // Double-click detection (palette items)
     Uint64                  mLastClickTime  = 0;
     int                     mLastClickIndex = -1;
@@ -163,9 +188,9 @@ class LevelEditorScene : public Scene {
     // Toolbar buttons  (three groups separated by GRP_GAP dividers)
     // -------------------------------------------------------------------------
     // Group 1 — Place tools
-    SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{};
-    // Group 2 — Tile modifier tools
-    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{};
+    SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{};
+    // Group 2 — Tile modifier tools (no Destructible button — merged into Action)
+    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{}, btnHazard{}, btnAntiGrav{};
     // Group 3 — Level actions
     SDL_Rect btnGravity{}, btnSave{}, btnLoad{}, btnClear{}, btnPlay{}, btnBack{};
 
@@ -173,9 +198,10 @@ class LevelEditorScene : public Scene {
     // Labels — all white, 12 px, centered in their button
     // -------------------------------------------------------------------------
     // Group 1
-    std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer;
+    std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer, lblSelect;
+    std::unique_ptr<Text> hintSelect;
     // Group 2
-    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox;
+    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox, lblHazard, lblAntiGrav;
     // Group 3
     std::unique_ptr<Text> lblGravity, lblSave, lblLoad, lblClear, lblPlay, lblBack;
     // Status / active tool display
@@ -191,35 +217,55 @@ class LevelEditorScene : public Scene {
         return mWindow ? mWindow->GetWidth() - PALETTE_W : 800;
     }
 
-    SDL_Point SnapToGrid(int x, int y) const {
-        int cx = (x / GRID) * GRID;
-        int cy = ((y - TOOLBAR_H) / GRID) * GRID + TOOLBAR_H;
-        return {cx, std::max(TOOLBAR_H, cy)};
+    // Convert a screen-space canvas point to world space
+    SDL_Point ScreenToWorld(int sx, int sy) const {
+        return { (int)(sx + mCamX), (int)(sy + mCamY) };
+    }
+    // Convert a world-space point to screen space
+    SDL_Point WorldToScreen(float wx, float wy) const {
+        return { (int)(wx - mCamX), (int)(wy - mCamY) };
+    }
+
+    SDL_Point SnapToGrid(int sx, int sy) const {
+        // Convert screen coords to world coords, then snap to grid.
+        // The visual grid lines are drawn at world multiples of GRID,
+        // so snapping in world space keeps placements aligned with them.
+        int wx = (int)(sx + mCamX);
+        int wy = (int)(sy + mCamY);
+        int cx = (wx / GRID) * GRID;
+        int cy = (wy / GRID) * GRID;
+        // Never place above world-y=0 (the top of the canvas)
+        if (cy < 0) cy = 0;
+        return {cx, cy};
     }
 
     bool HitTest(const SDL_Rect& r, int x, int y) const {
         return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
     }
 
-    int HitCoin(int x, int y) const {
+    // Hit-tests take screen-space mouse coords and convert to world space internally
+    int HitCoin(int sx, int sy) const {
+        auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < (int)mLevel.coins.size(); i++) {
             SDL_Rect r = {(int)mLevel.coins[i].x, (int)mLevel.coins[i].y, GRID, GRID};
-            if (HitTest(r, x, y)) return i;
+            if (HitTest(r, wx, wy)) return i;
         }
         return -1;
     }
-    int HitEnemy(int x, int y) const {
+    int HitEnemy(int sx, int sy) const {
+        auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < (int)mLevel.enemies.size(); i++) {
             SDL_Rect r = {(int)mLevel.enemies[i].x, (int)mLevel.enemies[i].y, GRID, GRID};
-            if (HitTest(r, x, y)) return i;
+            if (HitTest(r, wx, wy)) return i;
         }
         return -1;
     }
-    int HitTile(int x, int y) const {
+    int HitTile(int sx, int sy) const {
+        auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = (int)mLevel.tiles.size() - 1; i >= 0; i--) {
             const auto& t = mLevel.tiles[i];
             SDL_Rect    r = {(int)t.x, (int)t.y, t.w, t.h};
-            if (HitTest(r, x, y)) return i;
+            if (HitTest(r, wx, wy)) return i;
         }
         return -1;
     }

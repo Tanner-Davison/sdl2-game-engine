@@ -10,6 +10,7 @@ struct CoinSpawn {
 struct EnemySpawn {
     float x, y;
     float speed;
+    bool  antiGravity = false; // floats in place instead of patrolling on the ground
 };
 struct PlayerSpawn {
     float x, y;
@@ -20,13 +21,17 @@ struct TileSpawn {
     std::string imagePath;
     bool prop   = false; // rendered, no collision — background decoration
     bool ladder = false; // rendered, no solid collision — player can climb with W
-    bool      action      = false;           // rendered and collidable until the player touches it,
-                                             // then stops rendering and stops blocking (e.g. a door)
+    bool      action      = false;           // rendered and collidable until the player SLASHES it,
+                                             // then stops rendering and stops blocking (e.g. a door).
+                                             // This is the one unified slash-trigger tool — replaces
+                                             // the old separate Destructible tool entirely.
     int       actionGroup = 0;              // 0 = standalone; non-zero = group ID.
                                              // All action tiles sharing the same non-zero group
-                                             // are triggered simultaneously when any one is touched.
+                                             // are triggered simultaneously when any one is slashed.
     SlopeType slope       = SlopeType::None; // diagonal slope — collision rides the hypotenuse
     int       rotation    = 0;               // clockwise degrees: 0, 90, 180, 270
+    bool      hazard      = false;           // solid tile that drains 30 HP/sec while player overlaps
+    bool        antiGravity  = false;           // floats — bobs in place, no gravity, pushable
     // Custom hitbox — all zero means "use full tile rect" (default).
     // When non-zero, the collider is this sub-rect relative to (x,y).
     int hitboxOffX = 0;
