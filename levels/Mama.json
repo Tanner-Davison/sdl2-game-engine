@@ -1,0 +1,12 @@
+{
+    "background": "game_assets/backgrounds/Background_02.png",
+    "coins": [],
+    "enemies": [],
+    "gravityMode": "platformer",
+    "name": "Mama",
+    "player": {
+        "x": 576.0,
+        "y": 768.0
+    },
+    "tiles": []
+}

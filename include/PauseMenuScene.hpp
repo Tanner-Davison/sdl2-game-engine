@@ -109,7 +109,7 @@ class PauseMenuScene : public Scene {
             return std::make_unique<GameScene>(mLevelPath, mFromEditor);
         if (mGoBack) {
             if (mFromEditor)
-                return std::make_unique<LevelEditorScene>();
+                return std::make_unique<LevelEditorScene>(mLevelPath);
             else
                 return std::make_unique<TitleScene>();
         }

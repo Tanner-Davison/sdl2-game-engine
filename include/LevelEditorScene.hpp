@@ -42,29 +42,45 @@ class LevelEditorScene : public Scene {
 
   private:
     // Destructible has been removed — Action tool is the one unified slash-trigger.
-    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope, Hitbox, Hazard, AntiGrav, MovingPlat, Select };
+    enum class Tool {
+        Coin,
+        Enemy,
+        Erase,
+        PlayerStart,
+        Tile,
+        Resize,
+        Prop,
+        Ladder,
+        Action,
+        Slope,
+        Hitbox,
+        Hazard,
+        AntiGrav,
+        MovingPlat,
+        Select
+    };
     enum class PaletteTab { Tiles, Backgrounds };
 
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
-    static constexpr int   GRID        = 48;   // 48px gives ~33% more grid cells
-    static constexpr int   TOOLBAR_H   = 86;   // extra room for collapse strip below buttons
-    static constexpr int   PALETTE_W        = 180;
-    static constexpr int   PALETTE_TAB_W    = 18;  // width of the collapsed toggle tab
-    static constexpr int   ICON_SIZE   = 40;
-    static constexpr int   PAL_ICON    = 76;
-    static constexpr int   PAL_COLS    = 2;
-    static constexpr int   TAB_H       = 28;
-    static constexpr float ENEMY_SPEED = 120.0f;
+    static constexpr int   GRID          = 48; // 48px gives ~33% more grid cells
+    static constexpr int   TOOLBAR_H     = 86; // extra room for collapse strip below buttons
+    static constexpr int   PALETTE_W     = 180;
+    static constexpr int   PALETTE_TAB_W = 18; // width of the collapsed toggle tab
+    static constexpr int   ICON_SIZE     = 40;
+    static constexpr int   PAL_ICON      = 76;
+    static constexpr int   PAL_COLS      = 2;
+    static constexpr int   TAB_H         = 28;
+    static constexpr float ENEMY_SPEED   = 120.0f;
 
     // Toolbar layout — all buttons share the same height; widths per group
-    static constexpr int BTN_H      = 56;   // button height (fits inside TOOLBAR_H with margins)
-    static constexpr int BTN_Y      = 8;    // vertical offset from toolbar top
-    static constexpr int BTN_TOOL_W = 68;   // tool buttons (groups 1 & 2)
-    static constexpr int BTN_ACT_W  = 72;   // action buttons (group 3)
-    static constexpr int BTN_GAP    = 4;    // gap between buttons within a group
-    static constexpr int GRP_GAP    = 16;   // gap between groups (shows divider line)
+    static constexpr int BTN_H = 56; // button height (fits inside TOOLBAR_H with margins)
+    static constexpr int BTN_Y = 8;  // vertical offset from toolbar top
+    static constexpr int BTN_TOOL_W = 68; // tool buttons (groups 1 & 2)
+    static constexpr int BTN_ACT_W  = 72; // action buttons (group 3)
+    static constexpr int BTN_GAP    = 4;  // gap between buttons within a group
+    static constexpr int GRP_GAP    = 16; // gap between groups (shows divider line)
 
     // Root directories
     static constexpr const char* TILE_ROOT = "game_assets/tiles";
@@ -74,63 +90,73 @@ class LevelEditorScene : public Scene {
     // Editor state
     // -------------------------------------------------------------------------
     std::string mOpenPath;
-    bool        mForceNew        = false;
-    std::string mPresetName;     // name chosen in title-screen modal (overrides "level1")
-    Window*     mWindow          = nullptr;
-    Tool        mActiveTool      = Tool::Coin;
-    PaletteTab  mActiveTab       = PaletteTab::Tiles;
-    bool        mLaunchGame      = false;
-    bool        mGoBack          = false;   // true = return to TitleScene
+    bool        mForceNew = false;
+    std::string mPresetName; // name chosen in title-screen modal (overrides "level1")
+    Window*     mWindow     = nullptr;
+    Tool        mActiveTool = Tool::Coin;
+    PaletteTab  mActiveTab  = PaletteTab::Tiles;
+    bool        mLaunchGame = false;
+    bool        mGoBack     = false; // true = return to TitleScene
 
     // ── Cached static UI text (rebuilt only when content changes) ─────────────
     // These avoid constructing Text objects every frame in Render.
-    std::unique_ptr<Text> lblPalHeader;        // "Tiles/..." breadcrumb
-    std::unique_ptr<Text> lblPalHint1;         // "Size: N  Esc=up"
-    std::unique_ptr<Text> lblPalHint2;         // "Click folder to open"
-    std::unique_ptr<Text> lblBgHeader;         // "Backgrounds (I=import)"
-    std::unique_ptr<Text> lblStatusBar;        // tile/coin/enemy counts
-    std::unique_ptr<Text> lblCamPos;           // "Cam: x,y"
-    std::unique_ptr<Text> lblBottomHint;       // keyboard shortcut hint
-    std::unique_ptr<Text> lblToolPrefix;       // "Tool:"
+    std::unique_ptr<Text> lblPalHeader;  // "Tiles/..." breadcrumb
+    std::unique_ptr<Text> lblPalHint1;   // "Size: N  Esc=up"
+    std::unique_ptr<Text> lblPalHint2;   // "Click folder to open"
+    std::unique_ptr<Text> lblBgHeader;   // "Backgrounds (I=import)"
+    std::unique_ptr<Text> lblStatusBar;  // tile/coin/enemy counts
+    std::unique_ptr<Text> lblCamPos;     // "Cam: x,y"
+    std::unique_ptr<Text> lblBottomHint; // keyboard shortcut hint
+    std::unique_ptr<Text> lblToolPrefix; // "Tool:"
     // Per-group collapse tab labels (rebuilt in RebuildToolbarLayout)
     std::unique_ptr<Text> lblGrp1Tab, lblGrp2Tab, lblGrp3Tab;
     // Palette cell labels — rebuilt when palette changes
     std::vector<std::unique_ptr<Text>> mPalCellLabels;
     // Track last known values so we only rebuild when they change
-    int   mLastTileCount   = -1;
-    int   mLastCoinCount   = -1;
-    int   mLastEnemyCount  = -1;
-    int   mLastCamX        = INT_MIN;
-    int   mLastCamY        = INT_MIN;
-    int   mLastTileSizeW   = -1;
+    int         mLastTileCount  = -1;
+    int         mLastCoinCount  = -1;
+    int         mLastEnemyCount = -1;
+    int         mLastCamX       = INT_MIN;
+    int         mLastCamY       = INT_MIN;
+    int         mLastTileSizeW  = -1;
     std::string mLastPalHeaderPath;
 
     // ── Hitbox tool state ──────────────────────────────────────────────────
-    int  mHitboxTileIdx  = -1;  // tile currently selected for hitbox editing (-1 = none)
+    int mHitboxTileIdx = -1; // tile currently selected for hitbox editing (-1 = none)
     // Which edge/corner of the hitbox is being dragged
-    enum class HitboxHandle { None, Left, Right, Top, Bottom, TopLeft, TopRight, BotLeft, BotRight };
-    HitboxHandle mHitboxHandle    = HitboxHandle::None;
-    HitboxHandle mHoverHitboxHdl  = HitboxHandle::None;
-    bool         mHitboxDragging  = false;
-    int          mHitboxDragX     = 0;
-    int          mHitboxDragY     = 0;
+    enum class HitboxHandle {
+        None,
+        Left,
+        Right,
+        Top,
+        Bottom,
+        TopLeft,
+        TopRight,
+        BotLeft,
+        BotRight
+    };
+    HitboxHandle mHitboxHandle   = HitboxHandle::None;
+    HitboxHandle mHoverHitboxHdl = HitboxHandle::None;
+    bool         mHitboxDragging = false;
+    int          mHitboxDragX    = 0;
+    int          mHitboxDragY    = 0;
     // Snapshot of hitbox at drag start
-    int          mHitboxOrigOffX  = 0;
-    int          mHitboxOrigOffY  = 0;
-    int          mHitboxOrigW     = 0;
-    int          mHitboxOrigH     = 0;
-    static constexpr int HBOX_HANDLE = 10; // px from edge that activates handle
-    bool        mIsDragging      = false;
-    int         mDragIndex       = -1;
-    bool        mDragIsCoin      = false;
-    bool        mDragIsTile      = false;
-    std::string mStatusMsg       = "New level";
-    std::string mLevelName       = "level1";
-    int         mPaletteScroll   = 0;
-    int         mBgPaletteScroll = 0;
-    int         mSelectedTile    = 0;
-    int         mSelectedBg      = 0;
-    int         mTileW = GRID, mTileH = GRID;
+    int                  mHitboxOrigOffX  = 0;
+    int                  mHitboxOrigOffY  = 0;
+    int                  mHitboxOrigW     = 0;
+    int                  mHitboxOrigH     = 0;
+    static constexpr int HBOX_HANDLE      = 10; // px from edge that activates handle
+    bool                 mIsDragging      = false;
+    int                  mDragIndex       = -1;
+    bool                 mDragIsCoin      = false;
+    bool                 mDragIsTile      = false;
+    std::string          mStatusMsg       = "New level";
+    std::string          mLevelName       = "level1";
+    int                  mPaletteScroll   = 0;
+    int                  mBgPaletteScroll = 0;
+    int                  mSelectedTile    = 0;
+    int                  mSelectedBg      = 0;
+    int                  mTileW = GRID, mTileH = GRID;
 
     // Tile palette navigation
     std::string mTileCurrentDir;
@@ -166,15 +192,15 @@ class LevelEditorScene : public Scene {
     SDL_Surface* GetRotated(const std::string& path, SDL_Surface* src, int deg);
 
     // Palette collapse
-    bool        mPaletteCollapsed  = false; // true = panel hidden, tab visible
+    bool mPaletteCollapsed = false; // true = panel hidden, tab visible
 
     // Toolbar group collapse state
-    bool        mGrp1Collapsed = false;  // Place tools
-    bool        mGrp2Collapsed = false;  // Modifier tools
-    bool        mGrp3Collapsed = false;  // Action buttons
+    bool mGrp1Collapsed = false; // Place tools
+    bool mGrp2Collapsed = false; // Modifier tools
+    bool mGrp3Collapsed = false; // Action buttons
 
     // Collapsed group pill rects (for click detection)
-    SDL_Rect    mGrp1Pill{}, mGrp2Pill{}, mGrp3Pill{};
+    SDL_Rect mGrp1Pill{}, mGrp2Pill{}, mGrp3Pill{};
 
     // Drop / import state
     bool        mDropActive        = false;
@@ -182,23 +208,23 @@ class LevelEditorScene : public Scene {
     std::string mImportInputText;
 
     // ── Selection tool state ───────────────────────────────────────────────
-    std::vector<int> mSelIndices;      // indices into mLevel.tiles that are selected
+    std::vector<int> mSelIndices; // indices into mLevel.tiles that are selected
     // Rubber-band marquee
-    bool  mSelBoxing   = false;        // dragging a selection rect
-    int   mSelBoxX0    = 0;            // world-space anchor corner
-    int   mSelBoxY0    = 0;
-    int   mSelBoxX1    = 0;            // world-space live corner
-    int   mSelBoxY1    = 0;
+    bool mSelBoxing = false; // dragging a selection rect
+    int  mSelBoxX0  = 0;     // world-space anchor corner
+    int  mSelBoxY0  = 0;
+    int  mSelBoxX1  = 0; // world-space live corner
+    int  mSelBoxY1  = 0;
     // Moving the selection
-    bool  mSelDragging = false;
-    int   mSelDragStartWX = 0;         // world-space mouse position at drag start
-    int   mSelDragStartWY = 0;
+    bool mSelDragging    = false;
+    int  mSelDragStartWX = 0; // world-space mouse position at drag start
+    int  mSelDragStartWY = 0;
     // Per-tile original positions captured at drag-start
-    std::vector<std::pair<float,float>> mSelOrigPositions;
+    std::vector<std::pair<float, float>> mSelOrigPositions;
 
     // Editor camera pan
-    float mCamX = 0.0f;  // world-space offset applied to all canvas rendering
-    float mCamY = 0.0f;
+    float mCamX         = 0.0f; // world-space offset applied to all canvas rendering
+    float mCamY         = 0.0f;
     bool  mIsPanning    = false; // true while middle-mouse is held
     int   mPanStartX    = 0;
     int   mPanStartY    = 0;
@@ -239,34 +265,34 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     SDL_Surface*                 mFolderIcon = nullptr;
 
-    // -------------------------------------------------------------------------
     // Toolbar buttons  (three groups separated by GRP_GAP dividers)
     // -------------------------------------------------------------------------
     // Group 1 — Place tools
     SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{};
     // Group 2 — Tile modifier tools (no Destructible button — merged into Action)
-    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{}, btnHazard{}, btnAntiGrav{}, btnMovingPlat{};
+    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{},
+        btnHazard{}, btnAntiGrav{}, btnMovingPlat{};
     // Group 3 — Level actions
     SDL_Rect btnGravity{}, btnSave{}, btnLoad{}, btnClear{}, btnPlay{}, btnBack{};
 
-    // -------------------------------------------------------------------------
     // Labels — all white, 12 px, centered in their button
     // -------------------------------------------------------------------------
     // Group 1
     std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer, lblSelect;
     std::unique_ptr<Text> hintSelect;
     // Group 2
-    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox, lblHazard, lblAntiGrav, lblMovingPlat;
+    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox,
+        lblHazard, lblAntiGrav, lblMovingPlat;
 
     // Moving-platform tool state
     std::vector<int> mMovPlatIndices; // tile indices currently in this platform group
-    int   mMovPlatNextGroupId = 1;    // auto-incremented group id for new platforms
-    int   mMovPlatCurGroupId  = 1;    // group id being painted right now
-    bool  mMovPlatHoriz       = true; // H or V
-    float mMovPlatRange       = 96.0f;
-    float mMovPlatSpeed       = 60.0f;
-    bool  mMovPlatLoop        = false; // true = one-way left→right loop
-    bool  mMovPlatTrigger     = false; // true = only starts when player lands on it
+    int              mMovPlatNextGroupId = 1; // auto-incremented group id for new platforms
+    int              mMovPlatCurGroupId  = 1; // group id being painted right now
+    bool             mMovPlatHoriz       = true; // H or V
+    float            mMovPlatRange       = 96.0f;
+    float            mMovPlatSpeed       = 60.0f;
+    bool             mMovPlatLoop        = false; // true = one-way left→right loop
+    bool             mMovPlatTrigger = false; // true = only starts when player lands on it
     // Group 3
     std::unique_ptr<Text> lblGravity, lblSave, lblLoad, lblClear, lblPlay, lblBack;
     // Status / active tool display
@@ -279,19 +305,19 @@ class LevelEditorScene : public Scene {
     // Helpers
     // -------------------------------------------------------------------------
     int CanvasW() const {
-        if (!mWindow) return 800;
-        return mPaletteCollapsed
-            ? mWindow->GetWidth() - PALETTE_TAB_W
-            : mWindow->GetWidth() - PALETTE_W;
+        if (!mWindow)
+            return 800;
+        return mPaletteCollapsed ? mWindow->GetWidth() - PALETTE_TAB_W
+                                 : mWindow->GetWidth() - PALETTE_W;
     }
 
     // Convert a screen-space canvas point to world space
     SDL_Point ScreenToWorld(int sx, int sy) const {
-        return { (int)(sx + mCamX), (int)(sy + mCamY) };
+        return {(int)(sx + mCamX), (int)(sy + mCamY)};
     }
     // Convert a world-space point to screen space
     SDL_Point WorldToScreen(float wx, float wy) const {
-        return { (int)(wx - mCamX), (int)(wy - mCamY) };
+        return {(int)(wx - mCamX), (int)(wy - mCamY)};
     }
 
     SDL_Point SnapToGrid(int sx, int sy) const {
@@ -303,7 +329,8 @@ class LevelEditorScene : public Scene {
         int cx = (wx / GRID) * GRID;
         int cy = (wy / GRID) * GRID;
         // Never place above world-y=0 (the top of the canvas)
-        if (cy < 0) cy = 0;
+        if (cy < 0)
+            cy = 0;
         return {cx, cy};
     }
 
@@ -316,7 +343,8 @@ class LevelEditorScene : public Scene {
         auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < (int)mLevel.coins.size(); i++) {
             SDL_Rect r = {(int)mLevel.coins[i].x, (int)mLevel.coins[i].y, GRID, GRID};
-            if (HitTest(r, wx, wy)) return i;
+            if (HitTest(r, wx, wy))
+                return i;
         }
         return -1;
     }
@@ -324,7 +352,8 @@ class LevelEditorScene : public Scene {
         auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < (int)mLevel.enemies.size(); i++) {
             SDL_Rect r = {(int)mLevel.enemies[i].x, (int)mLevel.enemies[i].y, GRID, GRID};
-            if (HitTest(r, wx, wy)) return i;
+            if (HitTest(r, wx, wy))
+                return i;
         }
         return -1;
     }
@@ -333,14 +362,16 @@ class LevelEditorScene : public Scene {
         for (int i = (int)mLevel.tiles.size() - 1; i >= 0; i--) {
             const auto& t = mLevel.tiles[i];
             SDL_Rect    r = {(int)t.x, (int)t.y, t.w, t.h};
-            if (HitTest(r, wx, wy)) return i;
+            if (HitTest(r, wx, wy))
+                return i;
         }
         return -1;
     }
 
     void SetStatus(const std::string& msg) {
         mStatusMsg = msg;
-        if (lblStatus) lblStatus->CreateSurface(mStatusMsg);
+        if (lblStatus)
+            lblStatus->CreateSurface(mStatusMsg);
     }
 
     void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
@@ -350,19 +381,20 @@ class LevelEditorScene : public Scene {
 
     void DrawOutline(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1) {
         const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
-        Uint32 col = SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a);
-        SDL_Rect rects[4] = {{r.x, r.y, r.w, t},
-                             {r.x, r.y + r.h, r.w, t},
-                             {r.x, r.y, t, r.h},
-                             {r.x + r.w, r.y, t, r.h}};
-        for (auto& rr : rects) SDL_FillSurfaceRect(s, &rr, col);
+        Uint32                        col = SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a);
+        SDL_Rect                      rects[4] = {{r.x, r.y, r.w, t},
+                                                  {r.x, r.y + r.h, r.w, t},
+                                                  {r.x, r.y, t, r.h},
+                                                  {r.x + r.w, r.y, t, r.h}};
+        for (auto& rr : rects)
+            SDL_FillSurfaceRect(s, &rr, col);
     }
 
     // Palette loading
-    void LoadTileView(const std::string& dir);
-    void LoadBgPalette();
-    void ApplyBackground(int idx);
+    void       LoadTileView(const std::string& dir);
+    void       LoadBgPalette();
+    void       ApplyBackground(int idx);
     ResizeEdge DetectResizeEdge(int tileIdx, int mx, int my) const;
-    bool ImportPath(const std::string& srcPath);
-    void RebuildToolbarLayout(); // recompute button rects after collapse state changes
+    bool       ImportPath(const std::string& srcPath);
+    void       RebuildToolbarLayout(); // recompute button rects after collapse state changes
 };
