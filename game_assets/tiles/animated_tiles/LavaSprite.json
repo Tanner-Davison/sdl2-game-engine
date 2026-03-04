@@ -1,0 +1,12 @@
+{
+    "fps": 8.0,
+    "frames": [
+        "/Users/tanner.davison/Desktop/LavaSprite/1.png",
+        "/Users/tanner.davison/Desktop/LavaSprite/2.png",
+        "/Users/tanner.davison/Desktop/LavaSprite/3.png",
+        "/Users/tanner.davison/Desktop/LavaSprite/4.png",
+        "/Users/tanner.davison/Desktop/LavaSprite/5.png",
+        "/Users/tanner.davison/Desktop/LavaSprite/6.png"
+    ],
+    "name": "LavaSprite"
+}

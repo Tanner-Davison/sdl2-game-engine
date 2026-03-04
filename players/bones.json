@@ -1,0 +1,95 @@
+{
+    "name": "bones",
+    "slots": [
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Walking",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 0,
+                "w": 0,
+                "x": 0,
+                "y": 0
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Jump Loop",
+            "fps": 8.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 0,
+                "w": 0,
+                "x": 0,
+                "y": 0
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Attacking",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Dying",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 75,
+                "x": 43,
+                "y": 29
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 140,
+    "spriteW": 160
+}

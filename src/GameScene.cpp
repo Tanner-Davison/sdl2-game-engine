@@ -1,4 +1,5 @@
 #include "GameScene.hpp"
+#include "AnimatedTile.hpp"
 #include "GameConfig.hpp"
 #include "GameEvents.hpp"
 #include "LevelTwo.hpp"
@@ -7,14 +8,16 @@
 #include <SDL3_image/SDL_image.h>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
 #include <print>
+namespace fs = std::filesystem;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Construction
 // ─────────────────────────────────────────────────────────────────────────────
 
-GameScene::GameScene(const std::string& levelPath, bool fromEditor)
-    : mLevelPath(levelPath), mFromEditor(fromEditor) {}
+GameScene::GameScene(const std::string& levelPath, bool fromEditor, const std::string& profilePath)
+    : mLevelPath(levelPath), mFromEditor(fromEditor), mProfilePath(profilePath) {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scene interface
@@ -28,31 +31,87 @@ void GameScene::Load(Window& window) {
     if (!mLevelPath.empty())
         LoadLevel(mLevelPath, mLevel);
 
-    // ── Frost Knight — individual PNG sequences, zero-padded 3-digit frame numbers ──
-    // KW/KH drive the actual rendered sprite size; collider dims are independent.
-    const int KW = PLAYER_SPRITE_WIDTH;
-    const int KH = PLAYER_SPRITE_HEIGHT;
-    auto loadAnim = [&](const std::string& folder, const std::string& prefix, int count) {
+    // ── Player animation sheets ────────────────────────────────────────────────
+    // If a PlayerProfile is given, load from its slot folders.
+    // Otherwise fall back to the built-in frost knight sequences.
+    PlayerProfile profile;
+    bool useProfile = !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, profile);
+
+    // Sprite render dimensions — use profile override if set, else engine default
+    const int KW = (useProfile && profile.spriteW > 0) ? profile.spriteW : PLAYER_SPRITE_WIDTH;
+    const int KH = (useProfile && profile.spriteH > 0) ? profile.spriteH : PLAYER_SPRITE_HEIGHT;
+    mPlayerSpriteW = KW;
+    mPlayerSpriteH = KH;
+
+    // Helper: build a SpriteSheet from a profile slot folder, falling back to
+    // the knight default if the slot is empty or the folder doesn't exist.
+    auto loadSlot = [&](PlayerAnimSlot slot,
+                        const std::string& fallbackFolder,
+                        const std::string& fallbackPrefix,
+                        int fallbackCount) -> std::unique_ptr<SpriteSheet> {
+        if (useProfile && profile.HasSlot(slot)) {
+            const std::string& dir = profile.Slot(slot).folderPath;
+            // Detect prefix + padDigits the same way PlayerCreatorScene does
+            std::vector<fs::path> pngs;
+            for (const auto& e : fs::directory_iterator(dir))
+                if (e.path().extension() == ".png") pngs.push_back(e.path());
+            if (!pngs.empty()) {
+                std::sort(pngs.begin(), pngs.end());
+                std::string stem = pngs[0].stem().string();
+                int pad = 0;
+                { int k = (int)stem.size()-1; while(k>=0&&std::isdigit((unsigned char)stem[k])){++pad;--k;} }
+                std::string pfx = stem;
+                while (!pfx.empty() && std::isdigit((unsigned char)pfx.back())) pfx.pop_back();
+                std::string numPart = stem.substr(pfx.size());
+                int startIdx = numPart.empty() ? 0 : std::stoi(numPart);
+                return std::make_unique<SpriteSheet>(dir + "/", pfx, (int)pngs.size(), KW, KH, pad, startIdx);
+            }
+        }
+        // Fallback: frost knight
         return std::make_unique<SpriteSheet>(
-            "game_assets/frost_knight_png_sequences/" + folder + "/",
-            prefix, count, KW, KH, 3);
+            "game_assets/frost_knight_png_sequences/" + fallbackFolder + "/",
+            fallbackPrefix, fallbackCount, KW, KH, 3);
     };
 
-    knightIdleSheet  = loadAnim("Idle",         "0_Knight_Idle_",         18);
-    knightWalkSheet  = loadAnim("Walking",       "0_Knight_Walking_",      24);
-    knightHurtSheet  = loadAnim("Hurt",          "0_Knight_Hurt_",         12);
-    knightJumpSheet  = loadAnim("Jump Start",    "0_Knight_Jump Start_",    6);
-    knightFallSheet  = loadAnim("Falling Down",  "0_Knight_Falling Down_",  6);
-    knightSlideSheet = loadAnim("Sliding",       "0_Knight_Sliding_",       6);
-    knightSlashSheet = loadAnim("Slashing",      "0_Knight_Slashing_",      12);
+    // Store per-slot fps so Spawn() can access them without capturing local vars
+    mSlotFps.fill(0.0f);
+    if (useProfile) {
+        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+            auto slot = static_cast<PlayerAnimSlot>(i);
+            mSlotFps[i] = profile.Slot(slot).fps > 0.0f ? profile.Slot(slot).fps : 0.0f;
+        }
+    }
 
-    idleFrames  = knightIdleSheet->GetAnimation("0_Knight_Idle_");
-    walkFrames  = knightWalkSheet->GetAnimation("0_Knight_Walking_");
-    jumpFrames  = knightJumpSheet->GetAnimation("0_Knight_Jump Start_");
-    hurtFrames  = knightHurtSheet->GetAnimation("0_Knight_Hurt_");
-    duckFrames  = knightSlideSheet->GetAnimation("0_Knight_Sliding_");
-    frontFrames = knightFallSheet->GetAnimation("0_Knight_Falling Down_");
-    slashFrames = knightSlashSheet->GetAnimation("0_Knight_Slashing_");
+    knightIdleSheet  = loadSlot(PlayerAnimSlot::Idle,  "Idle",         "0_Knight_Idle_",        18);
+    knightWalkSheet  = loadSlot(PlayerAnimSlot::Walk,  "Walking",      "0_Knight_Walking_",     24);
+    knightHurtSheet  = loadSlot(PlayerAnimSlot::Hurt,  "Hurt",         "0_Knight_Hurt_",        12);
+    knightJumpSheet  = loadSlot(PlayerAnimSlot::Jump,  "Jump Start",   "0_Knight_Jump Start_",   6);
+    knightFallSheet  = loadSlot(PlayerAnimSlot::Fall,  "Falling Down", "0_Knight_Falling Down_", 6);
+    knightSlideSheet = loadSlot(PlayerAnimSlot::Run,   "Sliding",      "0_Knight_Sliding_",      6);
+    knightSlashSheet = loadSlot(PlayerAnimSlot::Slash, "Slashing",     "0_Knight_Slashing_",    12);
+
+    // GetAnimation key: for profile slots use empty prefix fallback detection;
+    // for knight fallback use the known prefix.
+    auto getFrames = [&](std::unique_ptr<SpriteSheet>& sheet,
+                         PlayerAnimSlot slot,
+                         const std::string& knightKey) -> std::vector<SDL_Rect> {
+        if (useProfile && profile.HasSlot(slot)) {
+            // For profile slots the sheet was built with directory-scanned PNGs.
+            // GetAnimation("") matches every key and the new trailing-digit sort
+            // puts them in the right order regardless of prefix.
+            auto all = sheet->GetAnimation("");
+            if (!all.empty()) return all;
+        }
+        return sheet->GetAnimation(knightKey);
+    };
+
+    idleFrames  = getFrames(knightIdleSheet,  PlayerAnimSlot::Idle,  "0_Knight_Idle_");
+    walkFrames  = getFrames(knightWalkSheet,  PlayerAnimSlot::Walk,  "0_Knight_Walking_");
+    jumpFrames  = getFrames(knightJumpSheet,  PlayerAnimSlot::Jump,  "0_Knight_Jump Start_");
+    hurtFrames  = getFrames(knightHurtSheet,  PlayerAnimSlot::Hurt,  "0_Knight_Hurt_");
+    duckFrames  = getFrames(knightSlideSheet, PlayerAnimSlot::Run,   "0_Knight_Sliding_");
+    frontFrames = getFrames(knightFallSheet,  PlayerAnimSlot::Fall,  "0_Knight_Falling Down_");
+    slashFrames = getFrames(knightSlashSheet, PlayerAnimSlot::Slash, "0_Knight_Slashing_");
 
     enemySheet      = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
@@ -120,6 +179,11 @@ bool GameScene::HandleEvent(SDL_Event& e) {
         return false;
 
     if (!gameOver) {
+        // F1 — toggle hitbox debug overlay
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
+            mDebugHitboxes = !mDebugHitboxes;
+            return true;
+        }
         // ESC during active play — request pause
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && !levelComplete) {
             mPauseRequested = true;
@@ -159,6 +223,38 @@ void GameScene::Update(float dt) {
                  mLevelW, mLevelH);
     PlayerStateSystem(reg);
     AnimationSystem(reg, dt);
+
+    // Advance animated tile frames.
+    // Each animated tile's r.frames has N identical rects ({0,0,w,h} per frame)
+    // so anim->currentFrame is always a valid index into both r.frames and
+    // the raw surface vector. We just advance the timer, update currentFrame,
+    // and point rend->sheet at the matching surface. AnimationSystem never
+    // touches these entities (TileAnimTag exclude) so there is no interference.
+    for (auto& [ent, frames] : tileAnimFrameMap) {
+        if (!reg.valid(ent) || frames.empty()) continue;
+        auto* anim = reg.try_get<AnimationState>(ent);
+        auto* rend = reg.try_get<Renderable>(ent);
+        if (!anim || !rend) continue;
+        float dur = (anim->fps > 0.0f) ? 1.0f / anim->fps : 0.125f;
+        anim->timer += dt;
+        while (anim->timer >= dur) {
+            anim->timer -= dur;
+            anim->currentFrame = (anim->currentFrame + 1) % (int)frames.size();
+        }
+        SDL_Surface* cur = frames[anim->currentFrame];
+        if (cur) rend->sheet = cur;
+    }
+
+    // Tick down HitFlash timers on action tiles and remove when expired
+    {
+        auto flashView = reg.view<HitFlash>();
+        std::vector<entt::entity> expired;
+        flashView.each([&](entt::entity e, HitFlash& hf) {
+            hf.timer -= dt;
+            if (hf.timer <= 0.0f) expired.push_back(e);
+        });
+        for (auto e : expired) reg.remove<HitFlash>(e);
+    }
 
     // CollisionSystem now returns a result instead of mutating our variables directly
     CollisionResult collision = CollisionSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
@@ -265,6 +361,108 @@ void GameScene::Render(Window& window) {
         actionText->Render(window.GetSurface());
         RenderSystem(reg, window.GetSurface(), mCamera.x, mCamera.y);
 
+        // ── Debug hitbox overlay (F1) ───────────────────────────────────────
+        if (mDebugHitboxes) {
+            SDL_Surface* s = window.GetSurface();
+
+            // Alpha-blended fill: create a small overlay surface, set blend mode,
+            // then blit-scale it onto the screen rect so alpha is respected.
+            auto fill = [&](SDL_Rect r, Uint8 ri, Uint8 gi, Uint8 bi, Uint8 ai) {
+                SDL_Surface* ov = SDL_CreateSurface(r.w, r.h, SDL_PIXELFORMAT_ARGB8888);
+                if (!ov) return;
+                SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+                const SDL_PixelFormatDetails* f = SDL_GetPixelFormatDetails(ov->format);
+                SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(f, nullptr, ri, gi, bi, ai));
+                SDL_BlitSurface(ov, nullptr, s, &r);
+                SDL_DestroySurface(ov);
+            };
+            // Solid 1px outline — no blending needed for lines
+            auto outline = [&](SDL_Rect r, Uint8 ri, Uint8 gi, Uint8 bi) {
+                SDL_Surface* ov = SDL_CreateSurface(r.w, r.h, SDL_PIXELFORMAT_ARGB8888);
+                if (!ov) return;
+                SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+                const SDL_PixelFormatDetails* f = SDL_GetPixelFormatDetails(ov->format);
+                SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(f, nullptr, 0, 0, 0, 0));
+                Uint32 c = SDL_MapRGBA(f, nullptr, ri, gi, bi, 255);
+                SDL_Rect sides[4] = {
+                    {0, 0,         r.w, 1},
+                    {0, r.h-1,     r.w, 1},
+                    {0, 0,         1,   r.h},
+                    {r.w-1, 0,     1,   r.h}
+                };
+                for (auto& sr : sides) SDL_FillSurfaceRect(ov, &sr, c);
+                SDL_BlitSurface(ov, nullptr, s, &r);
+                SDL_DestroySurface(ov);
+            };
+
+            // Player — cyan
+            {
+                auto pv = reg.view<PlayerTag, Transform, Collider>();
+                pv.each([&](const Transform& t, const Collider& c) {
+                    int sx = (int)(t.x - mCamera.x);
+                    int sy = (int)(t.y - mCamera.y);
+                    SDL_Rect r = {sx, sy, c.w, c.h};
+                    fill(r, 0, 255, 255, 50);
+                    outline(r, 0, 255, 255);
+                    Text lbl(std::to_string(c.w) + "x" + std::to_string(c.h),
+                             SDL_Color{0,255,255,255}, sx+2, sy+2, 10);
+                    lbl.Render(s);
+                });
+            }
+
+            // Solid tiles — white
+            {
+                auto tv = reg.view<TileTag, Transform, Collider>();
+                tv.each([&](entt::entity te, const Transform& t, const Collider& c) {
+                    float tx = t.x, ty = t.y;
+                    if (const auto* off = reg.try_get<ColliderOffset>(te)) { tx += off->x; ty += off->y; }
+                    int sx = (int)(tx - mCamera.x), sy = (int)(ty - mCamera.y);
+                    SDL_Rect r = {sx, sy, c.w, c.h};
+                    fill(r, 255, 255, 255, 18);
+                    outline(r, 160, 160, 255);
+                });
+            }
+
+            // Hazard tiles — red
+            {
+                auto hv = reg.view<HazardTag, Transform, Collider>();
+                hv.each([&](entt::entity he, const Transform& t, const Collider& c) {
+                    float hx = t.x, hy = t.y;
+                    if (const auto* off = reg.try_get<ColliderOffset>(he)) { hx += off->x; hy += off->y; }
+                    int sx = (int)(hx - mCamera.x), sy = (int)(hy - mCamera.y);
+                    SDL_Rect r = {sx, sy, c.w, c.h};
+                    fill(r, 255, 40, 40, 60);
+                    outline(r, 255, 40, 40);
+                });
+            }
+
+            // Ladder tiles — green outline only
+            {
+                auto lv = reg.view<LadderTag, Transform, Collider>();
+                lv.each([&](const Transform& t, const Collider& c) {
+                    SDL_Rect r = {(int)(t.x - mCamera.x), (int)(t.y - mCamera.y), c.w, c.h};
+                    outline(r, 60, 255, 60);
+                });
+            }
+
+            // Enemies — orange
+            {
+                auto ev = reg.view<EnemyTag, Transform, Collider>(entt::exclude<DeadTag>);
+                ev.each([&](const Transform& t, const Collider& c) {
+                    SDL_Rect r = {(int)(t.x - mCamera.x), (int)(t.y - mCamera.y), c.w, c.h};
+                    fill(r, 255, 140, 0, 45);
+                    outline(r, 255, 140, 0);
+                });
+            }
+
+            // HUD hint bar
+            SDL_Rect hintBg = {0, window.GetHeight()-20, window.GetWidth(), 20};
+            fill(hintBg, 0, 0, 0, 140);
+            Text hint("[F1] Hitboxes  Cyan=Player  White=Solid  Red=Hazard  Green=Ladder  Orange=Enemy",
+                      SDL_Color{220, 220, 220, 255}, 8, window.GetHeight()-16, 11);
+            hint.Render(s);
+        }
+
         HUDSystem(reg, window.GetSurface(), window.GetWidth(),
                   healthText.get(), gravityText.get(),
                   coinText.get(), coinCount,
@@ -369,11 +567,70 @@ void GameScene::Spawn() {
     }
 
     // ── Player spawn ──────────────────────────────────────────────────────────
+    // Derive collider + render-offset from the resolved sprite size.
+    // If the profile has an explicit hitbox on the Idle slot, use it directly
+    // (values are in sprite-local px, so x/y become the render offset insets).
+    // Otherwise fall back to proportionally-scaled frost-knight insets.
+    int pColW, pColH, pROffX, pROffY;
+    {
+        // Try to load the profile to read the Idle hitbox
+        PlayerProfile tmpProfile;
+        bool hasProfile = !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, tmpProfile);
+        const AnimHitbox& idleHB = hasProfile
+            ? tmpProfile.Slot(PlayerAnimSlot::Idle).hitbox
+            : AnimHitbox{};
+
+        if (!idleHB.IsDefault()) {
+            // Profile hitbox is in sprite-local px.
+            // Strategy: Transform = sprite top-left, ColliderOffset shifts the
+            // physics box to (hb.x, hb.y) within the sprite. RenderOffset = 0.
+            // CollisionSystem already handles ColliderOffset for tiles; the
+            // player path in CollisionSystem uses pt directly (no offset), so
+            // we keep Transform = collider top-left for physics but adjust
+            // playerX/Y so the sprite-origin lands at the right screen position.
+            //
+            // Simplest correct model that requires NO CollisionSystem changes:
+            //   Transform  = collider top-left  (physics origin, unchanged)
+            //   RenderOffset.x = -hb.x          (sprite draws hb.x left of collider)
+            //   RenderOffset.y = -(spriteH - hb.h - (spriteH - hb.y - hb.h))
+            //                  = -hb.y           ... but bottom-align overrides this:
+            //   Bottom-align: sprite bottom == collider bottom
+            //     roff.y = hb.h - spriteH        (negative: sprite top is above collider top)
+            //   Horizontal-center: sprite center == collider center
+            //     roff.x = hb.w/2 - spriteW/2 + (hb.x - hb.w/2) ... simplifies to:
+            //     roff.x = hb.x - (spriteW - hb.w) / 2 ... no, just use -hb.x
+            //     Actually: collider left = transform.x
+            //               sprite left  = transform.x + roff.x
+            //               hb.x pixels into sprite = collider left
+            //               => transform.x + roff.x + hb.x = transform.x
+            //               => roff.x = -hb.x  ✓
+            pColW  = idleHB.w;
+            pColH  = idleHB.h;
+            // X: sprite-pixel hb.x aligns with collider left
+            //    transform.x + roff.x + hb.x = transform.x  =>  roff.x = -hb.x
+            pROffX = -idleHB.x;
+            // Y: sprite-pixel hb.y aligns with collider top
+            //    transform.y + roff.y + hb.y = transform.y  =>  roff.y = -hb.y
+            pROffY = -idleHB.y;
+        } else {
+            // Fallback: scale frost-knight insets proportionally
+            const float scaleX    = (float)mPlayerSpriteW / PLAYER_SPRITE_WIDTH;
+            const float scaleY    = (float)mPlayerSpriteH / PLAYER_SPRITE_HEIGHT;
+            const int   pInsetX   = (int)(PLAYER_BODY_INSET_X      * scaleX);
+            const int   pInsetTop = (int)(PLAYER_BODY_INSET_TOP    * scaleY);
+            const int   pInsetBot = (int)(PLAYER_BODY_INSET_BOTTOM * scaleY);
+            pColW  = mPlayerSpriteW - pInsetX * 2;
+            pColH  = mPlayerSpriteH - pInsetTop - pInsetBot;
+            pROffX = -pInsetX;
+            pROffY = -pInsetTop;
+        }
+    }
+
     float playerX = mLevelPath.empty()
-                      ? (float)(mWindow->GetWidth() / 2 - 33)
+                      ? (float)(mWindow->GetWidth() / 2 - pColW / 2)
                       : mLevel.player.x;
     float playerY = mLevelPath.empty()
-                      ? (float)(mWindow->GetHeight() - PLAYER_STAND_HEIGHT)
+                      ? (float)(mWindow->GetHeight() - pColH)
                       : mLevel.player.y;
 
     auto player = reg.create();
@@ -383,8 +640,8 @@ void GameScene::Spawn() {
     reg.emplace<Renderable>(player, knightIdleSheet->GetSurface(), idleFrames, false);
     reg.emplace<PlayerTag>(player);
     reg.emplace<Health>(player);
-    reg.emplace<Collider>(player, PLAYER_STAND_WIDTH, PLAYER_STAND_HEIGHT);
-    reg.emplace<RenderOffset>(player, PLAYER_STAND_ROFF_X, PLAYER_STAND_ROFF_Y);
+    reg.emplace<Collider>(player, pColW, pColH);
+    reg.emplace<RenderOffset>(player, pROffX, pROffY);
     reg.emplace<InvincibilityTimer>(player);
     {
         GravityState gs;
@@ -399,18 +656,106 @@ void GameScene::Spawn() {
     reg.emplace<ClimbState>(player);
     reg.emplace<HazardState>(player);
     reg.emplace<AttackState>(player);
+    // Helper to resolve per-slot FPS: use profile value when > 0, else 0 (PlayerStateSystem uses its own default)
+    auto slotFps = [&](PlayerAnimSlot slot) -> float {
+        return mSlotFps[static_cast<int>(slot)];
+    };
     reg.emplace<AnimationSet>(player, AnimationSet{
-        .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetSurface(),
-        .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetSurface(),
-        .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetSurface(),
-        .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetSurface(),
-        .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetSurface(),
-        .front      = frontFrames, .frontSheet = knightFallSheet->GetSurface(),
-        .slash      = slashFrames, .slashSheet = knightSlashSheet->GetSurface(),
+        .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetSurface(),  .idleFps  = slotFps(PlayerAnimSlot::Idle),
+        .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetSurface(),  .walkFps  = slotFps(PlayerAnimSlot::Walk),
+        .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetSurface(),  .jumpFps  = slotFps(PlayerAnimSlot::Jump),
+        .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetSurface(),  .hurtFps  = slotFps(PlayerAnimSlot::Hurt),
+        .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetSurface(), .duckFps  = slotFps(PlayerAnimSlot::Run),
+        .front      = frontFrames, .frontSheet = knightFallSheet->GetSurface(),  .frontFps = slotFps(PlayerAnimSlot::Fall),
+        .slash      = slashFrames, .slashSheet = knightSlashSheet->GetSurface(), .slashFps = slotFps(PlayerAnimSlot::Slash),
     });
 
     // ── Spawn tiles — only from level file ────────────────────────────────────
     for (const auto& ts : mLevel.tiles) {
+
+        // ── Animated tile: load all frames, register runtime state ─────────
+        if (IsAnimatedTile(ts.imagePath)) {
+            AnimatedTileDef def;
+            if (!LoadAnimatedTileDef(ts.imagePath, def) || def.framePaths.empty()) {
+                std::print("Failed to load animated tile def: {}\n", ts.imagePath);
+                continue;
+            }
+
+            // Load and scale all frames to tile dimensions
+            std::vector<SDL_Surface*> frameSurfs;
+            for (const auto& fp : def.framePaths) {
+                SDL_Surface* raw = IMG_Load(fp.c_str());
+                if (!raw) { frameSurfs.push_back(nullptr); continue; }
+                SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+                SDL_DestroySurface(raw);
+                if (!conv) { frameSurfs.push_back(nullptr); continue; }
+                SDL_Surface* scaled = SDL_CreateSurface(ts.w, ts.h, SDL_PIXELFORMAT_ARGB8888);
+                if (scaled) {
+                    SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
+                    SDL_BlitSurfaceScaled(conv, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
+                    SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
+                    if (ts.rotation != 0) {
+                        SDL_Surface* rot = RotateSurfaceDeg(scaled, ts.rotation);
+                        if (rot) { SDL_DestroySurface(scaled); scaled = rot; }
+                    }
+                }
+                SDL_DestroySurface(conv);
+                frameSurfs.push_back(scaled);
+            }
+
+            if (frameSurfs.empty() || !frameSurfs[0]) {
+                for (auto* s : frameSurfs) if (s) SDL_DestroySurface(s);
+                continue;
+            }
+
+            // Build frame rects (each surface is exactly ts.w x ts.h, so rect is always {0,0,w,h})
+            std::vector<SDL_Rect> frameRects;
+            for (auto* s : frameSurfs)
+                frameRects.push_back({0, 0, ts.w, ts.h});
+
+            // Store ALL frame surfaces in tileScaledSurfaces so they get freed on Unload
+            for (auto* s : frameSurfs)
+                if (s) tileScaledSurfaces.push_back(s);
+
+            // Use frame 0 as the initial sheet pointer for Renderable
+            // AnimatedTileState drives frame advancement each Update tick
+            auto tile = reg.create();
+            reg.emplace<Transform>(tile, ts.x, ts.y);
+
+            bool hasCustomHitbox = (ts.hitboxW > 0 || ts.hitboxH > 0);
+            int  colW = hasCustomHitbox ? (ts.hitboxW > 0 ? ts.hitboxW : ts.w) : ts.w;
+            int  colH = hasCustomHitbox ? (ts.hitboxH > 0 ? ts.hitboxH : ts.h) : ts.h;
+
+            if (ts.ladder)                         reg.emplace<LadderTag>(tile);
+            else if (ts.slope != SlopeType::None) { reg.emplace<TileTag>(tile); reg.emplace<SlopeCollider>(tile, ts.slope, ts.slopeHeightFrac); }
+            else if (ts.hazard)                   { reg.emplace<HazardTag>(tile); if (!ts.prop) reg.emplace<TileTag>(tile); }
+            else if (!ts.prop)                      reg.emplace<TileTag>(tile);
+            if (ts.prop)                            reg.emplace<PropTag>(tile);
+            // Action tag is independent — always emitted when set, but TileTag
+            // (solid collision) is only added above when prop=false.
+            if (ts.action)                          reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits);
+
+            if (!ts.prop) reg.emplace<Collider>(tile, colW, colH);
+            // Emit ColliderOffset whenever any hitbox customization exists,
+            // even if offset is 0,0 but size was trimmed — so the collision
+            // system can trust the Collider size came from editor data.
+            if (hasCustomHitbox)
+                reg.emplace<ColliderOffset>(tile, ts.hitboxOffX, ts.hitboxOffY);
+
+            // Build N identical frame rects (one per surface) so anim->currentFrame
+            // is always a valid index into both r.frames and our frameSurfs vector.
+            // RenderSystem reads r.frames[anim->currentFrame] for the src rect and
+            // r.sheet for the surface -- we swap r.sheet each tick in Update.
+            std::vector<SDL_Rect> animFrameRects((int)frameSurfs.size(),
+                                                  SDL_Rect{0, 0, ts.w, ts.h});
+            reg.emplace<TileAnimTag>(tile);
+            reg.emplace<Renderable>(tile, frameSurfs[0], std::move(animFrameRects), false);
+            reg.emplace<AnimationState>(tile, 0, (int)frameSurfs.size(), 0.0f, def.fps, true);
+            tileAnimFrameMap[tile] = std::move(frameSurfs);
+            continue;
+        }
+
+        // ── Normal PNG tile ────────────────────────────────────────────────
         SDL_Surface* raw = IMG_Load(ts.imagePath.c_str());
         if (!raw) {
             std::print("Failed to load tile: {}\n", ts.imagePath);
@@ -456,25 +801,25 @@ void GameScene::Spawn() {
         if (ts.ladder) {
             reg.emplace<LadderTag>(tile);
             reg.emplace<Collider>(tile, colW, colH);
-        } else if (ts.prop) {
-            reg.emplace<PropTag>(tile);
-        } else if (ts.action) {
-            reg.emplace<ActionTag>(tile, ts.actionGroup);
-            reg.emplace<TileTag>(tile);
-            reg.emplace<Collider>(tile, colW, colH);
         } else if (ts.slope != SlopeType::None) {
             reg.emplace<TileTag>(tile);
             reg.emplace<Collider>(tile, colW, colH);
-            reg.emplace<SlopeCollider>(tile, ts.slope);
+            reg.emplace<SlopeCollider>(tile, ts.slope, ts.slopeHeightFrac);
         } else if (ts.hazard) {
-            // Hazard: passthrough tile (no TileTag) — the player walks into it
-            // and takes damage.  No push-out; overlap is detected by CollisionSystem.
+            // Hazard: damages the player on overlap. Also solid (TileTag) unless
+            // prop is set, in which case the player can walk through it.
             reg.emplace<HazardTag>(tile);
             reg.emplace<Collider>(tile, colW, colH);
+            if (!ts.prop) reg.emplace<TileTag>(tile);
         } else {
             reg.emplace<Collider>(tile, colW, colH);
-            reg.emplace<TileTag>(tile);
+            if (!ts.prop) reg.emplace<TileTag>(tile);
         }
+        // Prop and Action are orthogonal to the collision type above.
+        // prop=true  -> visual only, walk-through regardless of action
+        // action=true -> slashable; solid by default, walk-through if prop also set
+        if (ts.prop)   reg.emplace<PropTag>(tile);
+        if (ts.action) reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits);
 
         // Anti-gravity tiles float and are pushable
         if (ts.antiGravity) {
@@ -515,8 +860,9 @@ void GameScene::Spawn() {
             reg.emplace<MovingPlatformState>(tile, mps);
         }
 
-        // Attach offset component when the hitbox doesn't start at tile origin
-        if (hasCustomHitbox && (ts.hitboxOffX != 0 || ts.hitboxOffY != 0))
+        // Attach offset component whenever hitbox was customized (even if offset is 0,0
+        // but size was trimmed) so CollisionSystem can trust Collider came from editor data.
+        if (hasCustomHitbox)
             reg.emplace<ColliderOffset>(tile, ts.hitboxOffX, ts.hitboxOffY);
         std::vector<SDL_Rect> tileFrame = {{0, 0, ts.w, ts.h}};
         reg.emplace<Renderable>(tile, scaled, tileFrame, false);
@@ -564,6 +910,7 @@ void GameScene::Spawn() {
 
 void GameScene::Respawn() {
     reg.clear();
+    tileAnimFrameMap.clear(); // entity handles are invalid after reg.clear()
     for (auto* s : tileScaledSurfaces) SDL_DestroySurface(s);
     tileScaledSurfaces.clear();
     gameOver           = false;

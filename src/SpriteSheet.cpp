@@ -20,7 +20,7 @@ SpriteSheet::SpriteSheet(const std::string& imageFile, const std::string& coordF
     LoadCoordinates(coordFile);
 }
 
-SpriteSheet::SpriteSheet(const std::string& directory, const std::string& prefix, int frameCount, int targetW, int targetH, int padDigits)
+SpriteSheet::SpriteSheet(const std::string& directory, const std::string& prefix, int frameCount, int targetW, int targetH, int padDigits, int startIndex)
     : surface(nullptr) {
     std::string dir = directory;
     if (!dir.empty() && dir.back() != '/')
@@ -29,8 +29,11 @@ SpriteSheet::SpriteSheet(const std::string& directory, const std::string& prefix
     std::vector<SDL_Surface*> frameSurfaces;
     int frameW = 0, frameH = 0;
 
-    // Determine start index: padded sequences start at 0, unpadded at 1
-    int startIdx = (padDigits > 0) ? 0 : 1;
+    // Determine start index: padded sequences start at 0, unpadded at 1.
+    // Caller can override by passing startIndex explicitly (default -1 = auto).
+    int startIdx = (startIndex >= 0) ? startIndex
+                 : (padDigits > 0)   ? 0
+                                     : 1;
     int endIdx   = startIdx + frameCount - 1;
 
     // Load frames in strict numeric order (startIdx..endIdx) so that column i
@@ -227,16 +230,19 @@ std::vector<SDL_Rect> SpriteSheet::GetAnimation(const std::string& baseName) con
         }
     }
 
-    // Sort numerically by the number suffix to avoid "Gold_10" sorting before "Gold_2"
+    // Sort numerically by the trailing digit suffix to avoid "Gold_10" sorting before "Gold_2".
+    // We scan from the end of each key to find where the numeric suffix starts, so this
+    // works regardless of how much (or how little) of the prefix baseName covered.
     std::sort(matchingFrames.begin(),
               matchingFrames.end(),
-              [&baseName](const auto& a, const auto& b) {
-                  auto numStr = [&](const std::string& s) {
-                      std::string n = s.substr(baseName.size());
-                      // strip any non-digit prefix left (e.g. walk01 vs walk1)
-                      return n.empty() ? 0 : std::stoi(n);
+              [](const auto& a, const auto& b) {
+                  auto trailingNum = [](const std::string& s) -> int {
+                      int i = (int)s.size() - 1;
+                      while (i >= 0 && std::isdigit((unsigned char)s[i])) --i;
+                      std::string digits = s.substr(i + 1);
+                      return digits.empty() ? 0 : std::stoi(digits);
                   };
-                  return numStr(a.first) < numStr(b.first);
+                  return trailingNum(a.first) < trailingNum(b.first);
               });
 
     // Extract just the rects

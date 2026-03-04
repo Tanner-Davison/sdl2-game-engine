@@ -18,7 +18,8 @@
  * @param dt   Delta time in seconds since the last frame.
  */
 inline void AnimationSystem(entt::registry& reg, float dt) {
-    auto view = reg.view<AnimationState>();
+    // Exclude animated tile entities — GameScene::Update owns their frame timing.
+    auto view = reg.view<AnimationState>(entt::exclude<TileAnimTag>);
     view.each([dt](AnimationState& anim) {
         if (!anim.looping && anim.currentFrame == anim.totalFrames - 1)
             return;

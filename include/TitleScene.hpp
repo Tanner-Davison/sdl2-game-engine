@@ -1,5 +1,6 @@
 #pragma once
 #include "Image.hpp"
+#include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
 #include "SurfaceUtils.hpp"
@@ -14,6 +15,8 @@
 
 class GameScene;
 class LevelEditorScene;
+class PlayerCreatorScene;
+class TileAnimCreatorScene;
 namespace fs = std::filesystem;
 
 class TitleScene : public Scene {
@@ -32,37 +35,73 @@ class TitleScene : public Scene {
         titleText = std::make_unique<Text>("SDL Sandbox", SDL_Color{255, 255, 255, 255},
                                            titleX, titleY - 120, 72);
 
-        int btnW = 180, btnH = 55;
-        int gap  = 20;
-        int cy   = mWindowH / 2 - 80;
-        int cx   = mWindowW / 2;
+        // ── Layout constants ──────────────────────────────────────────────────
+        const int btnW  = 180;  // button width
+        const int btnH  = 50;   // button height
+        const int gap   = 16;   // horizontal gap between sibling buttons
+        const int rowGap = 14;  // vertical gap between button rows
+        const int cx    = mWindowW / 2;
 
-        playBtnRect = {cx - btnW - gap / 2, cy, btnW, btnH};
+        // Row 1 starts just above centre so there's room for rows 2 + level list
+        const int row1Y = mWindowH / 2 - 100;
+        const int row2Y = row1Y + btnH + rowGap;
+        // Row 1: Play  |  Level Editor  (centred as a pair)
+        playBtnRect = {cx - btnW - gap / 2, row1Y, btnW, btnH};
         playButton  = std::make_unique<Rectangle>(playBtnRect);
         playButton->SetColor({255, 255, 255, 255});
         playButton->SetHoverColor({180, 180, 180, 255});
-        auto [pbx, pby] = Text::CenterInRect("Play", 32, playBtnRect);
-        playBtnText = std::make_unique<Text>("Play", SDL_Color{0, 0, 0, 255}, pbx, pby, 32);
+        auto [pbx, pby] = Text::CenterInRect("Play", 28, playBtnRect);
+        playBtnText = std::make_unique<Text>("Play", SDL_Color{0, 0, 0, 255}, pbx, pby, 28);
 
-        editorBtnRect = {cx + gap / 2, cy, btnW, btnH};
+        editorBtnRect = {cx + gap / 2, row1Y, btnW, btnH};
         editorButton  = std::make_unique<Rectangle>(editorBtnRect);
         editorButton->SetColor({80, 120, 200, 255});
         editorButton->SetHoverColor({100, 150, 230, 255});
-        auto [eBtnX, eBtnY] = Text::CenterInRect("Level Editor", 24, editorBtnRect);
+        auto [eBtnX, eBtnY] = Text::CenterInRect("Level Editor", 22, editorBtnRect);
         editorBtnText = std::make_unique<Text>("Level Editor", SDL_Color{255, 255, 255, 255},
-                                               eBtnX, eBtnY, 24);
+                                               eBtnX, eBtnY, 22);
 
+        // Row 2: Create Player  |  Tile Animator  (centred as a pair)
+        createPlayerBtnRect = {cx - btnW - gap / 2, row2Y, btnW, btnH};
+        createPlayerButton  = std::make_unique<Rectangle>(createPlayerBtnRect);
+        createPlayerButton->SetColor({160, 80, 180, 255});
+        createPlayerButton->SetHoverColor({200, 110, 220, 255});
+        auto [cpbx, cpby] = Text::CenterInRect("Create Player", 20, createPlayerBtnRect);
+        createPlayerBtnText = std::make_unique<Text>("Create Player",
+                                                     SDL_Color{255, 255, 255, 255},
+                                                     cpbx, cpby, 20);
+
+        tileAnimBtnRect = {cx + gap / 2, row2Y, btnW, btnH};
+        tileAnimButton  = std::make_unique<Rectangle>(tileAnimBtnRect);
+        tileAnimButton->SetColor({40, 140, 160, 255});
+        tileAnimButton->SetHoverColor({60, 180, 200, 255});
+        auto [tabx, taby] = Text::CenterInRect("Tile Animator", 20, tileAnimBtnRect);
+        tileAnimBtnText = std::make_unique<Text>("Tile Animator",
+                                                  SDL_Color{255, 255, 255, 255},
+                                                  tabx, taby, 20);
+
+        // Hint text sits below row 2, well clear of everything
         hintText = std::make_unique<Text>("Press ENTER to play hardcoded level",
-                                          SDL_Color{160, 160, 160, 255},
-                                          cx - 190, cy + btnH + 10, 16);
+                                          SDL_Color{140, 140, 140, 255},
+                                          cx - 170, row2Y + btnH + 8, 13);
 
+        mRow2BottomY = row2Y + btnH;
+
+        // Character selector — sits just below the two button rows.
+        // mProfileSelectorBaseY is locked to the original mRow2BottomY so that
+        // rebuildProfileSelector() always positions the bar correctly even if
+        // mRow2BottomY is later bumped for the level list.
+        mProfileSelectorBaseY = mRow2BottomY;
+        scanProfiles();
+        rebuildProfileSelector();
+        mRow2BottomY += 52; // 10px gap + 32px selector + 10px gap
         scanLevels(mWindowW, mWindowH);
 
         if (mLevelButtons.empty()) {
             noLevelsText = std::make_unique<Text>(
                 "No saved levels yet — make one in the Level Editor!",
                 SDL_Color{140, 140, 140, 255},
-                cx - 230, editorBtnRect.y + editorBtnRect.h + 60, 16);
+                cx - 230, mRow2BottomY + 50, 15);
         }
     }
 
@@ -142,6 +181,28 @@ class TitleScene : public Scene {
                 mEditorName  = "";
                 openEditor   = true;
             }
+            if (hit(createPlayerBtnRect, mx, my)) {
+                openPlayerCreator = true;
+                return true;
+            }
+            // Character selector arrows
+            if (!mProfiles.empty()) {
+                if (hit(mProfilePrevRect, mx, my)) {
+                    mProfileIdx = (mProfileIdx - 1 + (int)mProfiles.size()) % (int)mProfiles.size();
+                    mChosenProfile = mProfiles[mProfileIdx];
+                    rebuildProfileSelector();
+                    return true;
+                }
+                if (hit(mProfileNextRect, mx, my)) {
+                    mProfileIdx = (mProfileIdx + 1) % (int)mProfiles.size();
+                    mChosenProfile = mProfiles[mProfileIdx];
+                    rebuildProfileSelector();
+                    return true;
+                }
+            }
+            if (hit(tileAnimBtnRect, mx, my)) {
+                openTileAnimCreator = true;
+            }
             // "+ New Level" — open naming modal
             if (hit(newLevelRect, mx, my)) {
                 openNamePrompt();
@@ -164,6 +225,8 @@ class TitleScene : public Scene {
 
         playButton->HandleEvent(e);
         editorButton->HandleEvent(e);
+        if (createPlayerButton) createPlayerButton->HandleEvent(e);
+        if (tileAnimButton)     tileAnimButton->HandleEvent(e);
         return true;
     }
 
@@ -177,7 +240,29 @@ class TitleScene : public Scene {
 
         playButton->Render(s);    playBtnText->Render(s);
         editorButton->Render(s);  editorBtnText->Render(s);
-        if (hintText) hintText->Render(s);
+        if (hintText)  hintText->Render(s);
+        if (createPlayerButton) { createPlayerButton->Render(s); createPlayerBtnText->Render(s); }
+        if (tileAnimButton)     { tileAnimButton->Render(s);     tileAnimBtnText->Render(s); }
+
+        // Character selector
+        if (mProfileSelectorBg.w > 0) {
+            fillRect(s, mProfileSelectorBg, {28, 32, 52, 255});
+            outlineRect(s, mProfileSelectorBg, {80, 100, 180, 255});
+        }
+        if (mProfileLabel)    mProfileLabel->Render(s);
+        if (mProfileNameText) mProfileNameText->Render(s);
+        if (!mProfiles.empty()) {
+            // Prev arrow
+            fillRect(s, mProfilePrevRect, {45, 55, 100, 255});
+            outlineRect(s, mProfilePrevRect, {80, 100, 200, 255});
+            Text arr1("<", {220,220,255,255}, mProfilePrevRect.x+8, mProfilePrevRect.y+4, 16);
+            arr1.Render(s);
+            // Next arrow
+            fillRect(s, mProfileNextRect, {45, 55, 100, 255});
+            outlineRect(s, mProfileNextRect, {80, 100, 200, 255});
+            Text arr2(">", {220,220,255,255}, mProfileNextRect.x+8, mProfileNextRect.y+4, 16);
+            arr2.Render(s);
+        }
 
         if (levelsHeader) levelsHeader->Render(s);
         if (newLevelBtn)  { newLevelBtn->Render(s); newLevelLabel->Render(s); }
@@ -320,7 +405,7 @@ class TitleScene : public Scene {
         const int gap    = 8;
         const int rowGap = 12;
         const int totalW = playW + gap + editW;
-        int startY       = editorBtnRect.y + editorBtnRect.h + 30;
+        int startY       = mRow2BottomY + 28;
         int centerX      = winW / 2;
 
         // "+ New Level" button
@@ -383,11 +468,51 @@ class TitleScene : public Scene {
         }
     }
 
+    // ── Profile selector helpers ──────────────────────────────────────────────
+    void scanProfiles() {
+        mProfiles.clear();
+        mProfiles.push_back(""); // index 0 = default frost knight
+        for (const auto& p : ScanPlayerProfiles())
+            mProfiles.push_back(p.string());
+        mProfileIdx = 0;
+        mChosenProfile = "";
+    }
+
+    void rebuildProfileSelector() {
+        int cx   = mWindowW / 2;
+        int selY = mProfileSelectorBaseY + 10;
+        int selW = 340;
+        int selH = 32;
+        int arrW = 28;
+
+        mProfileSelectorBg = {cx - selW/2, selY, selW, selH};
+        mProfilePrevRect   = {cx - selW/2,           selY+2, arrW, selH-4};
+        mProfileNextRect   = {cx + selW/2 - arrW,    selY+2, arrW, selH-4};
+
+        mProfileLabel = std::make_unique<Text>(
+            "Character:",
+            SDL_Color{160, 170, 220, 255},
+            cx - selW/2 + arrW + 6, selY + 7, 13);
+
+        std::string name = "Frost Knight (default)";
+        if (mProfileIdx > 0 && mProfileIdx < (int)mProfiles.size()) {
+            name = fs::path(mProfiles[mProfileIdx]).stem().string();
+        }
+        mProfileNameText = std::make_unique<Text>(
+            name, SDL_Color{255, 255, 255, 255},
+            cx - selW/2 + arrW + 80, selY + 7, 14);
+    }
+
     // ── State ─────────────────────────────────────────────────────────────────
     SDL_Window* mSDLWindow    = nullptr;  // needed for SDL_StartTextInput
-    bool        startGame     = false;
-    bool        openEditor    = false;
+    bool        startGame         = false;
+    bool        openEditor        = false;
+    bool        openPlayerCreator   = false;
+    bool        openTileAnimCreator  = false;
+    int         mRow2BottomY         = 0;   // bottom edge of the second button row (bumped after selector)
+    int         mProfileSelectorBaseY = 0;   // locked Y anchor for the character selector bar
     std::string mChosenLevel;
+    std::string mChosenProfile; // path to selected PlayerProfile JSON (empty = frost knight)
     std::string mEditorPath;   // file path for Edit buttons (empty = new/resume)
     std::string mEditorName;   // level name chosen in the naming modal
     bool        mEditorForce  = false;
@@ -409,6 +534,12 @@ class TitleScene : public Scene {
     std::unique_ptr<Text>      playBtnText;
     std::unique_ptr<Text>      editorBtnText;
     std::unique_ptr<Text>      hintText;
+    std::unique_ptr<Text>      createPlayerBtnText;
+    std::unique_ptr<Rectangle> createPlayerButton;
+    SDL_Rect                   createPlayerBtnRect{};
+    std::unique_ptr<Text>      tileAnimBtnText;
+    std::unique_ptr<Rectangle> tileAnimButton;
+    SDL_Rect                   tileAnimBtnRect{};
     std::unique_ptr<Text>      noLevelsText;
     std::unique_ptr<Text>      levelsHeader;
     std::unique_ptr<Rectangle> playButton;
@@ -420,4 +551,13 @@ class TitleScene : public Scene {
     SDL_Rect                   newLevelRect{};
     std::unique_ptr<Rectangle> newLevelBtn;
     std::unique_ptr<Text>      newLevelLabel;
+
+    // Character selector widgets & state
+    std::vector<std::string>   mProfiles;           // index 0 = empty (frost knight default)
+    int                        mProfileIdx = 0;
+    SDL_Rect                   mProfileSelectorBg{};
+    SDL_Rect                   mProfilePrevRect{};
+    SDL_Rect                   mProfileNextRect{};
+    std::unique_ptr<Text>      mProfileLabel;
+    std::unique_ptr<Text>      mProfileNameText;
 };

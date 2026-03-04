@@ -228,7 +228,13 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             slopeView.each([&](const SlopeCollider& sc, const Transform& tt, const Collider& tc) {
                 if (pRight <= tt.x || pLeft >= tt.x + tc.w) return;
 
-                float ratio = (float)tc.h / (float)tc.w;
+                // heightFrac controls how much of the tile height the slope
+                // actually spans.  1.0 = fully diagonal; 0.5 = gentle half-slope.
+                // The HIGH corner is always anchored at tt.y (tile top).
+                // The low corner sits at tt.y + (tc.h * heightFrac).
+                float riseH = tc.h * sc.heightFrac;  // pixels of vertical drop from high to low
+                float ratio = riseH / (float)tc.w;   // rise-over-run
+                float highY = (float)tt.y;            // high corner always at tile top
 
                 // Use player centre X for the surface formula — this keeps
                 // seam continuity across tiles while sitting at a visually
@@ -237,9 +243,15 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
 
                 float surface;
                 if (sc.slopeType == SlopeType::DiagUpLeft) {
-                    surface = tt.y + (playerX - tt.x) * ratio;
+                    // High on right, descends left-to-right
+                    // At playerX=tt.x (left edge): surface = highY + riseH (low)
+                    // At playerX=tt.x+tc.w (right edge): surface = highY (high)
+                    surface = highY + (tt.x + tc.w - playerX) * ratio;
                 } else {
-                    surface = tt.y + (tt.x + tc.w - playerX) * ratio;
+                    // DiagUpRight: high on left, descends right
+                    // At playerX=tt.x: surface = highY (high)
+                    // At playerX=tt.x+tc.w: surface = highY + riseH (low)
+                    surface = highY + (playerX - tt.x) * ratio;
                 }
 
                 // Reject extrapolation outside the tile's vertical bounds
@@ -417,18 +429,8 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             }
         });
 
-        // -- Hazard overlap ---------------------------------------------------
-        // Simple AABB check against all HazardTag tiles every frame.
-        // No invincibility gating — damage is continuous while overlapping.
-        {
-            auto hazardView = reg.view<HazardTag, Transform, Collider>();
-            hazardView.each([&](const Transform& ht, const Collider& hc) {
-                float hx = ht.x, hy = ht.y;
-                if (pt.x < hx + hc.w && pt.x + pw > hx &&
-                    pt.y < hy + hc.h && pt.y + ph > hy)
-                    result.onHazard = true;
-            });
-        }
+        // -- Hazard overlap: handled in the dedicated pass below playerView ----
+        // (Removed the duplicate early check that ignored ColliderOffset.)
 
         // -- Sword slash-hit detection --------------------------------------
         // Builds a directional sword hitbox and tests it against:
@@ -439,7 +441,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         //   - Horizontal gravity (DOWN/UP): Renderable::flipH  false=right, true=left
         //   - Left-wall gravity:            player faces UP the wall
         //   - Right-wall gravity:           player faces UP the wall (opposite side)
-        if (const auto* atk = reg.try_get<AttackState>(playerEnt); atk && atk->isAttacking) {
+        if (auto* atk = reg.try_get<AttackState>(playerEnt); atk && atk->isAttacking) {
             // SWORD_REACH and SWORD_HEIGHT are defined in GameConfig.hpp
 
             // Determine facing direction as a unit vector (fx, fy)
@@ -487,14 +489,28 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             };
 
             // Test every ActionTag tile against the sword rect.
-            // Action tiles are the unified slash-trigger: they disappear on hit
-            // (Renderable, TileTag, and Collider stripped by the Scene after iteration).
+            // hitEntities guards against multi-frame decrements — each swing
+            // only registers one hit per tile regardless of overlap duration.
             {
                 auto actionView = reg.view<ActionTag, Transform, Collider>();
-                actionView.each([&](entt::entity at, const ActionTag& /*tag*/,
+                actionView.each([&](entt::entity at, ActionTag& tag,
                                     const Transform& tt, const Collider& tc) {
-                    if (swordHits(tt.x, tt.y, (float)tc.w, (float)tc.h))
+                    if (!swordHits(tt.x, tt.y, (float)tc.w, (float)tc.h)) return;
+                    // Only gate multi-hit tiles — single-hit tiles destroy immediately
+                    if (tag.hitsRequired > 1) {
+                        if (atk->hitEntities.count(at)) return; // already hit this swing
+                        atk->hitEntities.insert(at);
+                    }
+                    tag.hitsRemaining--;
+                    if (tag.hitsRemaining <= 0) {
                         result.actionTilesTriggered.push_back(at);
+                    } else {
+                        // Flash red to show the hit registered
+                        if (reg.all_of<HitFlash>(at))
+                            reg.get<HitFlash>(at).timer = HitFlash{}.duration; // reset
+                        else
+                            reg.emplace<HitFlash>(at);
+                    }
                 });
             }
 
@@ -502,6 +518,8 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             liveEnemyView.each([&](entt::entity enemy,
                                    const Transform& et, const Collider& ec) {
                 if (!swordHits(et.x, et.y, (float)ec.w, (float)ec.h)) return;
+                if (atk->hitEntities.count(enemy)) return; // already hit this swing
+                atk->hitEntities.insert(enemy);
                 // Apply slash damage to the enemy's health
                 auto* eh = reg.try_get<Health>(enemy);
                 if (!eh) {
@@ -596,19 +614,28 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
     // Hazard tiles have no TileTag so the player is never pushed out of them.
     // We use a small TOUCH expansion so standing flush on the surface of a
     // hazard tile (e.g. spikes on the ground) also registers.
+    // ColliderOffset is respected so custom hitboxes set in the editor apply.
     {
-        constexpr float TOUCH = 6.0f; // px — standing within this of the tile counts
+        // TOUCH: 1px so standing flush on a hazard surface registers,
+        // but the player must actually overlap/touch the hitbox — not just be near it.
+        constexpr float TOUCH = 1.0f;
         auto hazardView = reg.view<HazardTag, Transform, Collider>();
         auto pView      = reg.view<PlayerTag, Transform, Collider>();
         pView.each([&](const Transform& pt, const Collider& pc) {
             if (result.onHazard) return;
-            hazardView.each([&](const Transform& ht, const Collider& hc) {
+            hazardView.each([&](entt::entity he, const Transform& ht, const Collider& hc) {
                 if (result.onHazard) return;
-                // Expand the hazard rect by TOUCH on all sides before testing
-                if (pt.x          < ht.x + hc.w + TOUCH &&
-                    pt.x + pc.w   > ht.x          - TOUCH &&
-                    pt.y          < ht.y + hc.h + TOUCH &&
-                    pt.y + pc.h   > ht.y          - TOUCH)
+                // Apply ColliderOffset if present (custom hitbox position from editor)
+                float hx = ht.x;
+                float hy = ht.y;
+                if (const auto* off = reg.try_get<ColliderOffset>(he)) {
+                    hx += off->x;
+                    hy += off->y;
+                }
+                if (pt.x        < hx + hc.w + TOUCH &&
+                    pt.x + pc.w > hx          - TOUCH &&
+                    pt.y        < hy + hc.h + TOUCH &&
+                    pt.y + pc.h > hy          - TOUCH)
                     result.onHazard = true;
             });
         });

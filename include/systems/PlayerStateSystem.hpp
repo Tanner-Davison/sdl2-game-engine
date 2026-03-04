@@ -31,11 +31,12 @@ inline void PlayerStateSystem(entt::registry& reg) {
             if (atk->attackPressed && !inv.isInvincible) {
                 atk->attackPressed = false;
                 atk->isAttacking   = true;
+                atk->hitEntities.clear(); // new swing — reset per-swing hit registry
                 r.sheet            = set.slashSheet;
                 r.frames           = set.slash;
                 anim.currentFrame  = 0;
                 anim.timer         = 0.0f;
-                anim.fps           = 18.0f;
+                anim.fps           = (set.slashFps > 0.0f) ? set.slashFps : 18.0f;
                 anim.looping       = false;
                 anim.totalFrames   = (int)set.slash.size();
                 anim.currentAnim   = AnimationID::SLASH;
@@ -71,27 +72,31 @@ inline void PlayerStateSystem(entt::registry& reg) {
         bool moving    = std::abs(v.dx) > 1.0f || std::abs(v.dy) > 1.0f;
         bool openWorld = reg.all_of<OpenWorldTag>(entity);
 
+        // Helper: use profile FPS when authored (> 0), else engine default
+        auto resolveFps = [](float profileFps, float engineDefault) {
+            return profileFps > 0.0f ? profileFps : engineDefault;
+        };
+
         if (inv.isInvincible) {
             frames  = &set.hurt;
-            fps     = 12.0f;
+            fps     = resolveFps(set.hurtFps, 12.0f);
             looping = false;
             id      = AnimationID::HURT;
         } else if (!openWorld && g.active && !g.isGrounded) {
-            // OpenWorld has no gravity, so we never show the jump animation
             frames = &set.jump;
-            fps    = 4.0f;
+            fps    = resolveFps(set.jumpFps, 4.0f);
             id     = AnimationID::JUMP;
         } else if (!openWorld && g.isCrouching) {
             frames = &set.duck;
-            fps    = 12.0f;
+            fps    = resolveFps(set.duckFps, 12.0f);
             id     = AnimationID::DUCK;
         } else if (moving) {
             frames = &set.walk;
-            fps    = 24.0f;
+            fps    = resolveFps(set.walkFps, 24.0f);
             id     = AnimationID::WALK;
         } else {
             frames = &set.idle;
-            fps    = 12.0f;
+            fps    = resolveFps(set.idleFps, 12.0f);
             id     = AnimationID::IDLE;
         }
 

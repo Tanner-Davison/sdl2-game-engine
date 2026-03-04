@@ -64,6 +64,21 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen,
             } else {
                 SDL_BlitSurface(r.sheet, &src, screen, &dest);
             }
+
+            // HitFlash: overlay a pulsing transparent red rect on struck action tiles
+            if (const auto* hf = reg.try_get<HitFlash>(entity)) {
+                // Pulse: fade from ~160 alpha at hit to 0 at expiry
+                float frac = hf->timer / hf->duration;  // 1.0 -> 0.0
+                Uint8 alpha = static_cast<Uint8>(frac * 160.0f);
+                SDL_Surface* ov = SDL_CreateSurface(dest.w, dest.h, SDL_PIXELFORMAT_ARGB8888);
+                if (ov) {
+                    SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+                    const SDL_PixelFormatDetails* ovf = SDL_GetPixelFormatDetails(ov->format);
+                    SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(ovf, nullptr, 220, 30, 30, alpha));
+                    SDL_BlitSurface(ov, nullptr, screen, &dest);
+                    SDL_DestroySurface(ov);
+                }
+            }
         }
     }
 

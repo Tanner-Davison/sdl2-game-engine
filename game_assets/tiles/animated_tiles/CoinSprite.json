@@ -1,0 +1,16 @@
+{
+    "fps": 8.0,
+    "frames": [
+        "/Users/tanner.davison/Desktop/CoinSprite/1.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/2.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/3.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/4.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/5.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/6.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/7.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/8.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/9.png",
+        "/Users/tanner.davison/Desktop/CoinSprite/10.png"
+    ],
+    "name": "CoinSprite"
+}

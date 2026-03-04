@@ -104,9 +104,13 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
 
         fs.spinSpeed *= drag;
         if (std::abs(fs.spinSpeed) < 0.5f) fs.spinSpeed = 0.0f;
+        // Clamp spinAngle to (-89, +89) so it never crosses a 90-degree boundary.
+        // RotateSurfaceDeg only handles 0/90/180/270 — if spinAngle reaches 90 it
+        // snaps the sprite sideways for one frame then flips back, causing a flicker.
+        // Floating spin is purely cosmetic wobble so limiting to <90deg is fine.
         fs.spinAngle += fs.spinSpeed * dt;
-        if (fs.spinAngle >= 360.0f) fs.spinAngle -= 360.0f;
-        if (fs.spinAngle <    0.0f) fs.spinAngle += 360.0f;
+        if (fs.spinAngle >= 89.0f)  { fs.spinAngle =  89.0f; fs.spinSpeed = 0.0f; }
+        if (fs.spinAngle <= -89.0f) { fs.spinAngle = -89.0f; fs.spinSpeed = 0.0f; }
 
         // ── Apply position ────────────────────────────────────────────────────
         ft.x      += fs.driftVx * dt;
@@ -114,6 +118,113 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
         fs.baseY  += fs.driftVy * dt;  // integrate vertical drift into the bob anchor
         ft.y       = fs.baseY + bob;
         fs.dyThisFrame = ft.y - prevY;  // record how far the object moved vertically
+
+        // Capture speed before bounce so the hit check below still sees the
+        // pre-impact velocity even after driftVx/driftVy get reflected/damped.
+        float preBounceSpeed = std::abs(fs.driftVx) + std::abs(fs.driftVy);
+
+        // ── Bounce off solid surfaces (TileTag, ActionTag, HazardTag) ─────────
+        // Test against all tiles that have a physical presence: solid tiles,
+        // action tiles (still have TileTag+Collider until destroyed), and hazard
+        // tiles. When overlapping, reflect the relevant drift axis and push out.
+        constexpr float BOUNCE_DAMP = 0.55f; // fraction of velocity kept after bounce
+        constexpr float MIN_BOUNCE  = 30.0f; // px/s minimum to bother reflecting
+        {
+            // Collect all collidable tile entities: TileTag OR HazardTag tiles
+            // ActionTag tiles already have TileTag so they're covered.
+            // Use two views to cover both.
+            auto solidView  = reg.view<TileTag,   Transform, Collider>();
+            auto hazardView = reg.view<HazardTag,  Transform, Collider>();
+
+            auto bounce = [&](entt::entity te, const Transform& tt, const Collider& tc) {
+                if (te == entity) return; // never bounce against self
+                // Apply ColliderOffset if present so we test the actual hitbox
+                float tx = tt.x, ty = tt.y;
+                if (const auto* co = reg.try_get<ColliderOffset>(te)) { tx += co->x; ty += co->y; }
+                // Skip if no overlap
+                if (ft.x + fc.w <= tx || ft.x >= tx + tc.w) return;
+                if (ft.y + fc.h <= ty || ft.y >= ty + tc.h) return;
+
+                // ── Action tile hit: register here while we know there's overlap ──
+                // Doing this inside bounce (before push-out) means ft.x/ft.y still
+                // overlaps the hitbox — the separate hit check below runs after
+                // push-out and always misses.
+                if (preBounceSpeed >= 80.0f) {
+                    if (auto* tag = reg.try_get<ActionTag>(te)) {
+                        bool recentlyHit = reg.all_of<HitFlash>(te) &&
+                                           reg.get<HitFlash>(te).timer > HitFlash{}.duration * 0.5f;
+                        if (!recentlyHit) {
+                            tag->hitsRemaining--;
+                            if (tag->hitsRemaining <= 0) {
+                                if (reg.all_of<Renderable>(te)) reg.remove<Renderable>(te);
+                                if (reg.all_of<TileTag>(te))    reg.remove<TileTag>(te);
+                                if (reg.all_of<Collider>(te))   reg.remove<Collider>(te);
+                                if (reg.all_of<HitFlash>(te))   reg.remove<HitFlash>(te);
+                            } else {
+                                if (reg.all_of<HitFlash>(te))
+                                    reg.get<HitFlash>(te).timer = HitFlash{}.duration;
+                                else
+                                    reg.emplace<HitFlash>(te);
+                            }
+                        }
+                    }
+                }
+
+                // Compute overlap on each axis to find the shallowest penetration
+                float oLeft   = (ft.x + fc.w) - tx;
+                float oRight  = (tx + tc.w)   - ft.x;
+                float oTop    = (ft.y + fc.h) - ty;
+                float oBottom = (ty + tc.h)   - ft.y;
+
+                float minH = oLeft < oRight  ? oLeft  : oRight;
+                float minV = oTop  < oBottom ? oTop   : oBottom;
+
+                // Use velocity direction to break ties: if the object is moving
+                // mostly horizontally, prefer a horizontal bounce even if the
+                // vertical overlap is slightly smaller (avoids spurious upward
+                // launches when hitting a narrow offset hitbox from the side).
+                float absVx = std::abs(fs.driftVx);
+                float absVy = std::abs(fs.driftVy);
+                bool horizBounce = (absVx >= absVy)
+                    ? (minH <= minV * 1.5f)   // moving horizontally — bias toward H
+                    : (minH < minV * 0.5f);   // moving vertically  — only H if much shallower
+
+                if (horizBounce) {
+                    // Horizontal bounce — only reflect X, never touch driftVy
+                    if (absVx >= MIN_BOUNCE) {
+                        fs.driftVx = -fs.driftVx * BOUNCE_DAMP;
+                        fs.spinSpeed += fs.driftVx * 0.3f;
+                    } else {
+                        fs.driftVx = 0.0f;
+                    }
+                    // Push out horizontally
+                    if (oLeft < oRight) ft.x = tx - fc.w;
+                    else                ft.x = tx + tc.w;
+                } else {
+                    // Vertical bounce — only allow upward rebound from a bottom hit
+                    // (oBottom < oTop means the object's bottom face is inside the tile,
+                    // i.e. the object hit the tile from below — only case that goes up).
+                    bool hitFromBelow = (oBottom < oTop);
+                    if (hitFromBelow) {
+                        // Bottom hit: reflect upward
+                        if (absVy >= MIN_BOUNCE)
+                            fs.driftVy = -fs.driftVy * BOUNCE_DAMP;
+                        else
+                            fs.driftVy = 0.0f;
+                        fs.baseY = ty + tc.h - bob;
+                        ft.y = fs.baseY + bob;
+                    } else {
+                        // Top hit (landed on something): just stop vertical drift, no bounce up
+                        fs.driftVy = 0.0f;
+                        fs.baseY = ty - fc.h - bob;
+                        ft.y = fs.baseY + bob;
+                    }
+                }
+            };
+
+            solidView.each( [&](entt::entity te, const Transform& tt, const Collider& tc) { bounce(te, tt, tc); });
+            hazardView.each([&](entt::entity te, const Transform& tt, const Collider& tc) { bounce(te, tt, tc); });
+        }
 
         // ── Player body push ──────────────────────────────────────────────────
         // Fires every frame the player is in contact with the floating entity.
@@ -148,17 +259,17 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
             playerY           < ft.y + fc.h  + CONTACT_MARGIN &&
             playerY + playerH > ft.y          - CONTACT_MARGIN;
 
-        // Bottom-hit: player head (playerY) is at or just below the tile's
-        // bottom face, with genuine horizontal overlap of the two colliders.
-        // Uses the real collider extents — no artificial margin on X so only
-        // true hitbox contact counts.
+        // Bottom-hit: player head is at or just below the tile's bottom face.
+        // Require the player to be JUMPING (velocity < 0) so a barrel returning
+        // at head height while the player is grounded never triggers this.
         bool bottomHit = false;
         {
             float headY   = playerY;
             float tileBot = ft.y + fc.h;
             bool hOverlap = (playerX + playerW > ft.x) && (playerX < ft.x + fc.w);
             bool nearBot  = (headY >= tileBot - BOTTOM_MARGIN) && (headY < tileBot + BOTTOM_MARGIN);
-            bottomHit = hOverlap && nearBot;
+            bool jumping  = (playerVy < -10.0f); // only when player is actually moving upward
+            bottomHit = hOverlap && nearBot && jumping;
         }
 
         if (bodyContact || bottomHit) {
@@ -178,7 +289,7 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
             if (!fs.wasInContact) {
                 // First frame of contact: full impulse for side hits and top hits.
                 if (topBottomHit && !bottomHit) {
-                    // Top hit (player above, landing on object) — strong vertical push
+                    // Top hit (player landing on object) — push down only, no upward
                     float vMag = std::max(120.0f, std::abs(playerVy));
                     fs.driftVy  += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
                     if (std::abs(playerVx) > 10.0f) {
@@ -188,14 +299,11 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
                     }
                     fs.spinSpeed += hDir * BODY_SPIN * 0.5f;
                 } else if (!topBottomHit) {
-                    // Side hit — horizontal push
+                    // Side hit — horizontal push only, never add vertical velocity
                     float hMag = std::max(80.0f, std::abs(playerVx));
                     fs.driftVx  += hDir * hMag * (BODY_PUSH_H / PLAYER_SPEED);
                     fs.spinSpeed += hDir * BODY_SPIN;
-                    if (std::abs(playerVy) > 30.0f) {
-                        float vMag = std::abs(playerVy) * 0.4f;
-                        fs.driftVy += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
-                    }
+                    // No driftVy here — side contacts must not launch the object up or down
                 }
                 // Re-anchor baseY on first contact so bob origin is correct.
                 fs.baseY = ft.y - bob;
@@ -231,8 +339,7 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
         // SLASH_LIFT: small upward baseY shift so the enemy briefly lifts off its
         //   feet rather than launching vertically.
         // SLASH_SPIN: spin rate imparted on hit.
-        constexpr float SLASH_PUSH_FORCE = 280.0f; // reduced from 420 — was travelling too far
-        constexpr float SLASH_LIFT       =   6.0f; // px — barely lifts feet off ground
+        constexpr float SLASH_PUSH_FORCE = 280.0f;
         constexpr float SLASH_SPIN       = 360.0f;
 
         // ── Float carry: if player is standing on top, move them with the object ──
@@ -266,16 +373,12 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
                 swordY + swordH > ft.y;
 
             if (swordOverlap) {
-                // Use slashDir (player facing) as the authoritative knockback direction.
-                // The old bug computed direction from sword-center vs enemy-center, which
-                // is inverted when slashing left: the sword is to the left of the enemy,
-                // so enemy-center > sword-center → pushDir=+1 (right) — wrong.
-                // slashDir is always correct: it's exactly which way the player is looking.
                 fs.driftVx   += slashDir * SLASH_PUSH_FORCE;
-                fs.baseY      = (ft.y - bob) - SLASH_LIFT; // anchor with subtle lift
-                fs.driftVy    = 0.0f;                       // suppress vertical drift
+                // No vertical component — slash is a purely horizontal push
                 fs.spinSpeed += slashDir * SLASH_SPIN;
             }
         }
+
+
     }
 }

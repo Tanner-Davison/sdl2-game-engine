@@ -27,12 +27,14 @@ class LevelEditorScene : public Scene {
     //   LevelEditorScene("path.json") -> open that specific file
     // levelName: when non-empty and forceNew=true, sets mLevelName directly
     // instead of defaulting to "level1"
-    explicit LevelEditorScene(std::string levelPath = "",
-                              bool        forceNew  = false,
-                              std::string levelName = "")
+    explicit LevelEditorScene(std::string levelPath   = "",
+                              bool        forceNew    = false,
+                              std::string levelName   = "",
+                              std::string profilePath = "")
         : mOpenPath(std::move(levelPath))
         , mForceNew(forceNew)
-        , mPresetName(std::move(levelName)) {}
+        , mPresetName(std::move(levelName))
+        , mProfilePath(std::move(profilePath)) {}
     void                   Load(Window& window) override;
     void                   Unload() override;
     bool                   HandleEvent(SDL_Event& e) override;
@@ -64,7 +66,7 @@ class LevelEditorScene : public Scene {
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
-    static constexpr int   GRID          = 48; // 48px gives ~33% more grid cells
+    static constexpr int   GRID          = 38;
     static constexpr int   TOOLBAR_H     = 86; // extra room for collapse strip below buttons
     static constexpr int   PALETTE_W     = 180;
     static constexpr int   PALETTE_TAB_W = 18; // width of the collapsed toggle tab
@@ -91,7 +93,8 @@ class LevelEditorScene : public Scene {
     // -------------------------------------------------------------------------
     std::string mOpenPath;
     bool        mForceNew = false;
-    std::string mPresetName; // name chosen in title-screen modal (overrides "level1")
+    std::string mPresetName;   // name chosen in title-screen modal (overrides "level1")
+    std::string mProfilePath;  // PlayerProfile JSON path to pass through to GameScene (empty = frost knight)
     Window*     mWindow     = nullptr;
     Tool        mActiveTool = Tool::Coin;
     PaletteTab  mActiveTab  = PaletteTab::Tiles;
@@ -157,6 +160,7 @@ class LevelEditorScene : public Scene {
     int                  mSelectedTile    = 0;
     int                  mSelectedBg      = 0;
     int                  mTileW = GRID, mTileH = GRID;
+    float mScrollAccum = 0.0f; // fractional scroll accumulator for tile sizing
 
     // Tile palette navigation
     std::string mTileCurrentDir;
@@ -265,6 +269,7 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     SDL_Surface*                 mFolderIcon = nullptr;
 
+    // -------------------------------------------------------------------------
     // Toolbar buttons  (three groups separated by GRP_GAP dividers)
     // -------------------------------------------------------------------------
     // Group 1 — Place tools

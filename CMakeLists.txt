@@ -29,6 +29,8 @@ set(SOURCES
     src/Image.cpp
     src/Text.cpp
     src/SpriteSheet.cpp
+    src/PlayerCreatorScene.cpp
+    src/TileAnimCreatorScene.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})

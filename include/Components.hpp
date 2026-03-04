@@ -3,6 +3,8 @@
 #pragma once
 #include "GameConfig.hpp"
 #include <SDL3/SDL.h>
+#include <entt/entt.hpp>
+#include <unordered_set>
 #include <vector>
 
 // ── Slope type ────────────────────────────────────────────────────────────────────
@@ -42,19 +44,26 @@ struct AnimationState {
 // sheet pointers are non-owning — the SpriteSheet objects must outlive this.
 struct AnimationSet {
     std::vector<SDL_Rect> idle;
-    SDL_Surface*          idleSheet = nullptr;
+    SDL_Surface*          idleSheet  = nullptr;
+    float                 idleFps    = 0.0f; // 0 = use engine default
     std::vector<SDL_Rect> walk;
-    SDL_Surface*          walkSheet = nullptr;
+    SDL_Surface*          walkSheet  = nullptr;
+    float                 walkFps    = 0.0f;
     std::vector<SDL_Rect> jump;
-    SDL_Surface*          jumpSheet = nullptr;
+    SDL_Surface*          jumpSheet  = nullptr;
+    float                 jumpFps    = 0.0f;
     std::vector<SDL_Rect> hurt;
-    SDL_Surface*          hurtSheet = nullptr;
+    SDL_Surface*          hurtSheet  = nullptr;
+    float                 hurtFps    = 0.0f;
     std::vector<SDL_Rect> duck;
-    SDL_Surface*          duckSheet = nullptr;
+    SDL_Surface*          duckSheet  = nullptr;
+    float                 duckFps    = 0.0f;
     std::vector<SDL_Rect> front;
     SDL_Surface*          frontSheet = nullptr;
+    float                 frontFps   = 0.0f;
     std::vector<SDL_Rect> slash;
     SDL_Surface*          slashSheet = nullptr;
+    float                 slashFps   = 0.0f;
 };
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -158,8 +167,12 @@ struct HazardState {
 // Attached to the player. attackPressed fires the slash; isAttacking blocks
 // any other animation swap until the slash plays to completion.
 struct AttackState {
-    bool attackPressed = false; // set by InputSystem on F key-down
-    bool isAttacking   = false; // true while slash anim is playing
+    bool attackPressed = false;
+    bool isAttacking   = false;
+    // Entities already struck this swing — cleared on each new swing so each
+    // attack only registers one hit per target, regardless of how many frames
+    // the sword rect overlaps the same entity.
+    std::unordered_set<entt::entity> hitEntities;
 };
 
 // ── Tags (marker components — no data) ───────────────────────────────────────
@@ -209,16 +222,23 @@ struct DestructibleTag {
 };
 struct OpenWorldTag {}; // marks the player as running in open-world (top-down) mode
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
-                     // makes contact, then Renderable and Collider are removed so it
-                     // disappears and stops blocking (e.g. a door that opens on touch)
-    int group = 0;   // 0 = standalone; matching non-zero groups trigger together
+                     // slashes it enough times, then Renderable and Collider are removed.
+    int group        = 0; // 0 = standalone; matching non-zero groups trigger together
+    int hitsRequired = 1; // total slashes needed to destroy (set from editor)
+    int hitsRemaining = 1; // current hits left — decremented each slash
 };
 
 // ── Slope collision data ──────────────────────────────────────────────────────
 // Attached to slope tiles.  CollisionSystem uses slopeType to compute the
 // floor Y at the player's horizontal centre instead of using a flat AABB.
+//
+// heightFrac: fraction of the tile height the slope actually rises over.
+//   1.0 = fully diagonal (default, high-corner is at tile top)
+//   0.5 = gentle slope (high-corner is at tile mid-height)
+// The low corner is always at the tile bottom on the appropriate side.
 struct SlopeCollider {
-    SlopeType slopeType = SlopeType::None;
+    SlopeType slopeType  = SlopeType::None;
+    float     heightFrac = 1.0f; // 0.0 < heightFrac <= 1.0
 };
 
 // ── Ladder / climbing state ───────────────────────────────────────────────────
@@ -240,6 +260,19 @@ struct MovingPlatformState {
     int   loopDir     = 1;     // +1 = moving right, -1 = moving left (ping-pong)
     bool  trigger     = false; // waits for first player landing before moving
     bool  triggered   = false; // becomes true once player has landed on it
+};
+
+// Marks a tile as an animated tile driven by tileAnimFrameMap in GameScene.
+// AnimationSystem skips entities with this tag so only GameScene::Update
+// advances the frame counter and swaps the sheet pointer.
+struct TileAnimTag {};
+
+// ── Hit flash ───────────────────────────────────────────────────────────────
+// Attached to action tiles when struck. RenderSystem overlays a transparent
+// red tint for the flash duration, then the component is removed.
+struct HitFlash {
+    float timer    = 0.18f; // counts down to 0 — initialised to duration on emplace
+    float duration = 0.18f; // seconds the flash lasts
 };
 
 struct ClimbState {

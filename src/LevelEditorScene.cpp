@@ -1,4 +1,5 @@
 #include "LevelEditorScene.hpp"
+#include "AnimatedTile.hpp"
 #include "GameScene.hpp"
 #include "TitleScene.hpp"
 #include "SurfaceUtils.hpp"
@@ -215,15 +216,40 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         mPaletteItems.push_back(std::move(back));
     }
 
-    std::vector<fs::path> folders, files;
+    // ── Virtual "Animated Tiles" folder entry (shown at root level only) ─────
+    if (!atRoot) {/* skip */} else {
+        if (fs::exists(ANIMATED_TILE_DIR)) {
+            int count = 0;
+            for (const auto& e : fs::directory_iterator(ANIMATED_TILE_DIR))
+                if (e.path().extension() == ".json") ++count;
+            if (count > 0) {
+                PaletteItem anim;
+                anim.path     = ANIMATED_TILE_DIR;
+                anim.label    = "Animated Tiles (" + std::to_string(count) + ")";
+                anim.isFolder = true;
+                anim.thumb    = mFolderIcon;
+                anim.full     = nullptr;
+                mPaletteItems.push_back(std::move(anim));
+            }
+        }
+    }
+
+    std::vector<fs::path> folders, files, manifests;
     for (const auto& entry : fs::directory_iterator(dir)) {
-        if (entry.is_directory())
+        if (entry.is_directory()) {
+            // Skip animated_tiles dir at root — already represented by the virtual entry above
+            if (atRoot && entry.path() == fs::path(ANIMATED_TILE_DIR))
+                continue;
             folders.push_back(entry.path());
-        else if (entry.path().extension() == ".png")
+        } else if (entry.path().extension() == ".png") {
             files.push_back(entry.path());
+        } else if (entry.path().extension() == ".json") {
+            manifests.push_back(entry.path());
+        }
     }
     std::sort(folders.begin(), folders.end());
     std::sort(files.begin(), files.end());
+    std::sort(manifests.begin(), manifests.end());
 
     // Folders first
     for (const auto& p : folders) {
@@ -257,18 +283,75 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         mPaletteItems.push_back(std::move(item));
     }
 
+    // ── Animated tile manifests (only shown when we're inside ANIMATED_TILE_DIR) ──
+    for (const auto& p : manifests) {
+        AnimatedTileDef def;
+        if (!LoadAnimatedTileDef(p.string(), def) || def.framePaths.empty()) continue;
+
+        // Load first frame as thumbnail
+        SDL_Surface* firstFrame = nullptr;
+        SDL_Surface* thumb      = nullptr;
+        for (const auto& fp : def.framePaths) {
+            SDL_Surface* raw = IMG_Load(fp.c_str());
+            if (!raw) continue;
+            firstFrame = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+            SDL_DestroySurface(raw);
+            if (firstFrame) { SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_BLEND); break; }
+        }
+        if (firstFrame) {
+            thumb = MakeThumb(firstFrame, PAL_ICON, PAL_ICON);
+            SDL_DestroySurface(firstFrame);
+        }
+
+        PaletteItem item;
+        item.path     = p.string();  // .json manifest path
+        item.label    = def.name + " [~";  // ~ prefix = animated
+        item.label   += std::to_string(def.framePaths.size()) + "f]";
+        item.isFolder = false;
+        item.thumb    = thumb;
+        item.full     = thumb ? SDL_DuplicateSurface(thumb) : nullptr;
+        mPaletteItems.push_back(std::move(item));
+    }
+
     // Rebuild the path→surface cache so Render never does a linear search
     mTileSurfaceCache.clear();
     for (const auto& item : mPaletteItems)
         if (!item.isFolder && item.full)
             mTileSurfaceCache[item.path] = item.full;
 
-    // Also seed the cache for any tiles already in the level whose images
-    // live in subdirectories not currently visible in the palette view.
-    // We store these in mExtraTileSurfaces so Unload() can free them independently
-    // from palette-owned surfaces (which are freed via mPaletteItems).
+    // Also seed the cache for tiles already in the level whose images live in
+    // subdirectories not currently visible in the palette view.  Animated tile
+    // manifests (.json) are handled separately -- we load the first frame.
     for (const auto& ts : mLevel.tiles) {
         if (ts.imagePath.empty() || mTileSurfaceCache.count(ts.imagePath)) continue;
+
+        if (IsAnimatedTile(ts.imagePath)) {
+            // Animated tile: show first frame in the editor canvas
+            AnimatedTileDef def;
+            if (!LoadAnimatedTileDef(ts.imagePath, def) || def.framePaths.empty()) continue;
+            SDL_Surface* firstFrame = nullptr;
+            for (const auto& fp : def.framePaths) {
+                SDL_Surface* raw = IMG_Load(fp.c_str());
+                if (!raw) continue;
+                firstFrame = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+                SDL_DestroySurface(raw);
+                if (firstFrame) { SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_BLEND); break; }
+            }
+            if (!firstFrame) continue;
+            SDL_Surface* scaled = SDL_CreateSurface(ts.w, ts.h, SDL_PIXELFORMAT_ARGB8888);
+            if (scaled) {
+                SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_NONE);
+                SDL_BlitSurfaceScaled(firstFrame, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
+                SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
+            }
+            SDL_DestroySurface(firstFrame);
+            if (!scaled) continue;
+            mTileSurfaceCache[ts.imagePath] = scaled;
+            mExtraTileSurfaces.push_back(scaled);
+            continue;
+        }
+
+        // Normal PNG tile
         SDL_Surface* raw = IMG_Load(ts.imagePath.c_str());
         if (!raw) continue;
         SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
@@ -276,7 +359,7 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         if (!conv) continue;
         SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
         mTileSurfaceCache[ts.imagePath] = conv;
-        mExtraTileSurfaces.push_back(conv); // owned here, freed in Unload
+        mExtraTileSurfaces.push_back(conv);
     }
 }
 
@@ -587,9 +670,45 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 mBgPaletteScroll = std::min(mBgPaletteScroll, std::max(0,(int)mBgItems.size()-1));
             }
         } else if (mActiveTool == Tool::Tile) {
-            mTileW = std::max(GRID, mTileW + (int)e.wheel.y * GRID);
-            mTileH = mTileW;
-            SetStatus("Tile size: " + std::to_string(mTileW));
+            // e.wheel.y is a float in SDL3 — accumulate fractional ticks
+            // and step by GRID only when the buffer crosses ±0.5.
+            mScrollAccum += e.wheel.y;
+            int steps = (int)mScrollAccum;   // truncate toward zero
+            if (steps != 0) {
+                mScrollAccum -= steps;
+                mTileW = std::max(GRID, mTileW + steps * GRID);
+                mTileH = mTileW;
+                SetStatus("Tile size: " + std::to_string(mTileW));
+            }
+        } else if (mActiveTool == Tool::Action) {
+            // Accumulate fractional SDL3 scroll ticks, step by 1 hit per full tick
+            float fmya; SDL_GetMouseState(nullptr, &fmya);
+            int mya = (int)fmya;
+            int hovAction = (mya >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, mya) : -1;
+            if (hovAction >= 0 && mLevel.tiles[hovAction].action) {
+                mScrollAccum += e.wheel.y;
+                int steps = (int)mScrollAccum;
+                if (steps != 0) {
+                    mScrollAccum -= steps;
+                    int& hits = mLevel.tiles[hovAction].actionHits;
+                    hits = std::clamp(hits + steps, 1, 99);
+                    SetStatus("Action tile hits: " + std::to_string(hits));
+                }
+            } else {
+                mScrollAccum = 0.0f; // not hovering a tile, discard accumulation
+            }
+        } else if (mActiveTool == Tool::Slope) {
+            // Shift+scroll on a slope tile: adjust slopeHeightFrac in 0.05 steps
+            float fmxs, fmys; SDL_GetMouseState(&fmxs, &fmys);
+            int mxs = (int)fmxs, mys = (int)fmys;
+            int hovSlope = (mys >= TOOLBAR_H && mxs < CanvasW()) ? HitTile(mxs, mys) : -1;
+            if (hovSlope >= 0 && mLevel.tiles[hovSlope].slope != SlopeType::None) {
+                float& frac = mLevel.tiles[hovSlope].slopeHeightFrac;
+                frac = std::clamp(frac + e.wheel.y * 0.05f, 0.05f, 1.0f);
+                // Round to nearest 0.05 to avoid floating-point drift
+                frac = std::round(frac * 20.0f) / 20.0f;
+                SetStatus("Slope height: " + std::to_string((int)(frac * 100)) + "%  (scroll to adjust)");
+            }
         } else if (mActiveTool == Tool::MovingPlat) {
             float fmx2, fmy2; SDL_GetMouseState(&fmx2, &fmy2);
             int mxw = (int)fmx2, myw = (int)fmy2;
@@ -1535,9 +1654,11 @@ void LevelEditorScene::Render(Window& window) {
             blitBadge(GetBadge("L",{255,255,255,255}), tsx+4, tsy+2);
         }
         if (t.action) {
-            std::string abadge = (t.actionGroup > 0)
-                ? "A" + std::to_string(t.actionGroup) : "A";
-            int bw = (t.actionGroup > 0) ? 20 : 14;
+            // Badge: A[group][xHits] e.g. "A2x4" = group 2, needs 4 hits
+            std::string abadge = "A";
+            if (t.actionGroup > 0) abadge += std::to_string(t.actionGroup);
+            if (t.actionHits   > 1) abadge += "x" + std::to_string(t.actionHits);
+            int bw = (int)abadge.size() * 6 + 4;
             DrawRect(screen,{tsx+2,tsy+2,bw,14},{200,100,0,200});
             blitBadge(GetBadge(abadge,{255,255,255,255}), tsx+4, tsy+2);
         }
@@ -1550,11 +1671,18 @@ void LevelEditorScene::Render(Window& window) {
             blitBadge(GetBadge("H",{255,255,255,255}), tsx+4, tsy+2);
         }
         if (t.slope != SlopeType::None) {
+            // Draw the actual slope surface line respecting slopeHeightFrac.
+            // High corner is always at tile top (tsy); low corner at tsy+riseH.
+            int riseH = (int)(t.h * t.slopeHeightFrac);
+            int highY = tsy;          // anchored at tile top
+            int lowY  = tsy + riseH;  // low corner descends by riseH
             int lx0, ly0, lx1, ly1;
-            if (t.slope == SlopeType::DiagUpRight) {
-                lx0=tsx;       ly0=tsy+t.h;  lx1=tsx+t.w; ly1=tsy;
+            if (t.slope == SlopeType::DiagUpLeft) {
+                // High on right, low on left
+                lx0=tsx;       ly0=lowY;   lx1=tsx+t.w; ly1=highY;
             } else {
-                lx0=tsx;       ly0=tsy;      lx1=tsx+t.w; ly1=tsy+t.h;
+                // DiagUpRight: high on left, low on right
+                lx0=tsx;       ly0=highY;  lx1=tsx+t.w; ly1=lowY;
             }
             int ddx=lx1-lx0, ddy=ly1-ly0;
             int steps=std::abs(ddx)>std::abs(ddy)?std::abs(ddx):std::abs(ddy);
@@ -1566,9 +1694,13 @@ void LevelEditorScene::Render(Window& window) {
                     ccx+=ssx; ccy+=ssy;
                 }
             }
-            DrawRect(screen,{tsx+2,tsy+2,14,14},{160,120,0,200});
+            // Badge: direction + height% if not fully diagonal
             std::string badge = (t.slope==SlopeType::DiagUpRight) ? "/" : "\\";
-            blitBadge(GetBadge(badge,{255,255,255,255}), tsx+5, tsy+2);
+            if (t.slopeHeightFrac < 0.99f)
+                badge += std::to_string((int)std::round(t.slopeHeightFrac * 100)) + "%";
+            int bw = (int)badge.size() * 6 + 4;
+            DrawRect(screen,{tsx+2,tsy+2,bw,14},{160,120,0,200});
+            blitBadge(GetBadge(badge,{255,255,255,255}), tsx+4, tsy+2);
         }
         if (t.rotation != 0) {
             std::string rbadge = std::to_string(t.rotation);
@@ -2252,7 +2384,18 @@ void LevelEditorScene::Render(Window& window) {
 
 // ─── NextScene ────────────────────────────────────────────────────────────────
 std::unique_ptr<Scene> LevelEditorScene::NextScene() {
-    if (mLaunchGame) { mLaunchGame=false; return std::make_unique<GameScene>("levels/"+mLevelName+".json", true); }
+    if (mLaunchGame) {
+        mLaunchGame = false;
+        // If no profile was passed in from TitleScene, auto-pick the first
+        // saved profile so the Play button always uses custom characters.
+        std::string profileToUse = mProfilePath;
+        if (profileToUse.empty()) {
+            auto profiles = ScanPlayerProfiles();
+            if (!profiles.empty())
+                profileToUse = profiles[0].string();
+        }
+        return std::make_unique<GameScene>("levels/"+mLevelName+".json", true, profileToUse);
+    }
     if (mGoBack)     { mGoBack=false;     return std::make_unique<TitleScene>(); }
     return nullptr;
 }
@@ -2266,7 +2409,7 @@ bool LevelEditorScene::ImportPath(const std::string& srcPath) {
         if (mActiveTab == PaletteTab::Backgrounds) {
             // Backgrounds doesn't support folders — import all PNGs flat
             int count = 0;
-            for (const auto& entry : fs::directory_iterator(src)) {
+            for (const auto& entry : fs::recursive_directory_iterator(src)) {
                 if (entry.path().extension() == ".png")
                     count += ImportPath(entry.path().string()) ? 1 : 0;
             }
@@ -2274,16 +2417,27 @@ bool LevelEditorScene::ImportPath(const std::string& srcPath) {
             return count > 0;
         }
 
-        // Tiles: copy the whole folder into game_assets/tiles/<foldername>/
-        fs::path destDir = fs::path(TILE_ROOT) / src.filename();
+        // Tiles: copy the folder tree into the CURRENT browse directory,
+        // not always the root. This lets you browse into medieval-platformer
+        // and drop a subfolder directly inside it.
+        fs::path baseDestDir = fs::path(mTileCurrentDir) / src.filename();
         std::error_code ec;
-        fs::create_directories(destDir, ec);
-        if (ec) { SetStatus("Import failed: can't create " + destDir.string()); return false; }
 
+        // Recursively mirror the source tree: create matching subdirs and
+        // copy every PNG, preserving the full relative hierarchy.
         int count = 0;
-        for (const auto& entry : fs::directory_iterator(src)) {
+        for (const auto& entry : fs::recursive_directory_iterator(src)) {
+            if (entry.is_directory()) {
+                // Mirror subdirectory structure under baseDestDir
+                fs::path rel  = fs::relative(entry.path(), src);
+                fs::path dest = baseDestDir / rel;
+                fs::create_directories(dest, ec);
+                continue;
+            }
             if (entry.path().extension() != ".png") continue;
-            fs::path dest = destDir / entry.path().filename();
+            fs::path rel  = fs::relative(entry.path(), src);
+            fs::path dest = baseDestDir / rel;
+            fs::create_directories(dest.parent_path(), ec);
             if (!fs::exists(dest)) {
                 fs::copy_file(entry.path(), dest, ec);
                 if (ec) continue;
@@ -2293,10 +2447,11 @@ bool LevelEditorScene::ImportPath(const std::string& srcPath) {
 
         if (count == 0) { SetStatus("No PNGs found in " + src.filename().string()); return false; }
 
-        // Reload the tile view — navigate into the new folder
-        LoadTileView(destDir.string());
-        SetStatus("Imported folder: " + src.filename().string() +
-                  " (" + std::to_string(count) + " tiles) — now browsing it");
+        // Navigate into the newly created folder so the user sees its contents
+        LoadTileView(baseDestDir.string());
+        SetStatus("Imported \"" + src.filename().string() + "\" into " +
+                  fs::path(mTileCurrentDir).filename().string() +
+                  " (" + std::to_string(count) + " files)");
         return true;
     }
 

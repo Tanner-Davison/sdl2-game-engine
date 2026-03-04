@@ -1,8 +1,10 @@
 #pragma once
+#include "AnimatedTile.hpp"
 #include "Components.hpp"
 #include "Image.hpp"
 #include "Level.hpp"
 #include "LevelSerializer.hpp"
+#include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
 #include "SpriteSheet.hpp"
@@ -14,6 +16,7 @@
 #include <entt/entt.hpp>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -29,7 +32,9 @@ class GameScene : public Scene {
 
     // Load from a saved level file (produced by LevelEditorScene).
     // fromEditor=true means ESC pause menu offers "Back to Editor" instead of "Back to Title".
-    explicit GameScene(const std::string& levelPath, bool fromEditor = false);
+    // profilePath: path to a saved PlayerProfile JSON (empty = use default frost knight)
+    explicit GameScene(const std::string& levelPath, bool fromEditor = false,
+                       const std::string& profilePath = "");
 
     void Load(Window& window) override;
     void Unload() override;
@@ -51,8 +56,13 @@ class GameScene : public Scene {
     int            stompCount         = 0;
     Window*        mWindow            = nullptr;
     std::string    mLevelPath;
+    std::string    mProfilePath;               // path to PlayerProfile JSON (empty = frost knight)
+    int            mPlayerSpriteW = 0;         // resolved sprite width  (set in Load, used in Spawn)
+    int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
+    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};  // per-slot fps from profile (0 = engine default)
     bool           mFromEditor        = false;  // true = launched via editor Play button
     bool           mPauseRequested    = false;  // set when ESC pressed during play
+    bool           mDebugHitboxes     = false;  // F1 toggles hitbox overlay
     Level          mLevel;
     SDL_Rect       retryBtnRect{};
 
@@ -67,6 +77,10 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     std::unique_ptr<SpriteSheet> coinSheet;
     std::vector<SDL_Surface*>    tileScaledSurfaces; // owned; freed on Unload/Respawn
+    // Animated tile frame surfaces, keyed by entity. Each vector is parallel to
+    // the entity's AnimationState frame count. Freed via tileScaledSurfaces above
+    // (all pointers are also pushed into tileScaledSurfaces at spawn time).
+    std::unordered_map<entt::entity, std::vector<SDL_Surface*>> tileAnimFrameMap;
     std::vector<SDL_Rect>        walkFrames;
     std::vector<SDL_Rect>        jumpFrames;
     std::vector<SDL_Rect>        idleFrames;

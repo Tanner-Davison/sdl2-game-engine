@@ -28,7 +28,9 @@ struct TileSpawn {
     int       actionGroup = 0;              // 0 = standalone; non-zero = group ID.
                                              // All action tiles sharing the same non-zero group
                                              // are triggered simultaneously when any one is slashed.
-    SlopeType slope       = SlopeType::None; // diagonal slope — collision rides the hypotenuse
+    int       actionHits  = 1;              // number of slashes required to destroy (default 1)
+    SlopeType slope           = SlopeType::None; // diagonal slope — collision rides the hypotenuse
+    float     slopeHeightFrac  = 1.0f;           // 0..1: fraction of tile height the slope rises (1.0=full diagonal)
     int       rotation    = 0;               // clockwise degrees: 0, 90, 180, 270
     bool      hazard      = false;           // solid tile that drains 30 HP/sec while player overlaps
     bool        antiGravity  = false;           // floats — bobs in place, no gravity, pushable

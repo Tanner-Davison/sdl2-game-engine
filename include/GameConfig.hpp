@@ -2,8 +2,9 @@
 #include <cmath>
 
 // -- Player stats -------------------------------------------------------------
-inline constexpr float PLAYER_HIT_DAMAGE        = 15.0f;
-inline constexpr float HAZARD_DAMAGE_PER_SEC    = 30.0f;  // HP drained per second while standing on a hazard tile
+inline constexpr float PLAYER_HIT_DAMAGE = 15.0f;
+inline constexpr float HAZARD_DAMAGE_PER_SEC =
+    30.0f; // HP drained per second while standing on a hazard tile
 inline constexpr float PLAYER_INVINCIBILITY = 1.5f;
 inline constexpr float PLAYER_MAX_HEALTH    = 100.0f;
 
@@ -52,7 +53,7 @@ inline constexpr int SLIME_SPRITE_HEIGHT = 26;
 // -- Physics ------------------------------------------------------------------
 inline constexpr float GRAVITY_DURATION   = 5.0f;
 inline constexpr float GRAVITY_FORCE      = 1000.0f;
-inline constexpr float JUMP_FORCE         = 600.0f;
+inline constexpr float JUMP_FORCE         = 450.0f;
 inline constexpr float MAX_FALL_SPEED     = 1500.0f;
 inline constexpr float PLAYER_SPEED       = 250.0f;
 inline constexpr float CLIMB_SPEED        = 350.0f;
@@ -73,21 +74,27 @@ inline constexpr int COIN_COUNT        = 8;
 inline constexpr int COIN_SIZE         = 40;
 
 // -- Camera -------------------------------------------------------------------
-inline constexpr float CAM_LERP_SPEED  = 6.0f;   // higher = snappier follow
-inline constexpr float CAM_DEADZONE_X  = 80.0f;  // px from center before camera moves horizontally
-inline constexpr float CAM_DEADZONE_Y  = 60.0f;  // px from center before camera moves vertically
+inline constexpr float CAM_LERP_SPEED = 6.0f; // higher = snappier follow
+inline constexpr float CAM_DEADZONE_X =
+    80.0f; // px from center before camera moves horizontally
+inline constexpr float CAM_DEADZONE_Y =
+    60.0f; // px from center before camera moves vertically
 
 struct Camera {
-    float x = 0.0f;  // current top-left world position shown at screen origin
+    float x = 0.0f; // current top-left world position shown at screen origin
     float y = 0.0f;
 
     // Call once per frame after the player has moved.
     // playerCX/CY: centre of the player collider in world space.
     // viewW/viewH:  screen dimensions.
     // levelW/levelH: total world size in pixels (0 = unbounded).
-    void Update(float playerCX, float playerCY,
-                int viewW, int viewH,
-                float levelW, float levelH, float dt) {
+    void Update(float playerCX,
+                float playerCY,
+                int   viewW,
+                int   viewH,
+                float levelW,
+                float levelH,
+                float dt) {
         float halfW = viewW * 0.5f;
         float halfH = viewH * 0.5f;
 
@@ -98,12 +105,18 @@ struct Camera {
         // Deadzone: only move the camera when the player leaves the dead region
         float diffX = desiredX - x;
         float diffY = desiredY - y;
-        if (diffX >  CAM_DEADZONE_X) desiredX = x + diffX - CAM_DEADZONE_X;
-        else if (diffX < -CAM_DEADZONE_X) desiredX = x + diffX + CAM_DEADZONE_X;
-        else                              desiredX = x;
-        if (diffY >  CAM_DEADZONE_Y) desiredY = y + diffY - CAM_DEADZONE_Y;
-        else if (diffY < -CAM_DEADZONE_Y) desiredY = y + diffY + CAM_DEADZONE_Y;
-        else                              desiredY = y;
+        if (diffX > CAM_DEADZONE_X)
+            desiredX = x + diffX - CAM_DEADZONE_X;
+        else if (diffX < -CAM_DEADZONE_X)
+            desiredX = x + diffX + CAM_DEADZONE_X;
+        else
+            desiredX = x;
+        if (diffY > CAM_DEADZONE_Y)
+            desiredY = y + diffY - CAM_DEADZONE_Y;
+        else if (diffY < -CAM_DEADZONE_Y)
+            desiredY = y + diffY + CAM_DEADZONE_Y;
+        else
+            desiredY = y;
 
         // Smooth lerp toward the target
         float t = 1.0f - std::exp(-CAM_LERP_SPEED * dt);
@@ -112,14 +125,20 @@ struct Camera {
 
         // Clamp so camera never shows outside the level bounds
         if (levelW > 0.0f) {
-            if (x < 0.0f)              x = 0.0f;
-            if (x + viewW > levelW)    x = levelW - viewW;
-            if (x < 0.0f)             x = 0.0f; // level narrower than viewport
+            if (x < 0.0f)
+                x = 0.0f;
+            if (x + viewW > levelW)
+                x = levelW - viewW;
+            if (x < 0.0f)
+                x = 0.0f; // level narrower than viewport
         }
         if (levelH > 0.0f) {
-            if (y < 0.0f)              y = 0.0f;
-            if (y + viewH > levelH)    y = levelH - viewH;
-            if (y < 0.0f)             y = 0.0f;
+            if (y < 0.0f)
+                y = 0.0f;
+            if (y + viewH > levelH)
+                y = levelH - viewH;
+            if (y < 0.0f)
+                y = 0.0f;
         }
     }
 };
