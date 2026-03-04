@@ -150,6 +150,7 @@ void GameScene::Update(float dt) {
     }
     if (gameOver) return;
 
+    MovingPlatformTick(reg, dt);       // move tiles, record vx — BEFORE everything
     FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
     MovementSystem(reg, dt, mWindow->GetWidth());
@@ -161,6 +162,7 @@ void GameScene::Update(float dt) {
 
     // CollisionSystem now returns a result instead of mutating our variables directly
     CollisionResult collision = CollisionSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
+    MovingPlatformCarry(reg);           // carry player X AFTER floor snap — exact onTop check
     coinCount  += collision.coinsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
     if (collision.playerDied) gameOver = true;
@@ -173,7 +175,7 @@ void GameScene::Update(float dt) {
     {
         auto hView = reg.view<PlayerTag, Health, HazardState, AnimationState,
                               Renderable, AnimationSet>();
-        hView.each([&](Health& hp, HazardState& hz,
+        hView.each([&](entt::entity playerEnt, Health& hp, HazardState& hz,
                        AnimationState& anim, Renderable& r,
                        const AnimationSet& set) {
             hz.active = collision.onHazard;
@@ -185,8 +187,13 @@ void GameScene::Update(float dt) {
                 // Advance flash timer — 8 Hz pulse
                 hz.flashTimer += dt;
 
-                // Force hurt animation while on hazard
+                // Force hurt animation while on hazard, and cancel any
+                // in-progress attack so isAttacking never gets stuck true.
                 if (anim.currentAnim != AnimationID::HURT) {
+                    if (auto* atk = reg.try_get<AttackState>(playerEnt)) {
+                        atk->isAttacking   = false;
+                        atk->attackPressed = false;
+                    }
                     r.sheet           = set.hurtSheet;
                     r.frames          = set.hurt;
                     anim.currentFrame = 0;
@@ -326,6 +333,20 @@ void GameScene::Spawn() {
     for (const auto& ts : mLevel.tiles) {
         float right  = ts.x + ts.w;
         float bottom = ts.y + ts.h;
+        // For moving platforms, extend bounds to include the full travel range
+        // so BoundsSystem never clamps the player before the platform reaches
+        // its rightmost/bottommost position.
+        if (ts.moving) {
+            if (ts.moveHoriz) {
+                float travelRight = ts.moveLoop
+                    ? ts.x + ts.moveRange + ts.w   // loop: travels originX → originX+range
+                    : ts.x + ts.moveRange + ts.w;  // sine: originX ± range, rightmost = +range
+                right = std::max(right, travelRight);
+            } else {
+                float travelBottom = ts.y + ts.moveRange + ts.h;
+                bottom = std::max(bottom, travelBottom);
+            }
+        }
         if (right  > mLevelW) mLevelW = right;
         if (bottom > mLevelH) mLevelH = bottom;
     }
@@ -464,6 +485,34 @@ void GameScene::Spawn() {
             fs.bobSpeed = 1.4f + (rand() % 80) * 0.01f;
             fs.bobPhase = (rand() % 628) * 0.01f;
             reg.emplace<FloatState>(tile, fs);
+        }
+
+        // Moving platform
+        if (ts.moving) {
+            reg.emplace<MovingPlatformTag>(tile);
+            MovingPlatformState mps;
+            mps.horiz     = ts.moveHoriz;
+            mps.range     = ts.moveRange;
+            mps.speed     = ts.moveSpeed;
+            mps.groupId   = ts.moveGroupId;
+            mps.originX   = ts.x;
+            mps.originY   = ts.y;
+            mps.loop      = ts.moveLoop;
+            mps.trigger   = ts.moveTrigger;
+            mps.triggered = false;
+            // Use authored phase/direction from the editor.
+            // movePhase is a 0..1 fraction of range for loop, 0..1 fraction of 2pi for sine.
+            if (ts.moveLoop) {
+                mps.phase   = ts.movePhase * ts.moveRange; // 0..1 -> pixels into range
+                mps.loopDir = ts.moveLoopDir;              // +1 or -1
+                // Position tile at its authored start
+                if (ts.moveHoriz)
+                    reg.get<Transform>(tile).x = ts.x + mps.phase;
+            } else {
+                mps.phase   = ts.movePhase * 6.28318f;     // 0..1 -> radians
+                mps.loopDir = 1;
+            }
+            reg.emplace<MovingPlatformState>(tile, mps);
         }
 
         // Attach offset component when the hitbox doesn't start at tile origin

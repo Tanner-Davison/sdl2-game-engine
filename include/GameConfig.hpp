@@ -42,8 +42,8 @@ inline constexpr float SLIME_MAX_HEALTH = 30.0f;
 inline constexpr float SLASH_DAMAGE     = 30.0f; // damage dealt per sword swing
 
 // -- Sword / attack hitbox ---------------------------------------------------
-inline constexpr float SWORD_REACH  = 28.0f; // px the hitbox extends in front of the player
-inline constexpr float SWORD_HEIGHT = 0.6f;  // fraction of player collider height covered
+inline constexpr float SWORD_REACH  = 36.0f; // px the hitbox extends in front of the player
+inline constexpr float SWORD_HEIGHT = 0.72f; // fraction of player collider height covered
 
 // -- Enemy sprite dimensions --------------------------------------------------
 inline constexpr int SLIME_SPRITE_WIDTH  = 36;

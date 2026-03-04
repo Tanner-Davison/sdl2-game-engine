@@ -47,8 +47,13 @@ inline void PlayerStateSystem(entt::registry& reg) {
                 return;
             }
             if (atk->isAttacking) {
-                if (anim.currentAnim == AnimationID::SLASH &&
-                    anim.currentFrame >= anim.totalFrames - 1) {
+                // Safety: if something else (hazard hurt, etc.) stomped the anim
+                // out from under us, the slash-finish check will never fire and
+                // isAttacking gets stuck true forever. Clear it immediately.
+                if (anim.currentAnim != AnimationID::SLASH) {
+                    atk->isAttacking   = false;
+                    atk->attackPressed = false;
+                } else if (anim.currentFrame >= anim.totalFrames - 1) {
                     atk->isAttacking = false;
                     anim.currentAnim = AnimationID::NONE;
                 } else if (!inv.isInvincible) {

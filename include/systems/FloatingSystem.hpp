@@ -109,8 +109,11 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
         if (fs.spinAngle <    0.0f) fs.spinAngle += 360.0f;
 
         // ── Apply position ────────────────────────────────────────────────────
-        ft.x += fs.driftVx * dt;
-        ft.y  = fs.baseY + bob + fs.driftVy * dt;
+        ft.x      += fs.driftVx * dt;
+        float prevY = ft.y;
+        fs.baseY  += fs.driftVy * dt;  // integrate vertical drift into the bob anchor
+        ft.y       = fs.baseY + bob;
+        fs.dyThisFrame = ft.y - prevY;  // record how far the object moved vertically
 
         // ── Player body push ──────────────────────────────────────────────────
         // Fires every frame the player is in contact with the floating entity.
@@ -133,37 +136,92 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
         constexpr float BODY_PUSH_V    = 180.0f;
         constexpr float BODY_SPIN      =  90.0f;
         constexpr float CONTACT_MARGIN =   8.0f;
+        // Bottom-hit threshold: how many px the player head can be below
+        // the tile's bottom face and still count as a hit. Kept small (6px)
+        // so only genuine head contact registers, not just walking nearby.
+        constexpr float BOTTOM_MARGIN  =   6.0f;
 
+        // Standard 4-side contact (sides + top)
         bool bodyContact =
             playerX           < ft.x + fc.w  + CONTACT_MARGIN &&
             playerX + playerW > ft.x          - CONTACT_MARGIN &&
             playerY           < ft.y + fc.h  + CONTACT_MARGIN &&
             playerY + playerH > ft.y          - CONTACT_MARGIN;
 
-        if (bodyContact) {
+        // Bottom-hit: player head (playerY) is at or just below the tile's
+        // bottom face, with genuine horizontal overlap of the two colliders.
+        // Uses the real collider extents — no artificial margin on X so only
+        // true hitbox contact counts.
+        bool bottomHit = false;
+        {
+            float headY   = playerY;
+            float tileBot = ft.y + fc.h;
+            bool hOverlap = (playerX + playerW > ft.x) && (playerX < ft.x + fc.w);
+            bool nearBot  = (headY >= tileBot - BOTTOM_MARGIN) && (headY < tileBot + BOTTOM_MARGIN);
+            bottomHit = hOverlap && nearBot;
+        }
+
+        if (bodyContact || bottomHit) {
             float pCx = playerX + playerW * 0.5f;
             float fCx = ft.x    + fc.w   * 0.5f;
             float pCy = playerY + playerH * 0.5f;
             float fCy = ft.y    + fc.h   * 0.5f;
 
-            // Horizontal push: entity flies away from the player's center.
             float hDir = (fCx >= pCx) ? 1.0f : -1.0f;
-            // Scale by player's horizontal speed so walking fast hits harder;
-            // minimum floor so a stationary player still registers contact.
-            float hMag = std::max(80.0f, std::abs(playerVx));
-            fs.driftVx  += hDir * hMag * (BODY_PUSH_H / PLAYER_SPEED);
-            fs.spinSpeed += hDir * BODY_SPIN;
+            float vDir = (fCy >= pCy) ? 1.0f : -1.0f; // +1 = entity below player, -1 = above
 
-            // Vertical push: only when player is above entity center (landing /
-            // standing on top).  Skip for pure side contact so a grounded
-            // walk-in doesn't also smash the entity downward.
-            if (pCy < fCy) {
-                float vMag = std::max(60.0f, std::abs(playerVy));
-                fs.driftVy += vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
+            // Determine dominant contact axis by overlap amounts
+            float overlapH = (playerW * 0.5f + fc.w * 0.5f) - std::abs(pCx - fCx);
+            float overlapV = (playerH * 0.5f + fc.h * 0.5f) - std::abs(pCy - fCy);
+            bool topBottomHit = overlapV < overlapH || bottomHit;
+
+            if (!fs.wasInContact) {
+                // First frame of contact: full impulse for side hits and top hits.
+                if (topBottomHit && !bottomHit) {
+                    // Top hit (player above, landing on object) — strong vertical push
+                    float vMag = std::max(120.0f, std::abs(playerVy));
+                    fs.driftVy  += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
+                    if (std::abs(playerVx) > 10.0f) {
+                        float hMag = std::abs(playerVx) * 0.6f;
+                        fs.driftVx  += (playerVx > 0.0f ? 1.0f : -1.0f) * hMag * (BODY_PUSH_H / PLAYER_SPEED);
+                        fs.spinSpeed += (playerVx > 0.0f ? 1.0f : -1.0f) * BODY_SPIN * 0.5f;
+                    }
+                    fs.spinSpeed += hDir * BODY_SPIN * 0.5f;
+                } else if (!topBottomHit) {
+                    // Side hit — horizontal push
+                    float hMag = std::max(80.0f, std::abs(playerVx));
+                    fs.driftVx  += hDir * hMag * (BODY_PUSH_H / PLAYER_SPEED);
+                    fs.spinSpeed += hDir * BODY_SPIN;
+                    if (std::abs(playerVy) > 30.0f) {
+                        float vMag = std::abs(playerVy) * 0.4f;
+                        fs.driftVy += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
+                    }
+                }
+                // Re-anchor baseY on first contact so bob origin is correct.
+                fs.baseY = ft.y - bob;
             }
 
-            // Re-anchor baseY so the bob origin tracks the pushed position.
-            fs.baseY = ft.y - bob - fs.driftVy * dt;
+            // Bottom hit (player jumping up into the object's underside):
+            // CollisionSystem snaps the player back each frame, so wasInContact
+            // always resets — the first-frame guard never accumulates enough
+            // impulse. Instead apply a continuous upward push each frame while
+            // the player is pressing up against the bottom, capped so it doesn't
+            // accelerate forever.
+            if (bottomHit) {
+                constexpr float BOTTOM_HIT_PUSH  = 220.0f; // upward px/s impulse per frame
+                constexpr float BOTTOM_HIT_CAP   = 400.0f; // max upward drift speed
+                if (fs.driftVy > -BOTTOM_HIT_CAP) {
+                    float jMag = std::max(BOTTOM_HIT_PUSH, std::abs(playerVy) * 0.8f);
+                    fs.driftVy -= jMag * dt * 8.0f; // integrate each frame of contact
+                    fs.driftVy  = std::max(fs.driftVy, -BOTTOM_HIT_CAP);
+                }
+                fs.spinSpeed += hDir * BODY_SPIN * dt * 6.0f;
+                fs.baseY = ft.y - bob; // keep anchor fresh while bouncing
+            }
+
+            fs.wasInContact = true;
+        } else {
+            fs.wasInContact = false;
         }
 
         // ── Sword slash push ──────────────────────────────────────────────────
@@ -176,6 +234,29 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
         constexpr float SLASH_PUSH_FORCE = 280.0f; // reduced from 420 — was travelling too far
         constexpr float SLASH_LIFT       =   6.0f; // px — barely lifts feet off ground
         constexpr float SLASH_SPIN       = 360.0f;
+
+        // ── Float carry: if player is standing on top, move them with the object ──
+        // Check if player feet are within a small margin of the object's top.
+        // Only carry downward (dyThisFrame > 0) — upward carry is handled by
+        // the player's own jump/gravity. Actually carry both directions so
+        // the player rides the object up and down.
+        if (fs.wasInContact && std::abs(fs.dyThisFrame) > 0.001f) {
+            auto pCarry = reg.view<PlayerTag, Transform, Collider, GravityState>();
+            pCarry.each([&](Transform& pt, const Collider& pc, GravityState& pg) {
+                float pFeet    = pt.y + pc.h;
+                float objTop   = ft.y;  // ft.y already updated
+                constexpr float CARRY_MARGIN = 12.0f;
+                bool onTop = std::abs(pFeet - objTop) < CARRY_MARGIN &&
+                             pt.x + pc.w > ft.x && pt.x < ft.x + fc.w;
+                if (onTop) {
+                    pt.y += fs.dyThisFrame;
+                    // If object moved down, player is no longer grounded by collision
+                    // — let gravity handle re-grounding naturally next frame.
+                    if (fs.dyThisFrame > 0.5f)
+                        pg.isGrounded = false;
+                }
+            });
+        }
 
         if (playerSlashing) {
             bool swordOverlap =

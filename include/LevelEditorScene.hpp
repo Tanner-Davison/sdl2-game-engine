@@ -10,10 +10,13 @@
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
+#include <array>
+#include <climits>
 #include <cmath>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class LevelEditorScene : public Scene {
@@ -39,15 +42,16 @@ class LevelEditorScene : public Scene {
 
   private:
     // Destructible has been removed — Action tool is the one unified slash-trigger.
-    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope, Hitbox, Hazard, AntiGrav, Select };
+    enum class Tool { Coin, Enemy, Erase, PlayerStart, Tile, Resize, Prop, Ladder, Action, Slope, Hitbox, Hazard, AntiGrav, MovingPlat, Select };
     enum class PaletteTab { Tiles, Backgrounds };
 
     // -------------------------------------------------------------------------
     // Constants
     // -------------------------------------------------------------------------
     static constexpr int   GRID        = 48;   // 48px gives ~33% more grid cells
-    static constexpr int   TOOLBAR_H   = 72;   // taller for clean grouped layout
-    static constexpr int   PALETTE_W   = 180;
+    static constexpr int   TOOLBAR_H   = 86;   // extra room for collapse strip below buttons
+    static constexpr int   PALETTE_W        = 180;
+    static constexpr int   PALETTE_TAB_W    = 18;  // width of the collapsed toggle tab
     static constexpr int   ICON_SIZE   = 40;
     static constexpr int   PAL_ICON    = 76;
     static constexpr int   PAL_COLS    = 2;
@@ -77,6 +81,29 @@ class LevelEditorScene : public Scene {
     PaletteTab  mActiveTab       = PaletteTab::Tiles;
     bool        mLaunchGame      = false;
     bool        mGoBack          = false;   // true = return to TitleScene
+
+    // ── Cached static UI text (rebuilt only when content changes) ─────────────
+    // These avoid constructing Text objects every frame in Render.
+    std::unique_ptr<Text> lblPalHeader;        // "Tiles/..." breadcrumb
+    std::unique_ptr<Text> lblPalHint1;         // "Size: N  Esc=up"
+    std::unique_ptr<Text> lblPalHint2;         // "Click folder to open"
+    std::unique_ptr<Text> lblBgHeader;         // "Backgrounds (I=import)"
+    std::unique_ptr<Text> lblStatusBar;        // tile/coin/enemy counts
+    std::unique_ptr<Text> lblCamPos;           // "Cam: x,y"
+    std::unique_ptr<Text> lblBottomHint;       // keyboard shortcut hint
+    std::unique_ptr<Text> lblToolPrefix;       // "Tool:"
+    // Per-group collapse tab labels (rebuilt in RebuildToolbarLayout)
+    std::unique_ptr<Text> lblGrp1Tab, lblGrp2Tab, lblGrp3Tab;
+    // Palette cell labels — rebuilt when palette changes
+    std::vector<std::unique_ptr<Text>> mPalCellLabels;
+    // Track last known values so we only rebuild when they change
+    int   mLastTileCount   = -1;
+    int   mLastCoinCount   = -1;
+    int   mLastEnemyCount  = -1;
+    int   mLastCamX        = INT_MIN;
+    int   mLastCamY        = INT_MIN;
+    int   mLastTileSizeW   = -1;
+    std::string mLastPalHeaderPath;
 
     // ── Hitbox tool state ──────────────────────────────────────────────────
     int  mHitboxTileIdx  = -1;  // tile currently selected for hitbox editing (-1 = none)
@@ -120,6 +147,34 @@ class LevelEditorScene : public Scene {
     int                  mResizeOrigW   = 0;
     int                  mResizeOrigH   = 0;
     static constexpr int RESIZE_HANDLE  = 10;
+
+    // Fast path→surface lookup for rendering tiles (rebuilt in LoadTileView)
+    std::unordered_map<std::string, SDL_Surface*> mTileSurfaceCache;
+    // Extra surfaces loaded for level tiles from subdirs not in current palette view.
+    // These are owned here and freed in Unload() separately from palette items.
+    std::vector<SDL_Surface*> mExtraTileSurfaces;
+
+    // Rotation cache: for each image path, pre-built surfaces for 90/180/270 deg.
+    // Index 0=90, 1=180, 2=270. Built lazily on first use, freed in Unload.
+    std::unordered_map<std::string, std::array<SDL_Surface*, 3>> mRotCache;
+
+    // Badge text surface cache: maps badge string -> pre-rendered SDL_Surface*.
+    // Avoids constructing a Text object every frame for P/L/A/F/H/slope badges.
+    std::unordered_map<std::string, SDL_Surface*> mBadgeCache;
+
+    SDL_Surface* GetBadge(const std::string& text, SDL_Color col);
+    SDL_Surface* GetRotated(const std::string& path, SDL_Surface* src, int deg);
+
+    // Palette collapse
+    bool        mPaletteCollapsed  = false; // true = panel hidden, tab visible
+
+    // Toolbar group collapse state
+    bool        mGrp1Collapsed = false;  // Place tools
+    bool        mGrp2Collapsed = false;  // Modifier tools
+    bool        mGrp3Collapsed = false;  // Action buttons
+
+    // Collapsed group pill rects (for click detection)
+    SDL_Rect    mGrp1Pill{}, mGrp2Pill{}, mGrp3Pill{};
 
     // Drop / import state
     bool        mDropActive        = false;
@@ -190,7 +245,7 @@ class LevelEditorScene : public Scene {
     // Group 1 — Place tools
     SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{};
     // Group 2 — Tile modifier tools (no Destructible button — merged into Action)
-    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{}, btnHazard{}, btnAntiGrav{};
+    SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{}, btnHazard{}, btnAntiGrav{}, btnMovingPlat{};
     // Group 3 — Level actions
     SDL_Rect btnGravity{}, btnSave{}, btnLoad{}, btnClear{}, btnPlay{}, btnBack{};
 
@@ -201,7 +256,17 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer, lblSelect;
     std::unique_ptr<Text> hintSelect;
     // Group 2
-    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox, lblHazard, lblAntiGrav;
+    std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox, lblHazard, lblAntiGrav, lblMovingPlat;
+
+    // Moving-platform tool state
+    std::vector<int> mMovPlatIndices; // tile indices currently in this platform group
+    int   mMovPlatNextGroupId = 1;    // auto-incremented group id for new platforms
+    int   mMovPlatCurGroupId  = 1;    // group id being painted right now
+    bool  mMovPlatHoriz       = true; // H or V
+    float mMovPlatRange       = 96.0f;
+    float mMovPlatSpeed       = 60.0f;
+    bool  mMovPlatLoop        = false; // true = one-way left→right loop
+    bool  mMovPlatTrigger     = false; // true = only starts when player lands on it
     // Group 3
     std::unique_ptr<Text> lblGravity, lblSave, lblLoad, lblClear, lblPlay, lblBack;
     // Status / active tool display
@@ -214,7 +279,10 @@ class LevelEditorScene : public Scene {
     // Helpers
     // -------------------------------------------------------------------------
     int CanvasW() const {
-        return mWindow ? mWindow->GetWidth() - PALETTE_W : 800;
+        if (!mWindow) return 800;
+        return mPaletteCollapsed
+            ? mWindow->GetWidth() - PALETTE_TAB_W
+            : mWindow->GetWidth() - PALETTE_W;
     }
 
     // Convert a screen-space canvas point to world space
@@ -296,4 +364,5 @@ class LevelEditorScene : public Scene {
     void ApplyBackground(int idx);
     ResizeEdge DetectResizeEdge(int tileIdx, int mx, int my) const;
     bool ImportPath(const std::string& srcPath);
+    void RebuildToolbarLayout(); // recompute button rects after collapse state changes
 };

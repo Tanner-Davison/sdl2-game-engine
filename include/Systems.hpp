@@ -10,5 +10,6 @@
 #include <systems/LadderSystem.hpp>
 #include <systems/FloatingSystem.hpp>
 #include <systems/MovementSystem.hpp>
+#include <systems/MovingPlatformSystem.hpp>
 #include <systems/PlayerStateSystem.hpp>
 #include <systems/RenderSystem.hpp>

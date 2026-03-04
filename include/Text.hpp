@@ -164,6 +164,9 @@ class Text {
                                   const SDL_Rect&    rect) {
         return {CenterX(content, fontSize, rect), CenterY(fontSize, rect)};
     }
+    /// Returns the internal text surface (non-owning). May be nullptr.
+    SDL_Surface* GetSurface() const { return mTextSurface; }
+
     // utility funciton Sets position of the text
     void SetPosition(int x, int y) {
         mPosX                   = x;

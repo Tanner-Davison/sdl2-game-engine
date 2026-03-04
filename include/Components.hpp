@@ -191,6 +191,8 @@ struct FloatState {
     float driftVy    = 0.0f;   // vertical push velocity   (decays with drag)
     float spinAngle  = 0.0f;   // current visual rotation in degrees (render-only)
     float spinSpeed  = 0.0f;   // degrees/sec, decays to 0
+    bool  wasInContact = false; // true if player was in contact last frame (impulse edge-trigger)
+    float dyThisFrame  = 0.0f;  // Y movement applied this frame (used to carry player)
     static constexpr float DRAG = 1.8f; // drag coefficient applied each second
 };
 
@@ -220,6 +222,26 @@ struct SlopeCollider {
 };
 
 // ── Ladder / climbing state ───────────────────────────────────────────────────
+// ── Moving platform ──────────────────────────────────────────────────────────
+struct MovingPlatformTag {};
+
+struct MovingPlatformState {
+    bool  horiz       = true;   // true = horizontal, false = vertical
+    float range       = 96.0f; // half-travel in pixels
+    float speed       = 60.0f; // pixels per second
+    int   groupId     = 0;     // 0 = solo; matching IDs move as one rigid unit
+    float originX     = 0.0f;  // spawn X
+    float originY     = 0.0f;  // spawn Y
+    float phase       = 0.0f;  // shared oscillator phase [0, 2*pi)
+    float vx          = 0.0f;  // X delta this frame
+    float vy          = 0.0f;  // Y delta this frame
+    bool  playerOnTop = false; // set in MovingPlatformTick, read in Carry
+    bool  loop        = false; // ping-pong: travel right to originX+range, then back
+    int   loopDir     = 1;     // +1 = moving right, -1 = moving left (ping-pong)
+    bool  trigger     = false; // waits for first player landing before moving
+    bool  triggered   = false; // becomes true once player has landed on it
+};
+
 struct ClimbState {
     bool onLadder  = false; // true while player overlaps a ladder tile this frame
     bool climbing  = false; // true while actively climbing (gravity suspended)

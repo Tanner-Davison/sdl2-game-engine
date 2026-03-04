@@ -157,17 +157,12 @@ inline void LadderSystem(entt::registry& reg, float dt) {
         }
 
         // ─────────────────────────────────────────────────────────────────────
-        // idle — grab ladder only on W press, and only when grounded.
-        //
-        // S is intentionally excluded: it should never initiate climbing from
-        // idle (pressing S while standing next to a ladder would otherwise pull
-        // the player downward into the ground and CollisionSystem would push
-        // them back up, making them appear to climb upward unintentionally).
-        //
-        // The grounded check prevents W — which is also the jump key — from
-        // stealing control mid-air and causing the player to float.
+        // idle — grab ladder on W press while touching the ladder column.
+        // Allowed both grounded AND mid-air so the player can grab during a jump.
+        // S is excluded from initiating: pressing S from idle would pull the
+        // player into the ground and CollisionSystem would push them back up.
         // ─────────────────────────────────────────────────────────────────────
-        if (touching && wHeld && g.isGrounded) {
+        if (touching && wHeld) {
             climb.climbing = true;
             g.active       = false;
             g.velocity     = 0.0f;

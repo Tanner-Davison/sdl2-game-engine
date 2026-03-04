@@ -43,10 +43,19 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                               {"rotation", t.rotation},
                               {"hazard", t.hazard},
                               {"antiGravity", t.antiGravity},
-                              {"hitboxOffX", t.hitboxOffX},
-                              {"hitboxOffY", t.hitboxOffY},
-                              {"hitboxW",    t.hitboxW},
-                              {"hitboxH",    t.hitboxH}});
+                              {"hitboxOffX",   t.hitboxOffX},
+                              {"hitboxOffY",   t.hitboxOffY},
+                              {"hitboxW",      t.hitboxW},
+                              {"hitboxH",      t.hitboxH},
+                              {"moving",       t.moving},
+                              {"moveHoriz",    t.moveHoriz},
+                              {"moveRange",    t.moveRange},
+                              {"moveSpeed",    t.moveSpeed},
+                              {"moveGroupId",  t.moveGroupId},
+                              {"moveLoop",     t.moveLoop},
+                              {"moveTrigger",  t.moveTrigger},
+                              {"movePhase",    t.movePhase},
+                              {"moveLoopDir",  t.moveLoopDir}});
     }
 
     std::ofstream file(path);
@@ -117,10 +126,19 @@ inline bool LoadLevel(const std::string& path, Level& out) {
                              t.value("rotation", 0),
                              t.value("hazard", false),
                              t.value("antiGravity", false),
-                             t.value("hitboxOffX", 0),
-                             t.value("hitboxOffY", 0),
-                             t.value("hitboxW",    0),
-                             t.value("hitboxH",    0)});
+                             t.value("hitboxOffX",  0),
+                             t.value("hitboxOffY",  0),
+                             t.value("hitboxW",     0),
+                             t.value("hitboxH",     0),
+                             t.value("moving",      false),
+                             t.value("moveHoriz",   true),
+                             t.value("moveRange",   96.0f),
+                             t.value("moveSpeed",   60.0f),
+                             t.value("moveGroupId", 0),
+                             t.value("moveLoop",    false),
+                             t.value("moveTrigger", false),
+                             t.value("movePhase",   0.0f),
+                             t.value("moveLoopDir", 1)});
     }
 
     std::print("Level loaded: {} ({} coins, {} enemies)\n",

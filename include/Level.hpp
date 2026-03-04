@@ -38,6 +38,18 @@ struct TileSpawn {
     int hitboxOffY = 0;
     int hitboxW    = 0;  // 0 = use tile w
     int hitboxH    = 0;  // 0 = use tile h
+
+    // Moving platform — zero moveRange means stationary (default).
+    // Tiles sharing the same non-zero moveGroupId move as one rigid unit.
+    bool  moving      = false;
+    bool  moveHoriz   = true;    // true = horizontal, false = vertical
+    float moveRange   = 96.0f;   // half-travel distance in pixels (total = range*2)
+    float moveSpeed   = 60.0f;   // pixels per second
+    int   moveGroupId = 0;       // 0 = solo; non-zero groups tiles into one platform
+    bool  moveLoop    = false;   // true = ping-pong, false = sine oscillate
+    bool  moveTrigger = false;   // true = only starts moving after player first lands on it
+    float movePhase   = 0.0f;   // starting position: 0.0=origin, 1.0=far end (fraction of range)
+    int   moveLoopDir = 1;      // starting direction: +1=right/down, -1=left/up
 };
 
 enum class GravityMode { Platformer, WallRun, OpenWorld };

@@ -228,25 +228,22 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             slopeView.each([&](const SlopeCollider& sc, const Transform& tt, const Collider& tc) {
                 if (pRight <= tt.x || pLeft >= tt.x + tc.w) return;
 
-                // Surface formula anchored at the tile's HIGH corner.
-                // Produces identical Y at tile seams for the standard staircase layout.
                 float ratio = (float)tc.h / (float)tc.w;
-                float playerCX = pLeft + pc.w * 0.5f;
+
+                // Use player centre X for the surface formula — this keeps
+                // seam continuity across tiles while sitting at a visually
+                // correct height (neither floating nor sunken).
+                float playerX = pLeft + pc.w * 0.5f;
+
                 float surface;
                 if (sc.slopeType == SlopeType::DiagUpLeft) {
-                    // HIGH = top-left (tt.x, tt.y), LOW = bot-right (tt.x+w, tt.y+h)
-                    surface = tt.y + (playerCX - tt.x) * ratio;
+                    surface = tt.y + (playerX - tt.x) * ratio;
                 } else {
-                    // DiagUpRight: HIGH = top-right (tt.x+w, tt.y), LOW = bot-left (tt.x, tt.y+h)
-                    surface = tt.y + (tt.x + tc.w - playerCX) * ratio;
+                    surface = tt.y + (tt.x + tc.w - playerX) * ratio;
                 }
 
-                // Never let the slope snap push the player BELOW the tile's own
-                // bottom edge.  This is the only guard needed: it prevents the
-                // formula from extrapolating past the low corner when the player
-                // is transitioning off the end of the slope onto flat ground,
-                // without clamping playerCX (which would break seam continuity).
-                if (surface > tt.y + tc.h) return;
+                // Reject extrapolation outside the tile's vertical bounds
+                if (surface < tt.y || surface > tt.y + tc.h) return;
 
                 if (pFeet < surface - SLOPE_SNAP_LOOKAHEAD) return;
                 if (pt.y  > tt.y + tc.h + SLOPE_SNAP_LOOKAHEAD) return;
@@ -258,8 +255,14 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             });
 
             if (onSlope) {
-                pt.y             = bestSurface - pc.h;
-                g.velocity       = 0.0f;
+                // Snap to slope surface regardless of velocity direction.
+                // The old g.velocity >= 0.0f guard caused isGrounded to stay
+                // false while walking uphill (SLOPE_STICK_VELOCITY can briefly
+                // make velocity negative), blocking jumps on ascending slopes.
+                if (g.velocity >= 0.0f || pt.y > bestSurface - pc.h) {
+                    pt.y       = bestSurface - pc.h;
+                    g.velocity = 0.0f;
+                }
                 g.isGrounded     = true;
                 onSlopeThisFrame = true;
             }
@@ -356,6 +359,10 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             if (pt.x + pw <= tax || pt.x >= tax + tc.w) return;
             if (pt.y + ph <= tay || pt.y >= tay + tc.h) return;
 
+            // Moving platforms own their own lateral carry — skip lateral
+            // push-out for them in Pass 2 to avoid fighting MovingPlatformSystem.
+            const bool isMovingPlat = reg.all_of<MovingPlatformTag>(te);
+
             switch (g.direction) {
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
@@ -365,9 +372,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     float oRight  = (tax + tc.w) - pt.x;
 
                     if (onSlopeThisFrame) {
-                        // On slope: ceiling push only — never floor snap or lateral.
-                        // The slope pass already placed pt.y correctly; any floor
-                        // contact here is a fill tile the slope lifted us above.
                         if (g.direction == GravityDir::DOWN
                             && oBottom < oTop && oBottom <= oLeft && oBottom <= oRight) {
                             pt.y       = tay + tc.h;
@@ -394,8 +398,13 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         g.velocity = 0.0f;
                         break;
                     }
-                    // Lateral wall: push out on shallower horizontal axis.
-                    pt.x = oLeft < oRight ? tax - pw : tax + tc.w;
+                    // Lateral wall: skip ejection for moving platforms ONLY when
+                    // contact is from above (player standing on top) — ejecting
+                    // would fight MovingPlatformCarry. For side contacts, always
+                    // eject so the player can't walk through platform edges.
+                    bool isTopContact = (oTop < oLeft && oTop < oRight);
+                    if (!isMovingPlat || !isTopContact)
+                        pt.x = oLeft < oRight ? tax - pw : tax + tc.w;
                     break;
                 }
                 case GravityDir::LEFT:
