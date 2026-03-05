@@ -579,35 +579,37 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
     for (auto e : toDestroy)
         reg.destroy(e);
 
-    // -- Strip triggered action tiles (and their groups) ----------------------
-    auto stripTile = [&](entt::entity e) {
-        if (!reg.valid(e)) return;
-        if (reg.all_of<Renderable>(e)) reg.remove<Renderable>(e);
-        if (reg.all_of<TileTag>(e))    reg.remove<TileTag>(e);
-        if (reg.all_of<Collider>(e))   reg.remove<Collider>(e);
-    };
-
+    // -- Collect group members for triggered action tiles ----------------------
+    // CollisionSystem no longer strips tiles directly. It expands groups here
+    // so GameScene::Update() receives the full set (primary + all group members)
+    // and can decide per-entity whether to run a destroy animation or strip cold.
     {
         auto& v = result.actionTilesTriggered;
         std::sort(v.begin(), v.end());
         v.erase(std::unique(v.begin(), v.end()), v.end());
     }
 
-    for (auto e : result.actionTilesTriggered) {
-        if (!reg.valid(e)) continue;
-        if (!reg.all_of<ActionTag>(e)) continue;
-        int grp = reg.get<ActionTag>(e).group;
-        stripTile(e);
-        if (grp != 0) {
-            std::vector<entt::entity> groupMembers;
+    {
+        // Expand groups: for every triggered tile with a non-zero group, add all
+        // other ActionTag entities in that group to actionTilesTriggered.
+        std::vector<entt::entity> extras;
+        for (auto e : result.actionTilesTriggered) {
+            if (!reg.valid(e) || !reg.all_of<ActionTag>(e)) continue;
+            int grp = reg.get<ActionTag>(e).group;
+            if (grp == 0) continue;
             auto groupView = reg.view<ActionTag>();
             groupView.each([&](entt::entity other, const ActionTag& at) {
                 if (other != e && at.group == grp)
-                    groupMembers.push_back(other);
+                    extras.push_back(other);
             });
-            for (auto gm : groupMembers)
-                stripTile(gm);
         }
+        for (auto ex : extras)
+            result.actionTilesTriggered.push_back(ex);
+        // Re-deduplicate after expansion
+        std::sort(result.actionTilesTriggered.begin(), result.actionTilesTriggered.end());
+        result.actionTilesTriggered.erase(
+            std::unique(result.actionTilesTriggered.begin(), result.actionTilesTriggered.end()),
+            result.actionTilesTriggered.end());
     }
 
     // -- Hazard tile overlap -----------------------------------------------

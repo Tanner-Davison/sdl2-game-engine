@@ -36,7 +36,7 @@
         },
         {
             "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Jump Loop",
-            "fps": 8.0,
+            "fps": 21.0,
             "hitbox": {
                 "h": 95,
                 "w": 75,
@@ -58,7 +58,7 @@
         },
         {
             "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 03/PNG Sequences/Attacking",
-            "fps": 0.0,
+            "fps": 48.0,
             "hitbox": {
                 "h": 95,
                 "w": 75,

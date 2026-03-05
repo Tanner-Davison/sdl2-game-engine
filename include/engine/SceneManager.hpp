@@ -41,6 +41,13 @@ class SceneManager {
             mCurrent->Render(window);
     }
 
+    void Shutdown() {
+        if (mCurrent) {
+            mCurrent->Unload();
+            mCurrent.reset();
+        }
+    }
+
     bool ShouldQuit() const {
         return mCurrent ? mCurrent->ShouldQuit() : true;
     }

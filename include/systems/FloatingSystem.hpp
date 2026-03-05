@@ -1,6 +1,7 @@
 #pragma once
 #include <Components.hpp>
 #include <GameConfig.hpp>
+#include <GameEvents.hpp>
 #include <cmath>
 #include <entt/entt.hpp>
 
@@ -20,7 +21,8 @@
 // that do NOT have FloatTag, grounding them on TileTag surfaces.
 // ─────────────────────────────────────────────────────────────────────────────
 
-inline void FloatingSystem(entt::registry& reg, float dt) {
+inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
+    FloatingResult result;
 
     // ── 1. Gravity for non-floating enemies ──────────────────────────────────
     {
@@ -156,10 +158,9 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
                         if (!recentlyHit) {
                             tag->hitsRemaining--;
                             if (tag->hitsRemaining <= 0) {
-                                if (reg.all_of<Renderable>(te)) reg.remove<Renderable>(te);
-                                if (reg.all_of<TileTag>(te))    reg.remove<TileTag>(te);
-                                if (reg.all_of<Collider>(te))   reg.remove<Collider>(te);
-                                if (reg.all_of<HitFlash>(te))   reg.remove<HitFlash>(te);
+                                // Don't strip components here — defer to GameScene's
+                                // destroy-animation pipeline so death anims play correctly.
+                                result.actionTilesTriggered.push_back(te);
                             } else {
                                 if (reg.all_of<HitFlash>(te))
                                     reg.get<HitFlash>(te).timer = HitFlash{}.duration;
@@ -378,7 +379,7 @@ inline void FloatingSystem(entt::registry& reg, float dt) {
                 fs.spinSpeed += slashDir * SLASH_SPIN;
             }
         }
-
-
     }
+
+    return result;
 }

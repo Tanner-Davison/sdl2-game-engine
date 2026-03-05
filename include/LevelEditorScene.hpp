@@ -59,7 +59,8 @@ class LevelEditorScene : public Scene {
         Hazard,
         AntiGrav,
         MovingPlat,
-        Select
+        Select,
+        MoveCam   // left-drag pans the camera; no tile interaction
     };
     enum class PaletteTab { Tiles, Backgrounds };
 
@@ -96,7 +97,7 @@ class LevelEditorScene : public Scene {
     std::string mPresetName;   // name chosen in title-screen modal (overrides "level1")
     std::string mProfilePath;  // PlayerProfile JSON path to pass through to GameScene (empty = frost knight)
     Window*     mWindow     = nullptr;
-    Tool        mActiveTool = Tool::Coin;
+    Tool        mActiveTool = Tool::Select;
     PaletteTab  mActiveTab  = PaletteTab::Tiles;
     bool        mLaunchGame = false;
     bool        mGoBack     = false; // true = return to TitleScene
@@ -178,6 +179,30 @@ class LevelEditorScene : public Scene {
     int                  mResizeOrigH   = 0;
     static constexpr int RESIZE_HANDLE  = 10;
 
+    // Destroy-anim thumbnail cache: maps anim JSON path -> a small SDL_Surface* thumb
+    // (first frame of the anim, scaled to 48x48). Built lazily, freed in Unload.
+    std::unordered_map<std::string, SDL_Surface*> mDestroyAnimThumbCache;
+    // Index of the action tile currently being hovered during a drag-drop of a .json file.
+    // -1 when no drop is in flight or cursor is not over an action tile.
+    int mActionAnimDropHover = -1;
+
+    // ── Destroy-anim picker popup ──────────────────────────────────────────────
+    // Opened when the user clicks an already-action tile while the Action tool
+    // is active. Lists all .json files in animated_tiles/ plus a "None" entry.
+    int      mActionAnimPickerTile = -1; // tile index the picker is targeting (-1 = closed)
+    SDL_Rect mActionAnimPickerRect{};    // screen-space bounding rect of the popup
+    struct AnimPickerEntry {
+        std::string path;   // empty = "None"
+        std::string name;
+        SDL_Surface* thumb = nullptr; // non-owning — points into mDestroyAnimThumbCache
+    };
+    std::vector<AnimPickerEntry> mAnimPickerEntries; // rebuilt when picker opens
+
+    void OpenAnimPicker(int tileIdx);   // build mAnimPickerEntries and set mActionAnimPickerTile
+    void CloseAnimPicker();             // reset picker state
+
+    SDL_Surface* GetDestroyAnimThumb(const std::string& jsonPath);
+
     // Fast path→surface lookup for rendering tiles (rebuilt in LoadTileView)
     std::unordered_map<std::string, SDL_Surface*> mTileSurfaceCache;
     // Extra surfaces loaded for level tiles from subdirs not in current palette view.
@@ -206,6 +231,14 @@ class LevelEditorScene : public Scene {
     // Collapsed group pill rects (for click detection)
     SDL_Rect mGrp1Pill{}, mGrp2Pill{}, mGrp3Pill{};
 
+    // Delete confirmation popup state
+    bool        mDelConfirmActive  = false;
+    std::string mDelConfirmPath;   // path pending deletion
+    bool        mDelConfirmIsDir   = false;
+    std::string mDelConfirmName;   // display name
+    SDL_Rect    mDelConfirmYes{};
+    SDL_Rect    mDelConfirmNo{};
+
     // Drop / import state
     bool        mDropActive        = false;
     bool        mImportInputActive = false;
@@ -226,9 +259,13 @@ class LevelEditorScene : public Scene {
     // Per-tile original positions captured at drag-start
     std::vector<std::pair<float, float>> mSelOrigPositions;
 
-    // Editor camera pan
+    // Editor camera pan + zoom
     float mCamX         = 0.0f; // world-space offset applied to all canvas rendering
     float mCamY         = 0.0f;
+    float mZoom         = 1.0f; // canvas zoom: 1.0 = 100%, 0.5 = 50%, 2.0 = 200%
+    static constexpr float ZOOM_MIN = 0.25f;
+    static constexpr float ZOOM_MAX = 4.0f;
+    static constexpr float ZOOM_STEP = 0.1f;
     bool  mIsPanning    = false; // true while middle-mouse is held
     int   mPanStartX    = 0;
     int   mPanStartY    = 0;
@@ -251,13 +288,15 @@ class LevelEditorScene : public Scene {
         SDL_Surface* thumb    = nullptr;
         SDL_Surface* full     = nullptr;
         bool         isFolder = false;
+        SDL_Rect     delBtn   = {-1,-1,0,0}; // computed each frame in Render
     };
     std::vector<PaletteItem> mPaletteItems;
 
     struct BgItem {
         std::string  path;
         std::string  label;
-        SDL_Surface* thumb = nullptr;
+        SDL_Surface* thumb  = nullptr;
+        SDL_Rect     delBtn = {-1,-1,0,0};
     };
     std::vector<BgItem> mBgItems;
 
@@ -273,7 +312,7 @@ class LevelEditorScene : public Scene {
     // Toolbar buttons  (three groups separated by GRP_GAP dividers)
     // -------------------------------------------------------------------------
     // Group 1 — Place tools
-    SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{};
+    SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{}, btnMoveCam{};
     // Group 2 — Tile modifier tools (no Destructible button — merged into Action)
     SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{},
         btnHazard{}, btnAntiGrav{}, btnMovingPlat{};
@@ -283,8 +322,8 @@ class LevelEditorScene : public Scene {
     // Labels — all white, 12 px, centered in their button
     // -------------------------------------------------------------------------
     // Group 1
-    std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer, lblSelect;
-    std::unique_ptr<Text> hintSelect;
+    std::unique_ptr<Text> lblCoin, lblEnemy, lblTile, lblErase, lblPlayer, lblSelect, lblMoveCam;
+    std::unique_ptr<Text> hintSelect, hintMoveCam;
     // Group 2
     std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox,
         lblHazard, lblAntiGrav, lblMovingPlat;
@@ -316,26 +355,26 @@ class LevelEditorScene : public Scene {
                                  : mWindow->GetWidth() - PALETTE_W;
     }
 
-    // Convert a screen-space canvas point to world space
+    // Convert a screen-space canvas point to world space (accounts for zoom)
     SDL_Point ScreenToWorld(int sx, int sy) const {
-        return {(int)(sx + mCamX), (int)(sy + mCamY)};
+        return {(int)(sx / mZoom + mCamX), (int)(sy / mZoom + mCamY)};
     }
-    // Convert a world-space point to screen space
+    // Convert a world-space point to screen space (accounts for zoom)
     SDL_Point WorldToScreen(float wx, float wy) const {
-        return {(int)(wx - mCamX), (int)(wy - mCamY)};
+        return {(int)((wx - mCamX) * mZoom), (int)((wy - mCamY) * mZoom)};
     }
 
     SDL_Point SnapToGrid(int sx, int sy) const {
-        // Convert screen coords to world coords, then snap to grid.
-        // The visual grid lines are drawn at world multiples of GRID,
-        // so snapping in world space keeps placements aligned with them.
-        int wx = (int)(sx + mCamX);
-        int wy = (int)(sy + mCamY);
-        int cx = (wx / GRID) * GRID;
-        int cy = (wy / GRID) * GRID;
-        // Never place above world-y=0 (the top of the canvas)
-        if (cy < 0)
-            cy = 0;
+        // Convert screen coords to world coords (with zoom), then snap to grid.
+        // std::floor is used at every step so the result is always the grid cell
+        // that visually contains the cursor, regardless of zoom level or sign.
+        // Plain (int) cast truncates toward zero, which gives the wrong cell for
+        // any fractional world coordinate just left/above a grid boundary.
+        float wx = sx / mZoom + mCamX;
+        float wy = sy / mZoom + mCamY;
+        int cx = (int)std::floor(wx / GRID) * GRID;
+        int cy = (int)std::floor(wy / GRID) * GRID;
+        if (cy < 0) cy = 0;
         return {cx, cy};
     }
 
@@ -382,6 +421,20 @@ class LevelEditorScene : public Scene {
     void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
         const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
         SDL_FillSurfaceRect(s, &r, SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a));
+    }
+
+    // Alpha-blended fill — creates a temporary surface with BLENDMODE_BLEND so
+    // the alpha channel is actually respected. Use this instead of DrawRect
+    // whenever you need a semi-transparent overlay over existing content.
+    void DrawRectAlpha(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
+        if (r.w <= 0 || r.h <= 0) return;
+        SDL_Surface* ov = SDL_CreateSurface(r.w, r.h, SDL_PIXELFORMAT_ARGB8888);
+        if (!ov) return;
+        SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+        const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(ov->format);
+        SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a));
+        SDL_BlitSurface(ov, nullptr, s, &r);
+        SDL_DestroySurface(ov);
     }
 
     void DrawOutline(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1) {

@@ -1,0 +1,14 @@
+{
+    "fps": 8.0,
+    "frames": [
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/1.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/2.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/3.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/4.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/5.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/6.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/7.png",
+        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/rockets/8.png"
+    ],
+    "name": "rockets"
+}

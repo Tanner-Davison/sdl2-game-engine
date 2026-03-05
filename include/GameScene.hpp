@@ -61,8 +61,21 @@ class GameScene : public Scene {
     int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
     std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};  // per-slot fps from profile (0 = engine default)
     bool           mFromEditor        = false;  // true = launched via editor Play button
-    bool           mPauseRequested    = false;  // set when ESC pressed during play
+    bool           mPaused            = false;  // true = pause overlay active, simulation frozen
+    bool           mGoBackFromPause   = false;  // set by pause overlay "Back" button
     bool           mDebugHitboxes     = false;  // F1 toggles hitbox overlay
+
+    // Pause overlay UI (built lazily on first pause, reused)
+    SDL_Rect                   mPauseResumeRect{};
+    SDL_Rect                   mPauseBackRect{};
+    std::unique_ptr<Rectangle> mPauseResumeBtn;
+    std::unique_ptr<Rectangle> mPauseBackBtn;
+    std::unique_ptr<Text>      mPauseTitleLbl;
+    std::unique_ptr<Text>      mPauseResumeLbl;
+    std::unique_ptr<Text>      mPauseBackLbl;
+    std::unique_ptr<Text>      mPauseHintLbl;
+    void BuildPauseUI(int W, int H);
+    void RenderPauseOverlay(Window& window);
     Level          mLevel;
     SDL_Rect       retryBtnRect{};
 

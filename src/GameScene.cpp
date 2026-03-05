@@ -2,8 +2,9 @@
 #include "AnimatedTile.hpp"
 #include "GameConfig.hpp"
 #include "GameEvents.hpp"
+#include "LevelEditorScene.hpp"
 #include "LevelTwo.hpp"
-#include "PauseMenuScene.hpp"
+#include "TitleScene.hpp"
 #include "SurfaceUtils.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <cmath>
@@ -165,12 +166,18 @@ void GameScene::Unload() {
 }
 
 std::unique_ptr<Scene> GameScene::NextScene() {
-    if (mPauseRequested) {
-        mPauseRequested = false;
-        return std::make_unique<PauseMenuScene>(mLevelPath, mFromEditor);
+    if (mGoBackFromPause) {
+        mGoBackFromPause = false;
+        if (mFromEditor)
+            return std::make_unique<LevelEditorScene>(mLevelPath, false, "", mProfilePath);
+        else
+            return std::make_unique<TitleScene>();
     }
-    if (levelComplete && levelCompleteTimer <= 0.0f)
+    if (levelComplete && levelCompleteTimer <= 0.0f) {
+        if (mFromEditor)
+            return std::make_unique<LevelEditorScene>(mLevelPath, false, "", mProfilePath);
         return std::make_unique<LevelTwo>();
+    }
     return nullptr;
 }
 
@@ -178,15 +185,40 @@ bool GameScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
+    // ── Pause overlay input ───────────────────────────────────────────────────
+    if (mPaused) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+            mPaused = false; // ESC again = resume
+            return true;
+        }
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            int mx = (int)e.button.x, my = (int)e.button.y;
+            if (mx >= mPauseResumeRect.x && mx < mPauseResumeRect.x + mPauseResumeRect.w &&
+                my >= mPauseResumeRect.y && my < mPauseResumeRect.y + mPauseResumeRect.h) {
+                mPaused = false;
+                return true;
+            }
+            if (mx >= mPauseBackRect.x && mx < mPauseBackRect.x + mPauseBackRect.w &&
+                my >= mPauseBackRect.y && my < mPauseBackRect.y + mPauseBackRect.h) {
+                mGoBackFromPause = true;
+                return true;
+            }
+        }
+        if (mPauseResumeBtn) mPauseResumeBtn->HandleEvent(e);
+        if (mPauseBackBtn)   mPauseBackBtn->HandleEvent(e);
+        return true; // swallow all input while paused
+    }
+
     if (!gameOver) {
         // F1 — toggle hitbox debug overlay
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F1) {
             mDebugHitboxes = !mDebugHitboxes;
             return true;
         }
-        // ESC during active play — request pause
+        // ESC during active play — open pause overlay
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE && !levelComplete) {
-            mPauseRequested = true;
+            mPaused = true;
+            if (mWindow) BuildPauseUI(mWindow->GetWidth(), mWindow->GetHeight());
             return true;
         }
         InputSystem(reg, e);
@@ -208,6 +240,7 @@ bool GameScene::HandleEvent(SDL_Event& e) {
 }
 
 void GameScene::Update(float dt) {
+    if (mPaused) return; // simulation frozen while pause overlay is open
     if (levelComplete) {
         levelCompleteTimer -= dt;
         return;
@@ -215,13 +248,13 @@ void GameScene::Update(float dt) {
     if (gameOver) return;
 
     MovingPlatformTick(reg, dt);       // move tiles, record vx — BEFORE everything
-    FloatingSystem(reg, dt);
+    FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
+    PlayerStateSystem(reg);            // immediately after ladder so climb state is fresh
     MovementSystem(reg, dt, mWindow->GetWidth());
     BoundsSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight(),
                  mLevel.gravityMode == GravityMode::WallRun,
                  mLevelW, mLevelH);
-    PlayerStateSystem(reg);
     AnimationSystem(reg, dt);
 
     // Advance animated tile frames.
@@ -239,10 +272,48 @@ void GameScene::Update(float dt) {
         anim->timer += dt;
         while (anim->timer >= dur) {
             anim->timer -= dur;
-            anim->currentFrame = (anim->currentFrame + 1) % (int)frames.size();
+            if (anim->looping) {
+                anim->currentFrame = (anim->currentFrame + 1) % (int)frames.size();
+            } else {
+                // Non-looping (death anims): clamp at last frame rather than wrapping.
+                // DestroyAnimTag completion check detects this and destroys the entity.
+                if (anim->currentFrame < (int)frames.size() - 1)
+                    anim->currentFrame++;
+                else
+                    anim->timer = 0.0f; // stop the timer at the last frame
+            }
         }
         SDL_Surface* cur = frames[anim->currentFrame];
         if (cur) rend->sheet = cur;
+    }
+
+    // ── Destroy action tiles whose death animation has finished ────────────────
+    // Runs AFTER the tileAnimFrameMap ticker so the last frame is guaranteed
+    // to have been ticked (and thus will be rendered this pass) before removal.
+    // Two-phase: first time we see currentFrame == totalFrames-1 we set
+    // reachedEnd = true and let the entity live one more full frame so the
+    // last frame actually gets painted. On the second detection we destroy.
+    {
+        std::vector<entt::entity> toDestroy;
+        auto destroyView = reg.view<DestroyAnimTag, AnimationState>();
+        destroyView.each([&](entt::entity e, DestroyAnimTag& dat, const AnimationState& anim) {
+            if (!anim.looping && anim.currentFrame >= anim.totalFrames - 1) {
+                if (dat.reachedEnd) {
+                    // Second time seeing the last frame — safe to destroy now
+                    toDestroy.push_back(e);
+                } else {
+                    // First time — mark it and let one more render pass happen
+                    dat.reachedEnd = true;
+                }
+            }
+        });
+        for (entt::entity e : toDestroy) {
+            tileAnimFrameMap.erase(e);
+            if (reg.valid(e)) {
+                if (reg.all_of<Renderable>(e)) reg.remove<Renderable>(e);
+                reg.destroy(e);
+            }
+        }
     }
 
     // Tick down HitFlash timers on action tiles and remove when expired
@@ -258,10 +329,108 @@ void GameScene::Update(float dt) {
 
     // CollisionSystem now returns a result instead of mutating our variables directly
     CollisionResult collision = CollisionSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
+    // Merge floating-object-triggered action tiles so they go through the same
+    // destroy-animation pipeline as slash-triggered tiles.
+    for (auto e : floatResult.actionTilesTriggered)
+        collision.actionTilesTriggered.push_back(e);
     MovingPlatformCarry(reg);           // carry player X AFTER floor snap — exact onTop check
     coinCount  += collision.coinsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
     if (collision.playerDied) gameOver = true;
+
+    // ── Process triggered action tiles ───────────────────────────────────────
+    // CollisionSystem has already expanded groups and deduplicated the list.
+    // For each triggered tile: strip collision immediately (TileTag + Collider),
+    // then either kick off the destroy animation or strip Renderable right away.
+    for (entt::entity e : collision.actionTilesTriggered) {
+        if (!reg.valid(e)) continue;
+
+        // Always remove solid collision immediately so the player can walk through
+        if (reg.all_of<TileTag>(e))  reg.remove<TileTag>(e);
+        if (reg.all_of<Collider>(e)) reg.remove<Collider>(e);
+
+        // Check whether this tile has a destroy animation path
+        const ActionTag* atag = reg.try_get<ActionTag>(e);
+        if (atag && !atag->destroyAnimPath.empty()) {
+            // ── Destroy animation path ────────────────────────────────────
+            AnimatedTileDef def;
+            std::print("[DestroyAnim] tile triggered, path='{}' ", atag->destroyAnimPath);
+            if (LoadAnimatedTileDef(atag->destroyAnimPath, def) && !def.framePaths.empty()) {
+                std::print("loaded {} frames at {}fps\n", def.framePaths.size(), def.fps);
+                // Read tile dimensions from the existing Transform + whatever the
+                // Renderable frame rect currently reports (safe because Renderable
+                // still exists at this point — we haven't stripped it yet).
+                int tw = 0, th = 0;
+                if (reg.all_of<Renderable>(e)) {
+                    const auto& rend = reg.get<Renderable>(e);
+                    if (!rend.frames.empty()) {
+                        tw = rend.frames[0].w;
+                        th = rend.frames[0].h;
+                    }
+                }
+                if (tw <= 0 || th <= 0) { tw = 38; th = 38; } // fallback to grid size
+
+                std::vector<SDL_Surface*> frameSurfs;
+                for (const auto& fp : def.framePaths) {
+                    SDL_Surface* raw = IMG_Load(fp.c_str());
+                    if (!raw) { frameSurfs.push_back(nullptr); continue; }
+                    SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+                    SDL_DestroySurface(raw);
+                    if (!conv) { frameSurfs.push_back(nullptr); continue; }
+                    SDL_Surface* scaled = SDL_CreateSurface(tw, th, SDL_PIXELFORMAT_ARGB8888);
+                    if (scaled) {
+                        SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
+                        SDL_BlitSurfaceScaled(conv, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
+                        SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
+                    }
+                    SDL_DestroySurface(conv);
+                    frameSurfs.push_back(scaled);
+                }
+
+                // Only proceed if at least the first frame loaded
+                if (!frameSurfs.empty() && frameSurfs[0]) {
+                    // Register surfaces for cleanup on Unload/Respawn
+                    for (auto* s : frameSurfs)
+                        if (s) tileScaledSurfaces.push_back(s);
+
+                    // Register in tileAnimFrameMap so the Update() anim ticker drives it
+                    tileAnimFrameMap[e] = std::move(frameSurfs);
+
+                    // Replace Renderable with the first death-anim frame
+                    auto& frames = tileAnimFrameMap[e];
+                    std::vector<SDL_Rect> animRects((int)frames.size(), SDL_Rect{0, 0, tw, th});
+                    if (reg.all_of<Renderable>(e))
+                        reg.remove<Renderable>(e);
+                    reg.emplace<Renderable>(e, frames[0], std::move(animRects), false);
+
+                    // Reset AnimationState to frame 0, non-looping
+                    if (reg.all_of<AnimationState>(e))
+                        reg.remove<AnimationState>(e);
+                    reg.emplace<AnimationState>(e, 0, (int)frames.size(), 0.0f, def.fps, false);
+
+                    // Tag as TileAnimTag so the anim ticker in Update() advances it
+                    if (!reg.all_of<TileAnimTag>(e))
+                        reg.emplace<TileAnimTag>(e);
+
+                    // Tag as DestroyAnimTag so the completion check can find it
+                    if (!reg.all_of<DestroyAnimTag>(e))
+                        reg.emplace<DestroyAnimTag>(e,
+                            (int)tileAnimFrameMap[e].size(), def.fps, false /*reachedEnd*/);
+
+                    continue; // don't strip Renderable — anim ticker owns it now
+                } else {
+                    // Frame load failed — free any partial surfaces and fall through to cold strip
+                    std::print("[DestroyAnim] frame surface load failed\n");
+                    for (auto* s : frameSurfs) if (s) SDL_DestroySurface(s);
+                }
+            } else {
+                std::print("def load failed or empty\n");
+            }
+        }
+
+        // ── No destroy animation (or load failed) — strip Renderable cold ─
+        if (reg.all_of<Renderable>(e)) reg.remove<Renderable>(e);
+    }
 
     // ── Hazard damage ─────────────────────────────────────────────────────────
     // While on a hazard tile: drain HP at HAZARD_DAMAGE_PER_SEC, advance flash
@@ -469,7 +638,73 @@ void GameScene::Render(Window& window) {
                   stompText.get(), stompCount);
     }
 
+    if (mPaused) RenderPauseOverlay(window);
+
     window.Update();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pause overlay
+// ─────────────────────────────────────────────────────────────────────────────
+
+void GameScene::BuildPauseUI(int W, int H) {
+    int cx = W / 2, cy = H / 2;
+
+    SDL_Rect titleRect = {cx - 160, cy - 145, 320, 50};
+    auto [tx, ty] = Text::CenterInRect("PAUSED", 36, titleRect);
+    mPauseTitleLbl = std::make_unique<Text>("PAUSED", SDL_Color{255, 215, 0, 255}, tx, ty, 36);
+
+    mPauseResumeRect = {cx - 130, cy - 60, 260, 55};
+    mPauseResumeBtn  = std::make_unique<Rectangle>(mPauseResumeRect);
+    mPauseResumeBtn->SetColor({40, 160, 80, 255});
+    mPauseResumeBtn->SetHoverColor({60, 200, 100, 255});
+    auto [rx, ry] = Text::CenterInRect("Resume", 28, mPauseResumeRect);
+    mPauseResumeLbl = std::make_unique<Text>("Resume", SDL_Color{255, 255, 255, 255}, rx, ry, 28);
+
+    std::string backLabel = mFromEditor ? "Back to Editor" : "Back to Title";
+    mPauseBackRect = {cx - 130, cy + 20, 260, 55};
+    mPauseBackBtn  = std::make_unique<Rectangle>(mPauseBackRect);
+    mPauseBackBtn->SetColor({120, 50, 50, 255});
+    mPauseBackBtn->SetHoverColor({180, 70, 70, 255});
+    auto [bx, by] = Text::CenterInRect(backLabel, 22, mPauseBackRect);
+    mPauseBackLbl = std::make_unique<Text>(backLabel, SDL_Color{255, 220, 220, 255}, bx, by, 22);
+
+    mPauseHintLbl = std::make_unique<Text>("ESC to resume", SDL_Color{100, 100, 120, 255},
+                                           cx - 70, cy + 100, 14);
+}
+
+void GameScene::RenderPauseOverlay(Window& window) {
+    SDL_Surface* screen = window.GetSurface();
+    const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
+
+    // Semi-transparent dim
+    SDL_Surface* ov = SDL_CreateSurface(screen->w, screen->h, SDL_PIXELFORMAT_ARGB8888);
+    if (ov) {
+        SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+        SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(fmt, nullptr, 0, 0, 0, 160));
+        SDL_BlitSurface(ov, nullptr, screen, nullptr);
+        SDL_DestroySurface(ov);
+    }
+
+    // Panel
+    int W = window.GetWidth(), H = window.GetHeight();
+    SDL_Rect panel = {W/2 - 180, H/2 - 160, 360, 320};
+    SDL_FillSurfaceRect(screen, &panel, SDL_MapRGBA(fmt, nullptr, 18, 20, 32, 230));
+    // Border
+    constexpr int T = 2;
+    Uint32 border = SDL_MapRGBA(fmt, nullptr, 80, 120, 220, 255);
+    SDL_Rect sides[4] = {
+        {panel.x, panel.y, panel.w, T}, {panel.x, panel.y+panel.h-T, panel.w, T},
+        {panel.x, panel.y, T, panel.h}, {panel.x+panel.w-T, panel.y, T, panel.h}
+    };
+    for (auto& s : sides) SDL_FillSurfaceRect(screen, &s, border);
+
+    if (mPauseTitleLbl)  mPauseTitleLbl->Render(screen);
+    if (mPauseResumeBtn) mPauseResumeBtn->Render(screen);
+    if (mPauseResumeLbl) mPauseResumeLbl->Render(screen);
+    if (mPauseBackBtn)   mPauseBackBtn->Render(screen);
+    if (mPauseBackLbl)   mPauseBackLbl->Render(screen);
+    if (mPauseHintLbl)   mPauseHintLbl->Render(screen);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -642,6 +877,21 @@ void GameScene::Spawn() {
     reg.emplace<Health>(player);
     reg.emplace<Collider>(player, pColW, pColH);
     reg.emplace<RenderOffset>(player, pROffX, pROffY);
+    {
+        // Store per-character baseline so PlayerStateSystem never clobbers the
+        // custom hitbox with hardcoded frost-knight constants.
+        PlayerBaseCollider base;
+        base.standW    = pColW;
+        base.standH    = pColH;
+        base.standRoffX = pROffX;
+        base.standRoffY = pROffY;
+        // Duck: same width, half height, anchored to collider bottom
+        base.duckW     = pColW;
+        base.duckH     = pColH / 2;
+        base.duckRoffX  = pROffX;
+        base.duckRoffY  = -(mPlayerSpriteH - base.duckH);
+        reg.emplace<PlayerBaseCollider>(player, base);
+    }
     reg.emplace<InvincibilityTimer>(player);
     {
         GravityState gs;
@@ -733,9 +983,11 @@ void GameScene::Spawn() {
             if (ts.prop)                            reg.emplace<PropTag>(tile);
             // Action tag is independent — always emitted when set, but TileTag
             // (solid collision) is only added above when prop=false.
-            if (ts.action)                          reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits);
+            if (ts.action)                          reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits, ts.actionDestroyAnim);
 
-            if (!ts.prop) reg.emplace<Collider>(tile, colW, colH);
+            // Hazard tiles always need a Collider for overlap detection even when prop=true
+            // (walk-through). Non-hazard props skip the Collider entirely.
+            if (!ts.prop || ts.hazard) reg.emplace<Collider>(tile, colW, colH);
             // Emit ColliderOffset whenever any hitbox customization exists,
             // even if offset is 0,0 but size was trimmed — so the collision
             // system can trust the Collider size came from editor data.
@@ -819,7 +1071,7 @@ void GameScene::Spawn() {
         // prop=true  -> visual only, walk-through regardless of action
         // action=true -> slashable; solid by default, walk-through if prop also set
         if (ts.prop)   reg.emplace<PropTag>(tile);
-        if (ts.action) reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits);
+        if (ts.action) reg.emplace<ActionTag>(tile, ts.actionGroup, ts.actionHits, ts.actionHits, ts.actionDestroyAnim);
 
         // Anti-gravity tiles float and are pushable
         if (ts.antiGravity) {

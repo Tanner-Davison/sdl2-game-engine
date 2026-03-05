@@ -60,7 +60,7 @@ void LevelEditorScene::RebuildToolbarLayout() {
     // Group 1 — Place
     int grp1X0 = x;
     if (mGrp1Collapsed) {
-        btnCoin = btnEnemy = btnTile = btnErase = btnPlayerStart = btnSelect = {-200, BTN_Y, BTN_TOOL_W, BTN_H};
+        btnCoin = btnEnemy = btnTile = btnErase = btnPlayerStart = btnSelect = btnMoveCam = {-200, BTN_Y, BTN_TOOL_W, BTN_H};
         x += PILL_W + BTN_GAP;
     } else {
         btnCoin        = nextTool();
@@ -69,6 +69,7 @@ void LevelEditorScene::RebuildToolbarLayout() {
         btnErase       = nextTool();
         btnPlayerStart = nextTool();
         btnSelect      = nextTool();
+        btnMoveCam     = nextTool();
     }
     // Pill covers the full group width at the strip position
     mGrp1Pill = {grp1X0, STRIP_Y_L, x - grp1X0, STRIP_H_L};
@@ -126,7 +127,8 @@ void LevelEditorScene::RebuildToolbarLayout() {
     recentre(lblTile,   "Tile",   btnTile);   recentreHint(hintTile,   btnTile);
     recentre(lblErase,  "Erase",  btnErase);  recentreHint(hintErase,  btnErase);
     recentre(lblPlayer, "Player", btnPlayerStart, 12); recentreHint(hintPlayer, btnPlayerStart);
-    recentre(lblSelect, "Select", btnSelect, 11);      recentreHint(hintSelect, btnSelect);
+    recentre(lblSelect,  "Select",  btnSelect,  11); recentreHint(hintSelect,  btnSelect);
+    recentre(lblMoveCam, "MoveCam", btnMoveCam, 10); recentreHint(hintMoveCam, btnMoveCam);
     recentre(lblProp,    "Prop",   btnProp);   recentreHint(hintProp,   btnProp);
     recentre(lblLadder,  "Ladder", btnLadder); recentreHint(hintLadder, btnLadder);
     recentre(lblAction,  "Action", btnAction); recentreHint(hintAction, btnAction);
@@ -181,6 +183,66 @@ SDL_Surface* LevelEditorScene::GetBadge(const std::string& text, SDL_Color col) 
     SDL_Surface* owned = SDL_DuplicateSurface(surf);
     mBadgeCache[key] = owned;
     return owned;
+}
+
+// ─── GetDestroyAnimThumb ─────────────────────────────────────────────────────
+// Returns a 16x16 thumbnail for an animated tile JSON path, built from the
+// first frame. Cached permanently for the editor lifetime.
+SDL_Surface* LevelEditorScene::GetDestroyAnimThumb(const std::string& jsonPath) {
+    auto it = mDestroyAnimThumbCache.find(jsonPath);
+    if (it != mDestroyAnimThumbCache.end()) return it->second;
+
+    AnimatedTileDef def;
+    if (!LoadAnimatedTileDef(jsonPath, def) || def.framePaths.empty()) {
+        mDestroyAnimThumbCache[jsonPath] = nullptr;
+        return nullptr;
+    }
+    SDL_Surface* result = nullptr;
+    for (const auto& fp : def.framePaths) {
+        SDL_Surface* raw = IMG_Load(fp.c_str());
+        if (!raw) continue;
+        SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+        SDL_DestroySurface(raw);
+        if (!conv) continue;
+        SDL_Surface* thumb = SDL_CreateSurface(48, 48, SDL_PIXELFORMAT_ARGB8888);
+        if (thumb) {
+            SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
+            SDL_BlitSurfaceScaled(conv, nullptr, thumb, nullptr, SDL_SCALEMODE_LINEAR);
+            SDL_SetSurfaceBlendMode(thumb, SDL_BLENDMODE_BLEND);
+        }
+        SDL_DestroySurface(conv);
+        result = thumb;
+        break;
+    }
+    mDestroyAnimThumbCache[jsonPath] = result;
+    return result;
+}
+
+// ─── OpenAnimPicker / CloseAnimPicker ────────────────────────────────────────
+void LevelEditorScene::OpenAnimPicker(int tileIdx) {
+    mActionAnimPickerTile = tileIdx;
+    mAnimPickerEntries.clear();
+
+    // "None" entry first — always available to clear any existing assignment
+    mAnimPickerEntries.push_back({""  , "None (no death anim)", nullptr});
+
+    // Scan animated_tiles/ for all .json manifests
+    auto manifests = ScanAnimatedTiles();
+    for (const auto& p : manifests) {
+        AnimatedTileDef def;
+        if (!LoadAnimatedTileDef(p.string(), def)) continue;
+        SDL_Surface* thumb = GetDestroyAnimThumb(p.string()); // builds & caches 48x48
+        mAnimPickerEntries.push_back({p.string(), def.name, thumb});
+    }
+
+    // Layout: popup centred horizontally over the tile, above or below depending on space.
+    // We don't know window size here, so defer rect computation to Render.
+    // Just mark as open — Render computes mActionAnimPickerRect each frame.
+}
+
+void LevelEditorScene::CloseAnimPicker() {
+    mActionAnimPickerTile = -1;
+    mAnimPickerEntries.clear();
 }
 
 // ─── LoadTileView ──────────────────────────────────────────────────────────
@@ -368,8 +430,8 @@ LevelEditorScene::ResizeEdge LevelEditorScene::DetectResizeEdge(int idx, int mx,
     if (idx < 0 || idx >= (int)mLevel.tiles.size()) return ResizeEdge::None;
     const auto& t = mLevel.tiles[idx];
     // mx/my are screen-space; convert to world space to compare with tile world coords
-    mx = (int)(mx + mCamX);
-    my = (int)(my + mCamY);
+    mx = (int)(mx / mZoom + mCamX);
+    my = (int)(my / mZoom + mCamY);
     int rx = (int)t.x, ry = (int)t.y, rw = t.w, rh = t.h;
 
     // Must be inside (or very near) the tile first
@@ -429,6 +491,10 @@ void LevelEditorScene::ApplyBackground(int idx) {
 void LevelEditorScene::Load(Window& window) {
     mWindow     = &window;
     mLaunchGame = false;
+    // Disable SDL motion event coalescing so every mouse move is delivered
+    // immediately — without this macOS batches motion events causing pan lag.
+    SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
+    SDL_SetHint("SDL_MOUSE_TOUCH_EVENTS", "0");
 
     background = std::make_unique<Image>(
         "game_assets/backgrounds/deepspace_scene.png", nullptr, FitMode::PRESCALED);
@@ -517,6 +583,8 @@ void LevelEditorScene::Load(Window& window) {
     hintErase      = mkHint("4", btnErase);
     hintPlayer     = mkHint("5", btnPlayerStart);
     hintSelect     = mkHint("Q", btnSelect);
+    lblMoveCam     = mkLbl("MoveCam", btnMoveCam, 10);
+    hintMoveCam    = mkHint("T", btnMoveCam);
 
     // Group 2 labels + hints
     lblProp        = mkLbl("Prop",    btnProp);
@@ -551,7 +619,7 @@ void LevelEditorScene::Load(Window& window) {
 
     lblStatus = std::make_unique<Text>(mStatusMsg, SDL_Color{180,180,200,255},
                                        BTN_GAP, TOOLBAR_H + 4, 12);
-    lblTool   = std::make_unique<Text>("Coin", SDL_Color{255,215,0,255},
+    lblTool   = std::make_unique<Text>("Select", SDL_Color{255,215,0,255},
                                        window.GetWidth() - PALETTE_W - 120, 22, 13);
 }
 
@@ -581,6 +649,11 @@ void LevelEditorScene::Unload() {
         if (s) SDL_DestroySurface(s);
     mBadgeCache.clear();
 
+    // Free destroy-anim thumbnail cache
+    for (auto& [path, s] : mDestroyAnimThumbCache)
+        if (s) SDL_DestroySurface(s);
+    mDestroyAnimThumbCache.clear();
+
     // Free extra tile surfaces (loaded for level tiles from subdirs)
     for (auto* s : mExtraTileSurfaces)
         if (s) SDL_DestroySurface(s);
@@ -600,8 +673,37 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_DROP_FILE) {
         mDropActive = false;
         std::string path = e.drop.data ? std::string(e.drop.data) : "";
-        if (!path.empty()) ImportPath(path);
+        if (!path.empty()) {
+            // If Action tool is active and the dropped file is an animated tile JSON,
+            // assign it as the destroy animation for whatever action tile the cursor
+            // is over. Don't import it into the palette.
+            if (mActiveTool == Tool::Action && IsAnimatedTile(path)) {
+                float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
+                int mx = (int)fmx, my = (int)fmy;
+                int ti = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
+                if (ti >= 0 && mLevel.tiles[ti].action) {
+                    mLevel.tiles[ti].actionDestroyAnim = path;
+                    // Preload the thumbnail now so it's ready to render immediately
+                    GetDestroyAnimThumb(path);
+                    fs::path p(path);
+                    SetStatus("Tile " + std::to_string(ti) + ": death anim \"" +
+                              p.stem().string() + "\" assigned");
+                } else {
+                    SetStatus("Drop a .json onto an Action tile to assign its death anim");
+                }
+                mActionAnimDropHover = -1;
+                return true;
+            }
+            ImportPath(path);
+        }
         return true;
+    }
+
+    // Track which action tile the cursor is hovering during an active file drag
+    // (SDL sends DROP_BEGIN but not continuous position events, so we do this
+    // in motion events below; this just resets when the drop window closes)
+    if (e.type == SDL_EVENT_DROP_COMPLETE) {
+        mActionAnimDropHover = -1;
     }
 
     // ── Import text input ─────────────────────────────────────────────────────
@@ -630,6 +732,36 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
+    // ── Delete confirmation popup ──────────────────────────────────────────
+    if (mDelConfirmActive) {
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+            mDelConfirmActive = false;
+            SetStatus("Delete cancelled");
+            return true;
+        }
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            int mx = (int)e.button.x, my = (int)e.button.y;
+            if (HitTest(mDelConfirmYes, mx, my)) {
+                std::error_code ec;
+                if (mDelConfirmIsDir) fs::remove_all(mDelConfirmPath, ec);
+                else                  fs::remove(mDelConfirmPath, ec);
+                mDelConfirmActive = false;
+                // Refresh the right palette depending on what was deleted
+                bool wasBg = (mDelConfirmPath.rfind(BG_ROOT, 0) == 0);
+                if (wasBg) LoadBgPalette();
+                else       LoadTileView(mTileCurrentDir);
+                SetStatus((mDelConfirmIsDir ? "Deleted folder: " : "Deleted: ") + mDelConfirmName);
+                return true;
+            }
+            if (HitTest(mDelConfirmNo, mx, my)) {
+                mDelConfirmActive = false;
+                SetStatus("Delete cancelled");
+                return true;
+            }
+        }
+        return true; // swallow all other input while popup is open
+    }
+
     // ── Pan: middle-mouse drag OR Ctrl + left-mouse drag ────────────────────
     auto startPan = [&](int mx, int my) {
         mIsPanning    = true;
@@ -637,6 +769,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         mPanStartY    = my;
         mPanCamStartX = mCamX;
         mPanCamStartY = mCamY;
+        SDL_CaptureMouse(true); // capture mouse so motion events aren't coalesced or dropped
     };
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_MIDDLE) {
@@ -649,9 +782,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (mx < CanvasW() && my >= TOOLBAR_H) { startPan(mx, my); return true; }
         }
     }
+    // Left-drag with the MoveCam tool pans the camera.
+    if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT
+        && !(SDL_GetModState() & SDL_KMOD_CTRL)
+        && mActiveTool == Tool::MoveCam) {
+        int mx = (int)e.button.x, my = (int)e.button.y;
+        if (mx < CanvasW() && my >= TOOLBAR_H) {
+            startPan(mx, my);
+            return true;
+        }
+    }
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
         (e.button.button == SDL_BUTTON_MIDDLE || e.button.button == SDL_BUTTON_LEFT)) {
-        if (mIsPanning) { mIsPanning = false; return true; }
+        if (mIsPanning) { mIsPanning = false; SDL_CaptureMouse(false); return true; }
     }
     // Pan motion is handled in Update() by polling SDL_GetMouseState every frame
     // for smoothness — no event handler needed here.
@@ -659,7 +802,27 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     // ── Mouse wheel ───────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
-        int mx=(int)fmx;
+        int mx=(int)fmx, my=(int)fmy;
+
+        // Ctrl+scroll = zoom in/out, anchored to mouse position
+        if ((SDL_GetModState() & SDL_KMOD_CTRL) && mx < CanvasW()) {
+            float oldZoom = mZoom;
+            float newZoom = std::clamp(mZoom + e.wheel.y * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX);
+            if (newZoom != oldZoom) {
+                // Anchor zoom to mouse position: keep world point under cursor fixed
+                float worldX = mx / oldZoom + mCamX;
+                float worldY = my / oldZoom + mCamY;
+                mZoom  = newZoom;
+                mCamX  = worldX - mx / mZoom;
+                mCamY  = worldY - my / mZoom;
+                // Clamp cam so we don't go into negative world space
+                if (mCamX < 0.0f) mCamX = 0.0f;
+                if (mCamY < 0.0f) mCamY = 0.0f;
+                SetStatus("Zoom: " + std::to_string((int)(mZoom * 100)) + "%  (Ctrl+scroll)");
+            }
+            return true;
+        }
+
         if (mx >= CanvasW()) {
             if (mActiveTab == PaletteTab::Tiles) {
                 mPaletteScroll = std::max(0, mPaletteScroll - (int)e.wheel.y);
@@ -783,8 +946,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 mActiveTool=Tool::Ladder; lblTool->CreateSurface("Ladder");
                 break;
             case SDLK_0:
-            case SDLK_T:
                 mActiveTool=Tool::Action; lblTool->CreateSurface("Action");
+                CloseAnimPicker();
+                break;
+            case SDLK_T:
+                mActiveTool=Tool::MoveCam; lblTool->CreateSurface("MoveCam");
                 break;
             case SDLK_MINUS:
                 mActiveTool=Tool::Slope; lblTool->CreateSurface("Slope");
@@ -844,6 +1010,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 SetStatus(mPaletteCollapsed ? "Palette hidden (Tab to show)" : "Palette visible (Tab to hide)");
                 break;
             case SDLK_ESCAPE:
+                if (mActionAnimPickerTile >= 0) {
+                    CloseAnimPicker();
+                    break;
+                }
                 if (mActiveTool == Tool::Select) {
                     mSelIndices.clear(); mSelBoxing = false; mSelDragging = false;
                     SetStatus("Selection cleared");
@@ -868,11 +1038,31 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (mActiveTool == Tool::Action && my >= TOOLBAR_H && mx < CanvasW()) {
             int ti = HitTile(mx, my);
             if (ti >= 0 && mLevel.tiles[ti].action) {
-                // Cycle group: 0 → 1 → 2 → … → 9 → 0
-                int& grp = mLevel.tiles[ti].actionGroup;
-                grp = (grp + 1) % 10;
-                SetStatus("Tile " + std::to_string(ti) +
-                          " group → " + (grp == 0 ? "standalone" : std::to_string(grp)));
+                // Right-click cycles through available death animations:
+                // None -> anim1 -> anim2 -> ... -> last -> None -> ...
+                // The thumbnail badge updates immediately on each click.
+                {
+                    auto manifests = ScanAnimatedTiles();
+                    auto& cur = mLevel.tiles[ti].actionDestroyAnim;
+                    if (manifests.empty()) {
+                        cur.clear();
+                        SetStatus("No death anims in animated_tiles/");
+                    } else {
+                        int idx = -1; // -1 = currently None
+                        for (int m = 0; m < (int)manifests.size(); m++)
+                            if (manifests[m].string() == cur) { idx = m; break; }
+                        idx++; // advance: None->0, 0->1, ..., last->None
+                        if (idx >= (int)manifests.size()) {
+                            cur.clear();
+                            SetStatus("Tile " + std::to_string(ti) + ": death anim -> None");
+                        } else {
+                            cur = manifests[idx].string();
+                            GetDestroyAnimThumb(cur); // preload thumbnail
+                            SetStatus("Tile " + std::to_string(ti) + ": death anim -> "
+                                      + manifests[idx].stem().string());
+                        }
+                    }
+                }
                 return true;
             }
         }
@@ -937,6 +1127,47 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx=(int)e.button.x, my=(int)e.button.y;
 
+        // ── Destroy-anim picker — handle clicks inside the popup ──────────────────
+        if (mActionAnimPickerTile >= 0 && !mAnimPickerEntries.empty()) {
+            if (HitTest(mActionAnimPickerRect, mx, my)) {
+                // Re-derive cell geometry (must match Render exactly)
+                const int THUMB  = 48;
+                const int ROW_H  = THUMB + 10;
+                const int PAD    = 8;
+                const int COL_W  = THUMB + PAD * 2;
+                const int COLS   = 4;
+                const int TITLE_H = 28;
+                int px = mActionAnimPickerRect.x;
+                int py = mActionAnimPickerRect.y;
+                int ey = py + TITLE_H;
+                int nEntries = (int)mAnimPickerEntries.size();
+                for (int i = 0; i < nEntries; i++) {
+                    int col = i % COLS;
+                    int row = i / COLS;
+                    int ex  = px + PAD + col * COL_W;
+                    int ey2 = ey + PAD + row * (ROW_H + PAD);
+                    SDL_Rect cell = {ex, ey2, COL_W - PAD, ROW_H};
+                    if (HitTest(cell, mx, my)) {
+                        const auto& entry = mAnimPickerEntries[i];
+                        if (mActionAnimPickerTile < (int)mLevel.tiles.size()) {
+                            mLevel.tiles[mActionAnimPickerTile].actionDestroyAnim = entry.path;
+                            if (!entry.path.empty()) GetDestroyAnimThumb(entry.path);
+                            SetStatus("Tile " + std::to_string(mActionAnimPickerTile)
+                                      + ": death anim → "
+                                      + (entry.path.empty() ? "None" : entry.name));
+                        }
+                        CloseAnimPicker();
+                        return true;
+                    }
+                }
+                return true; // click inside popup but not on a cell — absorb
+            } else {
+                // Click outside popup — close without changing anything
+                CloseAnimPicker();
+                // Fall through so the click still acts on the canvas
+            }
+        }
+
         // Palette collapse toggle tab — a narrow strip at the left edge of the panel
         {
             int cw = CanvasW();
@@ -975,9 +1206,14 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
 
         // Toolbar
+        // Any toolbar click closes the anim picker
+        if (mActionAnimPickerTile >= 0 && my < TOOLBAR_H)
+            CloseAnimPicker();
+
         auto tb = [&](SDL_Rect r, Tool t, const std::string& l) {
             if (!HitTest(r,mx,my)) return false;
             if (t != Tool::Select) { mSelIndices.clear(); mSelBoxing = false; mSelDragging = false; }
+            CloseAnimPicker();
             mActiveTool = t; lblTool->CreateSurface(l); return true;
         };
         if (tb(btnCoin,        Tool::Coin,        "Coin"))   return true;
@@ -988,6 +1224,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (HitTest(btnSelect,mx,my)) {
             mActiveTool=Tool::Select; lblTool->CreateSurface("Select");
             mSelBoxing=false; mSelDragging=false;
+            return true;
+        }
+        if (HitTest(btnMoveCam,mx,my)) {
+            mActiveTool=Tool::MoveCam; lblTool->CreateSurface("MoveCam");
             return true;
         }
         if (tb(btnProp,        Tool::Prop,        "Prop"))   return true;
@@ -1085,6 +1325,15 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
                 const auto& item = mPaletteItems[idx];
 
+                // Delete button hit? open confirm popup instead of deleting immediately
+                if (item.delBtn.x >= 0 && HitTest(item.delBtn, mx, my)) {
+                    mDelConfirmActive  = true;
+                    mDelConfirmPath    = item.path;
+                    mDelConfirmIsDir   = item.isFolder;
+                    mDelConfirmName    = fs::path(item.path).filename().string();
+                    return true;
+                }
+
                 if (item.isFolder) {
                     // Copy the path BEFORE calling LoadTileView — LoadTileView clears
                     // and rebuilds mPaletteItems, which invalidates the 'item' reference.
@@ -1114,8 +1363,17 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 int relY = my - TOOLBAR_H - TAB_H - 24 - PAD; // 24 = bg header strip
                 int row  = relY / itemH;
                 int idx  = mBgPaletteScroll + row;
-                if (idx >= 0 && idx < (int)mBgItems.size())
-                    ApplyBackground(idx);
+                if (idx >= 0 && idx < (int)mBgItems.size()) {
+                    // Delete button?
+                    if (mBgItems[idx].delBtn.x >= 0 && HitTest(mBgItems[idx].delBtn, mx, my)) {
+                        mDelConfirmActive  = true;
+                        mDelConfirmPath    = mBgItems[idx].path;
+                        mDelConfirmIsDir   = false;
+                        mDelConfirmName    = fs::path(mBgItems[idx].path).filename().string();
+                    } else {
+                        ApplyBackground(idx);
+                    }
+                }
             }
             return true;
         }
@@ -1139,9 +1397,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 break;
             case Tool::Erase: {
-                int ti=HitTile(mx,my); if(ti>=0){mLevel.tiles.erase(mLevel.tiles.begin()+ti);SetStatus("Erased tile");break;}
-                int ci=HitCoin(mx,my); if(ci>=0){mLevel.coins.erase(mLevel.coins.begin()+ci);SetStatus("Erased coin");break;}
-                int ei=HitEnemy(mx,my);if(ei>=0){mLevel.enemies.erase(mLevel.enemies.begin()+ei);SetStatus("Erased enemy");break;}
+                // Coins and enemies are checked before tiles so that objects
+                // placed on top of tiles are deleted first (layering order).
+                int ci=HitCoin(mx,my);  if(ci>=0){mLevel.coins.erase(mLevel.coins.begin()+ci);  SetStatus("Erased coin");  break;}
+                int ei=HitEnemy(mx,my); if(ei>=0){mLevel.enemies.erase(mLevel.enemies.begin()+ei);SetStatus("Erased enemy");break;}
+                int ti=HitTile(mx,my);  if(ti>=0){mLevel.tiles.erase(mLevel.tiles.begin()+ti);  SetStatus("Erased tile");  break;}
                 break;
             }
             case Tool::PlayerStart:
@@ -1151,10 +1411,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 if (ti >= 0) {
                     bool nowProp = !mLevel.tiles[ti].prop;
                     mLevel.tiles[ti].prop = nowProp;
-                    // Prop, Ladder, and Action are mutually exclusive
+                    // Prop, Ladder, and Action are mutually exclusive; Hazard is compatible with Prop
                     if (nowProp) { mLevel.tiles[ti].ladder = false; mLevel.tiles[ti].action = false; mLevel.tiles[ti].slope = SlopeType::None; }
+                    bool isHazard = mLevel.tiles[ti].hazard;
                     SetStatus(std::string("Tile ") + std::to_string(ti) +
-                              (nowProp ? " → prop (no collision)" : " → solid (collision on)"));
+                              (nowProp ? (isHazard ? " → prop+hazard (walk-through, damages)" : " → prop (no collision)")
+                                       : " → solid (collision on)"));
                 }
                 return true;
             }
@@ -1171,14 +1433,31 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 return true;
             }
             case Tool::Action: {
+                // If the picker is open and the click landed outside it, close it
+                // and fall through so the click can act on whatever tile is below.
+                if (mActionAnimPickerTile >= 0) {
+                    if (HitTest(mActionAnimPickerRect, mx, my))
+                        return true; // handled by the picker block above
+                    CloseAnimPicker();
+                    // fall through — open picker for the newly clicked tile if applicable
+                }
                 int ti = HitTile(mx, my);
                 if (ti >= 0) {
-                    bool nowAction = !mLevel.tiles[ti].action;
-                    mLevel.tiles[ti].action = nowAction;
-                    // Action, Prop, Ladder, and Slope are mutually exclusive
-                    if (nowAction) { mLevel.tiles[ti].prop = false; mLevel.tiles[ti].ladder = false; mLevel.tiles[ti].slope = SlopeType::None; }
-                    SetStatus(std::string("Tile ") + std::to_string(ti) +
-                              (nowAction ? " → action (disappears on contact)" : " → solid (action removed)"));
+                    if (mLevel.tiles[ti].action) {
+                        // Tile is already an action tile — open the anim picker
+                        OpenAnimPicker(ti);
+                        SetStatus("Tile " + std::to_string(ti) + ": choose death animation");
+                    } else {
+                        // Not an action tile yet — make it one
+                        mLevel.tiles[ti].action = true;
+                        mLevel.tiles[ti].prop   = false;
+                        mLevel.tiles[ti].ladder = false;
+                        mLevel.tiles[ti].slope  = SlopeType::None;
+                        SetStatus("Tile " + std::to_string(ti) +
+                                  " → action  (click again to assign death anim)");
+                    }
+                } else {
+                    CloseAnimPicker();
                 }
                 return true;
             }
@@ -1240,13 +1519,15 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     bool nowHazard = !mLevel.tiles[ti].hazard;
                     mLevel.tiles[ti].hazard = nowHazard;
                     if (nowHazard) {
-                        mLevel.tiles[ti].prop   = false;
+                        // Prop is intentionally NOT cleared — hazard+prop = walk-through hazard
                         mLevel.tiles[ti].ladder = false;
                         mLevel.tiles[ti].action = false;
                         mLevel.tiles[ti].slope  = SlopeType::None;
                     }
+                    bool isProp = mLevel.tiles[ti].prop;
                     SetStatus(std::string("Tile ") + std::to_string(ti) +
-                              (nowHazard ? " → hazard (30 HP/sec)" : " → solid (hazard removed)"));
+                              (nowHazard ? (isProp ? " → hazard+prop (walk-through, damages)" : " → hazard (solid, 30 HP/sec)")
+                                        : " → solid (hazard removed)"));
                 }
                 return true;
             }
@@ -1342,6 +1623,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 return true;
             }
+            case Tool::MoveCam:
+                // Pan is handled by the dedicated pan block above; nothing to do on click.
+                break;
             case Tool::Resize:
                 // Mouse-down on a resize handle starts the drag
                 if (mHoverTileIdx >= 0 && mHoverEdge != ResizeEdge::None) {
@@ -1358,7 +1642,15 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 break;
         }
 
-        if (mActiveTool != Tool::Erase) {
+        // Only start drag for placement tools that don't have their own case above.
+        // Coin/Enemy/Tile/PlayerStart already returned — this catches Select and modifier
+        // tools that might be clicked on top of an existing entity.
+        if (mActiveTool != Tool::Erase &&
+            mActiveTool != Tool::Coin  &&
+            mActiveTool != Tool::Enemy &&
+            mActiveTool != Tool::Tile  &&
+            mActiveTool != Tool::MoveCam &&
+            mActiveTool != Tool::PlayerStart) {
             int ti=HitTile(mx,my);  if(ti>=0){mIsDragging=true;mDragIndex=ti;mDragIsTile=true; mDragIsCoin=false;return true;}
             int ci=HitCoin(mx,my);  if(ci>=0){mIsDragging=true;mDragIndex=ci;mDragIsCoin=true; mDragIsTile=false;return true;}
             int ei=HitEnemy(mx,my); if(ei>=0){mIsDragging=true;mDragIndex=ei;mDragIsCoin=false;mDragIsTile=false;return true;}
@@ -1410,6 +1702,28 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx=(int)e.motion.x, my=(int)e.motion.y;
+
+        // ── Pan: derive delta from absolute position vs. recorded start ─────────
+        // SDL coalesces MOUSE_MOTION on macOS so xrel/yrel can skip frames.
+        // Using absolute position minus the recorded start position means we
+        // always land exactly where the mouse is right now, regardless of how
+        // many motion events were coalesced into this one.
+        if (mIsPanning) {
+            mCamX = mPanCamStartX - (mx - mPanStartX) / mZoom;
+            mCamY = mPanCamStartY - (my - mPanStartY) / mZoom;
+            if (mCamX < 0.0f) mCamX = 0.0f;
+            if (mCamY < 0.0f) mCamY = 0.0f;
+            return true;
+        }
+
+        // Track which action tile is under the cursor during an active drag-drop
+        // so Render can show the "drop here" highlight.
+        if (mDropActive && mActiveTool == Tool::Action) {
+            int ti = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
+            mActionAnimDropHover = (ti >= 0 && mLevel.tiles[ti].action) ? ti : -1;
+        } else {
+            mActionAnimDropHover = -1;
+        }
 
         // ── Selection rubber-band / drag-move ────────────────────────────────────
         if (mSelBoxing) {
@@ -1524,10 +1838,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mHoverHitboxHdl = HitboxHandle::None;
             const auto& t   = mLevel.tiles[mHitboxTileIdx];
             // Hitbox is in world space; convert to screen space for mouse comparison
-            int hx = (int)(t.x - mCamX) + t.hitboxOffX;
-            int hy = (int)(t.y - mCamY) + t.hitboxOffY;
-            int hw = t.hitboxW;
-            int hh = t.hitboxH;
+            int hx = (int)((t.x - mCamX + t.hitboxOffX) * mZoom);
+            int hy = (int)((t.y - mCamY + t.hitboxOffY) * mZoom);
+            int hw = (int)(t.hitboxW * mZoom);
+            int hh = (int)(t.hitboxH * mZoom);
             const int H = HBOX_HANDLE;
             bool nearL = (mx >= hx - H      && mx <= hx + H);
             bool nearR = (mx >= hx + hw - H && mx <= hx + hw + H);
@@ -1573,13 +1887,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
 // ─── Update ──────────────────────────────────────────────────────────────────
 void LevelEditorScene::Update(float /*dt*/) {
-    if (!mIsPanning) return;
-    float mx, my;
-    SDL_GetMouseState(&mx, &my);
-    mCamX = mPanCamStartX - (mx - mPanStartX);
-    mCamY = mPanCamStartY - (my - mPanStartY);
-    if (mCamX < 0.0f) mCamX = 0.0f;
-    if (mCamY < 0.0f) mCamY = 0.0f;
+    // Poll current mouse position every frame as a catch-up pass.
+    // MOUSE_MOTION events are the primary driver, but on macOS SDL can coalesce
+    // or drop motion events between frames. This ensures the camera is always
+    // flush with the actual cursor position by the time Render runs.
+    if (mIsPanning) {
+        float fx, fy;
+        SDL_GetMouseState(&fx, &fy);
+        int mx = (int)fx, my = (int)fy;
+        mCamX = mPanCamStartX - (mx - mPanStartX) / mZoom;
+        mCamY = mPanCamStartY - (my - mPanStartY) / mZoom;
+        if (mCamX < 0.0f) mCamX = 0.0f;
+        if (mCamY < 0.0f) mCamY = 0.0f;
+    }
 }
 
 // ─── Render ───────────────────────────────────────────────────────────────────
@@ -1597,32 +1917,48 @@ void LevelEditorScene::Render(Window& window) {
 
     background->Render(screen);
 
-    // Grid — offset by camera so grid lines stay pinned to world coordinates
+    // Grid — each line's screen position is computed fresh from its world coordinate
+    // so lines always land exactly where tile edges land. Stepping by an integer
+    // pixel count (gridPx) accumulates truncation error; recomputing per-line avoids it.
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
     Uint32 gridCol = SDL_MapRGBA(fmt,nullptr,255,255,255,20);
-    // Grid lines are drawn at world-space multiples of GRID.
-    // Convert to screen space: screenX = worldX - camX.
-    // First visible world grid line >= camX: ceil(camX/GRID)*GRID
-    int camOffX = (int)mCamX;
-    int camOffY = (int)mCamY;
-    int gridStartX = (camOffX / GRID) * GRID - camOffX;  // screen X of first world grid column
-    int gridStartY = (camOffY / GRID) * GRID - camOffY;  // screen Y of first world grid row
-    // Clamp so lines never draw over the toolbar
-    for (int x = gridStartX; x < cw; x += GRID) { SDL_Rect l={x,TOOLBAR_H,1,window.GetHeight()-TOOLBAR_H}; SDL_FillSurfaceRect(screen,&l,gridCol); }
-    for (int y = gridStartY; y < window.GetHeight(); y += GRID) { if (y < TOOLBAR_H) continue; SDL_Rect l={0,y,cw,1}; SDL_FillSurfaceRect(screen,&l,gridCol); }
+    {
+        // First grid line index visible on screen (can be negative world coords)
+        int firstCol = (int)std::floor(mCamX / GRID);
+        int firstRow = (int)std::floor(mCamY / GRID);
+        // How many lines fit across the canvas at this zoom
+        int numCols = (int)std::ceil(cw / (GRID * mZoom)) + 2;
+        int numRows = (int)std::ceil(window.GetHeight() / (GRID * mZoom)) + 2;
+        for (int i = 0; i < numCols; i++) {
+            float worldX = (firstCol + i) * (float)GRID;
+            int sx = (int)std::round((worldX - mCamX) * mZoom);
+            if (sx < 0 || sx >= cw) continue;
+            SDL_Rect l = {sx, TOOLBAR_H, 1, window.GetHeight() - TOOLBAR_H};
+            SDL_FillSurfaceRect(screen, &l, gridCol);
+        }
+        for (int i = 0; i < numRows; i++) {
+            float worldY = (firstRow + i) * (float)GRID;
+            int sy = (int)std::round((worldY - mCamY) * mZoom);
+            if (sy < TOOLBAR_H || sy >= window.GetHeight()) continue;
+            SDL_Rect l = {0, sy, cw, 1};
+            SDL_FillSurfaceRect(screen, &l, gridCol);
+        }
+    }
 
     // Placed tiles — all positions are in world space; subtract camera offset for screen space
     for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
         const auto& t = mLevel.tiles[ti];
         // Cull tiles fully outside the viewport
-        int tsx = (int)(t.x - mCamX);
-        int tsy = (int)(t.y - mCamY);
-        if (tsx + t.w <= 0 || tsx >= cw || tsy + t.h <= TOOLBAR_H || tsy >= window.GetHeight())
+        int tsx = (int)((t.x - mCamX) * mZoom);
+        int tsy = (int)((t.y - mCamY) * mZoom);
+        int tsw = (int)(t.w * mZoom);
+        int tsh = (int)(t.h * mZoom);
+        if (tsx + tsw <= 0 || tsx >= cw || tsy + tsh <= TOOLBAR_H || tsy >= window.GetHeight())
             continue;
         // O(1) cache lookup — no linear search, no IMG_Load per frame
         auto cacheIt = mTileSurfaceCache.find(t.imagePath);
         SDL_Surface* ts = (cacheIt != mTileSurfaceCache.end()) ? cacheIt->second : nullptr;
-        SDL_Rect dst={tsx, tsy, t.w, t.h};
+        SDL_Rect dst={tsx, tsy, tsw, tsh};
         if (ts) {
             // Rotation: use the per-path rotation cache so we build each
             // rotated surface at most once and reuse it every frame.
@@ -1661,6 +1997,55 @@ void LevelEditorScene::Render(Window& window) {
             int bw = (int)abadge.size() * 6 + 4;
             DrawRect(screen,{tsx+2,tsy+2,bw,14},{200,100,0,200});
             blitBadge(GetBadge(abadge,{255,255,255,255}), tsx+4, tsy+2);
+
+            // Bottom-right corner: death-anim indicator + group number label.
+            // Shows a thumbnail of the assigned death anim, or a "+" hint when empty.
+            // The group number is shown below the thumbnail so right-click cycling
+            // is immediately visible without needing to read the top-left badge.
+            constexpr int ANIM_BADGE_SZ = 16;
+            int abx = tsx + tsw - ANIM_BADGE_SZ - 2;
+            int aby = tsy + tsh - ANIM_BADGE_SZ - 2;
+            if (abx > tsx + bw + 2 && aby > tsy + 14) { // only draw if tile is large enough
+                if (!t.actionDestroyAnim.empty()) {
+                    // Purple tinted box + thumbnail of the first anim frame
+                    DrawRect(screen, {abx-1, aby-1, ANIM_BADGE_SZ+2, ANIM_BADGE_SZ+2}, {120,0,200,200});
+                    SDL_Surface* animThumb = GetDestroyAnimThumb(t.actionDestroyAnim);
+                    if (animThumb) {
+                        SDL_Rect dst2 = {abx, aby, ANIM_BADGE_SZ, ANIM_BADGE_SZ};
+                        SDL_BlitSurfaceScaled(animThumb, nullptr, screen, &dst2, SDL_SCALEMODE_LINEAR);
+                    }
+                    DrawOutline(screen, {abx-1, aby-1, ANIM_BADGE_SZ+2, ANIM_BADGE_SZ+2}, {200,80,255,255});
+                } else if (mActiveTool == Tool::Action && tsw >= 24 && tsh >= 24) {
+                    // Faint "+anim" hint to signal the tile can accept a drop
+                    DrawRect(screen, {abx, aby, ANIM_BADGE_SZ, ANIM_BADGE_SZ}, {60,20,80,140});
+                    DrawOutline(screen, {abx, aby, ANIM_BADGE_SZ, ANIM_BADGE_SZ}, {140,60,180,160});
+                    blitBadge(GetBadge("+",{180,100,220,200}), abx+4, aby+3);
+                }
+                // Group number label just to the left of the bottom-right badge.
+                // Always shown on action tiles so right-click cycling is visible.
+                // "G0" = standalone (no group), "G1".."G9" = grouped.
+                if (mActiveTool == Tool::Action && tsw >= 40) {
+                    std::string grpStr = (t.actionGroup == 0)
+                        ? "G-" : ("G" + std::to_string(t.actionGroup));
+                    SDL_Color grpCol = (t.actionGroup == 0)
+                        ? SDL_Color{120,120,140,200}   // dim for standalone
+                        : SDL_Color{255,220,60,255};   // bright gold when grouped
+                    SDL_Surface* grpBadge = GetBadge(grpStr, grpCol);
+                    if (grpBadge) {
+                        int gx = abx - grpBadge->w - 3;
+                        int gy = aby + ANIM_BADGE_SZ/2 - grpBadge->h/2;
+                        blitBadge(grpBadge, gx, gy);
+                    }
+                }
+            }
+
+            // Drop-hover highlight: bright purple overlay + "Drop anim here" label
+            if (ti == mActionAnimDropHover) {
+                DrawRect(screen, {tsx, tsy, tsw, tsh}, {140,0,220,70});
+                DrawOutline(screen, {tsx, tsy, tsw, tsh}, {200,80,255,255}, 2);
+                blitBadge(GetBadge("Drop anim here", {255,200,255,255}),
+                          tsx + tsw/2 - 42, tsy + tsh/2 - 5);
+            }
         }
         if (t.antiGravity) {
             DrawRect(screen,{tsx+2,tsy+2,14,14},{0,180,200,220});
@@ -1718,17 +2103,18 @@ void LevelEditorScene::Render(Window& window) {
         for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
             const auto& t = mLevel.tiles[ti];
             if (!t.moving) continue;
-            int tsx = (int)(t.x - mCamX), tsy = (int)(t.y - mCamY);
+            int tsx = (int)((t.x - mCamX) * mZoom), tsy = (int)((t.y - mCamY) * mZoom);
+            int tsw = (int)(t.w * mZoom), tsh = (int)(t.h * mZoom);
             bool inCurGroup = std::find(mMovPlatIndices.begin(), mMovPlatIndices.end(), ti)
                               != mMovPlatIndices.end();
             // Teal fill for current group, purple for other groups
             SDL_Color fill = inCurGroup ? SDL_Color{0,200,200,60} : SDL_Color{160,80,220,40};
-            DrawRect(screen, {tsx, tsy, t.w, t.h}, fill);
+            DrawRect(screen, {tsx, tsy, tsw, tsh}, fill);
             SDL_Color border = inCurGroup ? SDL_Color{0,255,255,220} : SDL_Color{180,100,255,160};
-            DrawOutline(screen, {tsx, tsy, t.w, t.h}, border, 2);
+            DrawOutline(screen, {tsx, tsy, tsw, tsh}, border, 2);
 
             // Draw travel path: a line showing the range
-            int cx = tsx + t.w/2, cy = tsy + t.h/2;
+            int cx = tsx + tsw/2, cy = tsy + tsh/2;
             int range = (int)t.moveRange;
             if (t.moveHoriz) {
                 if (t.moveLoop) {
@@ -1857,52 +2243,56 @@ void LevelEditorScene::Render(Window& window) {
         for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
             const auto& t = mLevel.tiles[ti];
             if (!t.moving) continue;
-            int tsx = (int)(t.x - mCamX), tsy = (int)(t.y - mCamY);
-            if (tsx+t.w<=0||tsx>=cw||tsy+t.h<=TOOLBAR_H||tsy>=window.GetHeight()) continue;
+            int tsx = (int)((t.x - mCamX) * mZoom), tsy = (int)((t.y - mCamY) * mZoom);
+            int tsw = (int)(t.w * mZoom),             tsh = (int)(t.h * mZoom);
+            if (tsx+tsw<=0||tsx>=cw||tsy+tsh<=TOOLBAR_H||tsy>=window.GetHeight()) continue;
             DrawRect(screen, {tsx+2, tsy+2, 14, 14}, {0,160,180,200});
             blitBadge(GetBadge("M",{255,255,255,255}), tsx+4, tsy+2);
         }
     }
 
     // Coins, enemies, player marker — convert world positions to screen space
+    int iconS = std::max(4, (int)(ICON_SIZE * mZoom));
     auto coinFrames = coinSheet->GetAnimation("Gold_");
     if (!coinFrames.empty())
         for (const auto& c:mLevel.coins){
-            int cx=(int)(c.x-mCamX), cy=(int)(c.y-mCamY);
-            if (cx+ICON_SIZE<=0||cx>=cw||cy+ICON_SIZE<=TOOLBAR_H||cy>=window.GetHeight()) continue;
-            SDL_Rect s=coinFrames[0],d={cx,cy,ICON_SIZE,ICON_SIZE};
+            int cx=(int)((c.x-mCamX)*mZoom), cy=(int)((c.y-mCamY)*mZoom);
+            if (cx+iconS<=0||cx>=cw||cy+iconS<=TOOLBAR_H||cy>=window.GetHeight()) continue;
+            SDL_Rect s=coinFrames[0],d={cx,cy,iconS,iconS};
             SDL_BlitSurfaceScaled(coinSheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);
             DrawOutline(screen,d,{255,215,0,255});
         }
     auto slimeFrames=enemySheet->GetAnimation("slimeWalk");
     if (!slimeFrames.empty())
         for (const auto& en:mLevel.enemies){
-            int ex=(int)(en.x-mCamX), ey=(int)(en.y-mCamY);
-            if (ex+ICON_SIZE<=0||ex>=cw||ey+ICON_SIZE<=TOOLBAR_H||ey>=window.GetHeight()) continue;
-            SDL_Rect s=slimeFrames[0],d={ex,ey,ICON_SIZE,ICON_SIZE};
+            int ex=(int)((en.x-mCamX)*mZoom), ey=(int)((en.y-mCamY)*mZoom);
+            if (ex+iconS<=0||ex>=cw||ey+iconS<=TOOLBAR_H||ey>=window.GetHeight()) continue;
+            SDL_Rect s=slimeFrames[0],d={ex,ey,iconS,iconS};
             SDL_BlitSurfaceScaled(enemySheet->GetSurface(),&s,screen,&d,SDL_SCALEMODE_LINEAR);
             SDL_Color eOutline = en.antiGravity ? SDL_Color{0,220,220,255} : SDL_Color{255,80,80,255};
             DrawOutline(screen,d,eOutline);
             if (en.antiGravity) {
-                DrawRect(screen,{ex+ICON_SIZE/2-4,ey-10,8,8},{0,200,220,220});
-                Text fb("F",SDL_Color{255,255,255,255},ex+ICON_SIZE/2-3,ey-11,8);
+                DrawRect(screen,{ex+iconS/2-4,ey-10,8,8},{0,200,220,220});
+                Text fb("F",SDL_Color{255,255,255,255},ex+iconS/2-3,ey-11,8);
                 fb.Render(screen);
             }
         }
     // Player marker
-    int pmx=(int)(mLevel.player.x-mCamX), pmy=(int)(mLevel.player.y-mCamY);
-    DrawRect(screen,{pmx,pmy,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,200,80,180});
-    DrawOutline(screen,{pmx,pmy,PLAYER_STAND_WIDTH,PLAYER_STAND_HEIGHT},{0,255,100,255},2);
+    int pmx=(int)((mLevel.player.x-mCamX)*mZoom), pmy=(int)((mLevel.player.y-mCamY)*mZoom);
+    int pmw=(int)(PLAYER_STAND_WIDTH*mZoom),        pmh=(int)(PLAYER_STAND_HEIGHT*mZoom);
+    DrawRect(screen,{pmx,pmy,pmw,pmh},{0,200,80,180});
+    DrawOutline(screen,{pmx,pmy,pmw,pmh},{0,255,100,255},2);
 
     // ── Selection tool feedback ─────────────────────────────────────────────────
     if (!mSelIndices.empty()) {
-        // Teal highlight overlay on each selected tile
+        // Teal highlight overlay on each selected tile — low alpha fill so tile is visible
         for (int idx : mSelIndices) {
             if (idx < 0 || idx >= (int)mLevel.tiles.size()) continue;
             const auto& t = mLevel.tiles[idx];
-            int sx = (int)(t.x - mCamX), sy = (int)(t.y - mCamY);
-            DrawRect(screen, {sx, sy, t.w, t.h}, {0, 220, 220, 60});
-            DrawOutline(screen, {sx, sy, t.w, t.h}, {0, 255, 255, 220}, 2);
+            int sx = (int)((t.x - mCamX) * mZoom), sy = (int)((t.y - mCamY) * mZoom);
+            int sw = (int)(t.w * mZoom),             sh = (int)(t.h * mZoom);
+            DrawRectAlpha(screen, {sx, sy, sw, sh}, {0, 220, 220, 40});
+            DrawOutline(screen, {sx, sy, sw, sh}, {0, 255, 255, 220}, 2);
         }
         // Bounding box around entire selection
         int bx0 = INT_MAX, by0 = INT_MAX, bx1 = INT_MIN, by1 = INT_MIN;
@@ -1912,8 +2302,9 @@ void LevelEditorScene::Render(Window& window) {
             bx0 = std::min(bx0, (int)t.x); by0 = std::min(by0, (int)t.y);
             bx1 = std::max(bx1, (int)t.x + t.w); by1 = std::max(by1, (int)t.y + t.h);
         }
-        int sbx = bx0 - (int)mCamX, sby = by0 - (int)mCamY;
-        DrawOutline(screen, {sbx-2, sby-2, bx1-bx0+4, by1-by0+4}, {0, 255, 255, 180}, 1);
+        int sbx = (int)((bx0 - mCamX) * mZoom), sby = (int)((by0 - mCamY) * mZoom);
+        int sbbw = (int)((bx1 - bx0) * mZoom),   sbbh = (int)((by1 - by0) * mZoom);
+        DrawOutline(screen, {sbx-2, sby-2, sbbw+4, sbbh+4}, {0, 255, 255, 180}, 1);
         // Count label
         std::string selLabel = std::to_string(mSelIndices.size()) + " selected";
         DrawRect(screen, {sbx, sby-16, (int)selLabel.size()*7+4, 14}, {0, 60, 70, 200});
@@ -1922,14 +2313,14 @@ void LevelEditorScene::Render(Window& window) {
     }
     // Rubber-band marquee rect
     if (mSelBoxing) {
-        int rx0 = (int)(std::min(mSelBoxX0, mSelBoxX1) - mCamX);
-        int ry0 = (int)(std::min(mSelBoxY0, mSelBoxY1) - mCamY);
-        int rx1 = (int)(std::max(mSelBoxX0, mSelBoxX1) - mCamX);
-        int ry1 = (int)(std::max(mSelBoxY0, mSelBoxY1) - mCamY);
+        int rx0 = (int)((std::min(mSelBoxX0, mSelBoxX1) - mCamX) * mZoom);
+        int ry0 = (int)((std::min(mSelBoxY0, mSelBoxY1) - mCamY) * mZoom);
+        int rx1 = (int)((std::max(mSelBoxX0, mSelBoxX1) - mCamX) * mZoom);
+        int ry1 = (int)((std::max(mSelBoxY0, mSelBoxY1) - mCamY) * mZoom);
         int rw  = rx1 - rx0, rh = ry1 - ry0;
         if (rw > 0 && rh > 0) {
-            DrawRect(screen,    {rx0, ry0, rw, rh}, {100, 220, 255, 25});
-            DrawOutline(screen, {rx0, ry0, rw, rh}, {100, 220, 255, 200}, 1);
+            DrawRectAlpha(screen, {rx0, ry0, rw, rh}, {100, 220, 255, 20});
+            DrawOutline(screen,   {rx0, ry0, rw, rh}, {100, 220, 255, 180}, 1);
         }
     }
 
@@ -1941,7 +2332,8 @@ void LevelEditorScene::Render(Window& window) {
 
         if (mHoverTileIdx >= 0 && !mIsResizing) {
             const auto& t = mLevel.tiles[mHoverTileIdx];
-            int rx=(int)(t.x-mCamX), ry=(int)(t.y-mCamY), rw=t.w, rh=t.h;
+            int rx=(int)((t.x-mCamX)*mZoom), ry=(int)((t.y-mCamY)*mZoom);
+            int rw=(int)(t.w*mZoom),           rh=(int)(t.h*mZoom);
             if (mHoverEdge==ResizeEdge::Right || mHoverEdge==ResizeEdge::Corner)
                 DrawRect(screen,{rx+rw-HS, ry+HS, HS, rh-HS*2}, handleCol);
             if (mHoverEdge==ResizeEdge::Bottom || mHoverEdge==ResizeEdge::Corner)
@@ -1952,8 +2344,9 @@ void LevelEditorScene::Render(Window& window) {
 
         if (mIsResizing && mResizeTileIdx >= 0 && mResizeTileIdx < (int)mLevel.tiles.size()) {
             const auto& t = mLevel.tiles[mResizeTileIdx];
-            int rx=(int)(t.x-mCamX), ry=(int)(t.y-mCamY);
-            DrawOutline(screen,{rx,ry,t.w,t.h},{255,220,80,255},2);
+            int rx=(int)((t.x-mCamX)*mZoom), ry=(int)((t.y-mCamY)*mZoom);
+            int rw=(int)(t.w*mZoom),           rh=(int)(t.h*mZoom);
+            DrawOutline(screen,{rx,ry,rw,rh},{255,220,80,255},2);
             Text szT(std::to_string(t.w/GRID)+"x"+std::to_string(t.h/GRID)+" tiles",
                      dragCol,rx+4,ry+4,12);
             szT.Render(screen);
@@ -1964,10 +2357,10 @@ void LevelEditorScene::Render(Window& window) {
     if (mActiveTool == Tool::Hitbox && mHitboxTileIdx >= 0
         && mHitboxTileIdx < (int)mLevel.tiles.size()) {
         const auto& t  = mLevel.tiles[mHitboxTileIdx];
-        int hx = (int)(t.x - mCamX) + t.hitboxOffX;
-        int hy = (int)(t.y - mCamY) + t.hitboxOffY;
-        int hw = t.hitboxW;
-        int hh = t.hitboxH;
+        int hx = (int)((t.x - mCamX + t.hitboxOffX) * mZoom);
+        int hy = (int)((t.y - mCamY + t.hitboxOffY) * mZoom);
+        int hw = (int)(t.hitboxW * mZoom);
+        int hh = (int)(t.hitboxH * mZoom);
 
         // Semi-transparent fill inside the hitbox
         DrawRect(screen, {hx, hy, hw, hh}, {80, 160, 255, 40});
@@ -1975,7 +2368,8 @@ void LevelEditorScene::Render(Window& window) {
         DrawOutline(screen, {hx, hy, hw, hh}, {80, 180, 255, 255}, 2);
 
         // Draw a faint dashed outline of the visual tile for reference
-        DrawOutline(screen, {(int)(t.x-mCamX), (int)(t.y-mCamY), t.w, t.h}, {255, 255, 255, 60}, 1);
+        DrawOutline(screen, {(int)((t.x-mCamX)*mZoom), (int)((t.y-mCamY)*mZoom),
+                             (int)(t.w*mZoom), (int)(t.h*mZoom)}, {255, 255, 255, 60}, 1);
 
         // 8 drag handles: corners + edge midpoints
         const int HS  = HBOX_HANDLE;          // half-side of handle square
@@ -2021,7 +2415,7 @@ void LevelEditorScene::Render(Window& window) {
         }
     }
 
-    // ── Toolbar ───────────────────────────────────────────────────────────────
+    // ── Toolbar — spans the full window width including the palette area ─────
     DrawRect(screen, {0, 0, window.GetWidth(), TOOLBAR_H}, {22, 22, 32, 255});
     DrawRect(screen, {0, TOOLBAR_H - 1, window.GetWidth(), 1}, {60, 60, 80, 255});
 
@@ -2068,8 +2462,9 @@ void LevelEditorScene::Render(Window& window) {
             drawBtn(btnTile,        ACCENT_PLACE, lblTile.get(),   hintTile.get(),   mActiveTool==Tool::Tile);
             drawBtn(btnErase,       ACCENT_PLACE, lblErase.get(),  hintErase.get(),  mActiveTool==Tool::Erase);
             drawBtn(btnPlayerStart, ACCENT_PLACE, lblPlayer.get(), hintPlayer.get(), mActiveTool==Tool::PlayerStart);
-            drawBtn(btnSelect,      ACCENT_PLACE, lblSelect.get(), hintSelect.get(), mActiveTool==Tool::Select);
-            gx1 = btnSelect.x + btnSelect.w;
+            drawBtn(btnSelect,      ACCENT_PLACE, lblSelect.get(),  hintSelect.get(),  mActiveTool==Tool::Select);
+            drawBtn(btnMoveCam,     ACCENT_PLACE, lblMoveCam.get(), hintMoveCam.get(), mActiveTool==Tool::MoveCam);
+            gx1 = btnMoveCam.x + btnMoveCam.w;
         } else {
             SDL_Rect bar = {gx0, BTN_Y, 32, BTN_H};
             DrawRect(screen, bar, {30,30,48,255});
@@ -2150,9 +2545,9 @@ void LevelEditorScene::Render(Window& window) {
 
     // ── Palette panel ─────────────────────────────────────────────────────────
     if (mPaletteCollapsed) {
-        // Draw just the narrow toggle tab so user can re-open
-        DrawRect(screen, {cw, 0, PALETTE_TAB_W, window.GetHeight()}, {20, 20, 30, 255});
-        DrawOutline(screen, {cw, 0, PALETTE_TAB_W, window.GetHeight()}, {60, 60, 80, 255});
+        // Draw just the narrow toggle tab so user can re-open (starts below toolbar)
+        DrawRect(screen, {cw, TOOLBAR_H, PALETTE_TAB_W, window.GetHeight()-TOOLBAR_H}, {20, 20, 30, 255});
+        DrawOutline(screen, {cw, TOOLBAR_H, PALETTE_TAB_W, window.GetHeight()-TOOLBAR_H}, {60, 60, 80, 255});
         // Toggle button
         SDL_Rect toggleBtn = {cw, TOOLBAR_H, PALETTE_TAB_W, 28};
         DrawRect(screen, toggleBtn, {40, 80, 180, 255});
@@ -2164,8 +2559,9 @@ void LevelEditorScene::Render(Window& window) {
             blitBadge(GetBadge(buf,{120,140,200,255}), cw+4, TOOLBAR_H+40+i*13);
         }
     } else {
-    DrawRect(screen,{cw,0,PALETTE_W,window.GetHeight()},{20,20,30,255});
-    DrawOutline(screen,{cw,0,PALETTE_W,window.GetHeight()},{60,60,80,255});
+    // Palette panel starts below the toolbar so the toolbar renders over it
+    DrawRect(screen,{cw,TOOLBAR_H,PALETTE_W,window.GetHeight()-TOOLBAR_H},{20,20,30,255});
+    DrawOutline(screen,{cw,TOOLBAR_H,PALETTE_W,window.GetHeight()-TOOLBAR_H},{60,60,80,255});
 
     // Collapse toggle button
     {
@@ -2259,6 +2655,16 @@ void LevelEditorScene::Render(Window& window) {
                 if((int)lbl.size()>9) lbl=lbl.substr(0,8)+"~";
                 blitBadge(GetBadge(lbl,{220,180,80,255}), ix+2, iy+cellW+2);
 
+                // ── Delete button (skip "◀ Back" entry) ─────────────────────
+                if (item.label.rfind("◄",0) != 0) {
+                    constexpr int DEL_SZ = 14;
+                    SDL_Rect db = {ix+cellW-DEL_SZ-1, iy+1, DEL_SZ, DEL_SZ};
+                    const_cast<PaletteItem&>(item).delBtn = db;
+                    DrawRect(screen, db, {140,30,30,220});
+                    DrawOutline(screen, db, {200,60,60,255});
+                    { SDL_Surface* xs=GetBadge("x",{255,180,180,255}); if(xs) blitBadge(xs, db.x+(db.w-xs->w)/2, db.y+(db.h-xs->h)/2); }
+                }
+
             } else {
                 // ── File cell ─────────────────────────────────────────────────
                 DrawRect(screen,cell,sel?SDL_Color{50,100,200,220}:SDL_Color{35,35,55,220});
@@ -2272,6 +2678,14 @@ void LevelEditorScene::Render(Window& window) {
                 if((int)lbl.size()>9)lbl=lbl.substr(0,8)+"~";
                 SDL_Color lc={(Uint8)(sel?255:170),(Uint8)(sel?255:170),(Uint8)(sel?255:190),255};
                 blitBadge(GetBadge(lbl,lc), ix+2, iy+cellW+2);
+
+                // ── Delete button (top-right corner) ──────────────────────────
+                constexpr int DEL_SZ = 14;
+                SDL_Rect db = {ix+cellW-DEL_SZ-1, iy+1, DEL_SZ, DEL_SZ};
+                const_cast<PaletteItem&>(item).delBtn = db;
+                DrawRect(screen, db, {140,30,30,220});
+                DrawOutline(screen, db, {200,60,60,255});
+                { SDL_Surface* xs=GetBadge("x",{255,180,180,255}); if(xs) blitBadge(xs, db.x+(db.w-xs->w)/2, db.y+(db.h-xs->h)/2); }
             }
         }
 
@@ -2312,6 +2726,13 @@ void LevelEditorScene::Render(Window& window) {
             std::string lbl=mBgItems[i].label; if((int)lbl.size()>14)lbl=lbl.substr(0,13)+"~";
             SDL_Color lc={(Uint8)(sel?255:170),(Uint8)(sel?255:170),(Uint8)(sel?255:190),255};
             blitBadge(GetBadge(lbl,lc), cw+PAD+2, iy+thumbH+2);
+            // Delete button
+            constexpr int DEL_SZ = 14;
+            SDL_Rect db = {cw+PAD+thumbW-DEL_SZ-1, iy+1, DEL_SZ, DEL_SZ};
+            mBgItems[i].delBtn = db;
+            DrawRect(screen, db, {140,30,30,220});
+            DrawOutline(screen, db, {200,60,60,255});
+            { SDL_Surface* xs=GetBadge("x",{255,180,180,255}); if(xs) blitBadge(xs, db.x+(db.w-xs->w)/2, db.y+(db.h-xs->h)/2); }
         }
         if((int)mBgItems.size()>vis){
             float pct=(float)mBgPaletteScroll/std::max(1,(int)mBgItems.size()-vis);
@@ -2345,10 +2766,132 @@ void LevelEditorScene::Render(Window& window) {
         }
         if (lblCamPos) lblCamPos->Render(screen);
     }
-    if (!lblBottomHint) const_cast<std::unique_ptr<Text>&>(lblBottomHint)
-        = std::make_unique<Text>("RClick:rotate  MMB:pan  G:Mode  I:Import  Ctrl+S:Save  Ctrl+Z:Undo",
-                                  SDL_Color{70,70,90,255}, cw/2-170, window.GetHeight()-18, 11);
+    // Rebuild hint — tool-specific for Action, generic otherwise
+    {
+        std::string hint;
+        if (mActiveTool == Tool::Action) {
+            hint = "LClick:toggle action  Scroll:adjust hits  RClick:cycle group or clear anim  Drop .json:assign death anim";
+        } else {
+            hint = "RClick:rotate  MMB:pan  Ctrl+Scroll:zoom(" + std::to_string((int)(mZoom*100)) + "%)  G:Mode  Ctrl+S:Save  Ctrl+Z:Undo";
+        }
+        const_cast<std::unique_ptr<Text>&>(lblBottomHint)
+            = std::make_unique<Text>(hint, SDL_Color{70,70,90,255}, cw/2-200, window.GetHeight()-18, 11);
+    }
     if (lblBottomHint) lblBottomHint->Render(screen);
+
+    // ── Destroy-anim picker popup ─────────────────────────────────────────────────
+    if (mActionAnimPickerTile >= 0
+        && mActionAnimPickerTile < (int)mLevel.tiles.size()
+        && !mAnimPickerEntries.empty()) {
+
+        const auto& tgt = mLevel.tiles[mActionAnimPickerTile];
+        const int THUMB  = 48;
+        const int ROW_H  = THUMB + 10;  // thumb + label below
+        const int PAD    = 8;
+        const int COL_W  = THUMB + PAD * 2;
+        const int COLS   = 4;
+        const int nEntries = (int)mAnimPickerEntries.size();
+        const int ROWS   = (nEntries + COLS - 1) / COLS;
+        const int TITLE_H = 28;
+        const int HINT_H  = 16;
+        const int PW = COL_W * COLS + PAD;
+        const int PH = TITLE_H + ROWS * (ROW_H + PAD) + PAD + HINT_H;
+
+        // Centre horizontally over the tile, position vertically so it stays on screen
+        int tileSx = (int)((tgt.x - mCamX) * mZoom);
+        int tileSy = (int)((tgt.y - mCamY) * mZoom);
+        int tileSw = (int)(tgt.w * mZoom);
+        int tileSh = (int)(tgt.h * mZoom);
+        int px = tileSx + tileSw / 2 - PW / 2;
+        int py = tileSy + tileSh + 6;  // prefer below the tile
+        // Clamp horizontally
+        px = std::max(4, std::min(px, cw - PW - 4));
+        // If popup would go off the bottom, put it above the tile instead
+        if (py + PH > window.GetHeight() - 30)
+            py = tileSy - PH - 6;
+        py = std::max(TOOLBAR_H + 4, py);
+
+        mActionAnimPickerRect = {px, py, PW, PH};
+
+        // Panel background
+        DrawRect(screen, {px, py, PW, PH}, {18, 14, 28, 245});
+        DrawOutline(screen, {px, py, PW, PH}, {160, 80, 255, 255}, 2);
+        // Accent bar on top
+        DrawRect(screen, {px+1, py+1, PW-2, 3}, {160, 80, 255, 255});
+
+        // Title
+        {
+            std::string title = "Death Animation  — Tile " + std::to_string(mActionAnimPickerTile);
+            auto [tx, ty] = Text::CenterInRect(title, 12, {px, py+4, PW, TITLE_H-4});
+            Text t(title, SDL_Color{200,160,255,255}, tx, ty, 12);
+            t.Render(screen);
+        }
+
+        // Entries grid
+        int ey = py + TITLE_H;
+        for (int i = 0; i < nEntries; i++) {
+            const auto& entry = mAnimPickerEntries[i];
+            int col = i % COLS;
+            int row = i / COLS;
+            int ex  = px + PAD + col * COL_W;
+            int ey2 = ey + PAD + row * (ROW_H + PAD);
+
+            SDL_Rect cell = {ex, ey2, COL_W - PAD, ROW_H};
+
+            // Highlight currently-assigned anim
+            bool isCurrent = (entry.path == tgt.actionDestroyAnim);
+            SDL_Color cellBg  = isCurrent ? SDL_Color{80,20,130,220} : SDL_Color{35,28,50,200};
+            SDL_Color cellBdr = isCurrent ? SDL_Color{200,100,255,255} : SDL_Color{80,60,110,200};
+            DrawRect(screen, cell, cellBg);
+            DrawOutline(screen, cell, cellBdr);
+
+            // Thumbnail
+            SDL_Rect thumbDst = {ex + (COL_W - PAD - THUMB)/2, ey2 + 2, THUMB, THUMB};
+            if (entry.thumb) {
+                SDL_BlitSurfaceScaled(entry.thumb, nullptr, screen, &thumbDst, SDL_SCALEMODE_LINEAR);
+            } else {
+                // "None" — draw a crossed-out box
+                DrawRect(screen, thumbDst, {50, 40, 60, 200});
+                DrawOutline(screen, thumbDst, {100, 80, 120, 255});
+                // X mark
+                for (int d = 0; d < THUMB; d++) {
+                    DrawRect(screen, {thumbDst.x + d, thumbDst.y + d, 2, 2}, {120,80,140,200});
+                    DrawRect(screen, {thumbDst.x + THUMB-1-d, thumbDst.y + d, 2, 2}, {120,80,140,200});
+                }
+            }
+
+            // Label (truncated)
+            std::string lbl = entry.name;
+            if ((int)lbl.size() > 8) lbl = lbl.substr(0, 7) + "~";
+            SDL_Color lblCol = isCurrent ? SDL_Color{255,200,255,255} : SDL_Color{160,140,180,255};
+            SDL_Surface* lblSurf = GetBadge(lbl, lblCol);
+            if (lblSurf) {
+                int lx = ex + (COL_W - PAD - lblSurf->w) / 2;
+                blitBadge(lblSurf, lx, ey2 + THUMB + 4);
+            }
+
+            // Current-assignment checkmark badge
+            if (isCurrent) {
+                DrawRect(screen, {cell.x + cell.w - 14, cell.y + 1, 13, 13}, {160, 60, 255, 240});
+                blitBadge(GetBadge("\xe2\x9c\x93", {255,255,255,255}), cell.x + cell.w - 12, cell.y + 2);
+            }
+        }
+
+        // Bottom hint
+        int hy = py + PH - HINT_H + 2;
+        blitBadge(GetBadge("Click to assign  •  RClick tile = remove action  •  Esc to close",
+                           {100,80,130,255}), px + PAD, hy);
+
+        // Handle picker clicks — we need to do this in Render because we compute
+        // rects here. Check current mouse button state.
+        float fmx, fmy;
+        Uint32 mbState = SDL_GetMouseState(&fmx, &fmy);
+        // We only act on a fresh click; detect via a static latch that resets when button is up.
+        // Simpler: handle in HandleEvent instead — but we need the rects. So we store the
+        // rects and handle in HandleEvent with a "picker click" path that re-derives cells.
+        // (Handled in HandleEvent block below — picker rect is now set every frame.)
+        (void)mbState;
+    }
 
     // ── Import input bar ──────────────────────────────────────────────────────
     if (mImportInputActive) {
@@ -2374,9 +2917,58 @@ void LevelEditorScene::Render(Window& window) {
         int cx2=cw/2,cy2=window.GetHeight()/2;
         DrawRect(screen,{cx2-220,cy2-44,440,88},{10,30,70,220});
         DrawOutline(screen,{cx2-220,cy2-44,440,88},{80,180,255,255},2);
-        std::string hint=(mActiveTab==PaletteTab::Backgrounds)?"Drop .png or folder → backgrounds":"Drop .png or folder → tiles";
-        Text d1(hint,SDL_Color{255,255,255,255},cx2-168,cy2-32,24); d1.Render(screen);
-        blitBadge(GetBadge("Folders become subfolders in the palette",{140,200,255,255}), cx2-150, cy2+4);
+        if (mActiveTool == Tool::Action) {
+            Text d1("Drop animated tile .json onto an Action tile",SDL_Color{255,200,255,255},cx2-200,cy2-32,20); d1.Render(screen);
+            blitBadge(GetBadge("The tile will play that animation when destroyed",{200,160,255,255}), cx2-164, cy2+4);
+        } else {
+            std::string hint=(mActiveTab==PaletteTab::Backgrounds)?"Drop .png or folder → backgrounds":"Drop .png or folder → tiles";
+            Text d1(hint,SDL_Color{255,255,255,255},cx2-168,cy2-32,24); d1.Render(screen);
+            blitBadge(GetBadge("Folders become subfolders in the palette",{140,200,255,255}), cx2-150, cy2+4);
+        }
+    }
+
+    // ── Delete confirmation popup ──────────────────────────────────────────
+    if (mDelConfirmActive) {
+        // Dim the whole screen
+        SDL_Surface* ov = SDL_CreateSurface(screen->w, screen->h, SDL_PIXELFORMAT_ARGB8888);
+        if (ov) {
+            SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
+            SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(fmt, nullptr, 0, 0, 0, 160));
+            SDL_BlitSurface(ov, nullptr, screen, nullptr);
+            SDL_DestroySurface(ov);
+        }
+        // Panel
+        int W = window.GetWidth(), H = window.GetHeight();
+        int pw = 360, ph = 140;
+        int px = W/2 - pw/2, py = H/2 - ph/2;
+        DrawRect(screen, {px, py, pw, ph}, {20, 18, 28, 250});
+        DrawOutline(screen, {px, py, pw, ph}, {200, 60, 60, 255}, 2);
+        // Title
+        std::string title = mDelConfirmIsDir ? "Delete Folder?" : "Delete File?";
+        auto [tx, ty] = Text::CenterInRect(title, 18, {px, py+8, pw, 28});
+        Text t1(title, SDL_Color{255,100,100,255}, tx, ty, 18); t1.Render(screen);
+        // Name
+        std::string nameStr = mDelConfirmName;
+        if ((int)nameStr.size() > 32) nameStr = nameStr.substr(0,30) + "...";
+        auto [nx, ny] = Text::CenterInRect(nameStr, 12, {px, py+38, pw, 20});
+        Text t2(nameStr, SDL_Color{220,200,200,255}, nx, ny, 12); t2.Render(screen);
+        // Warning
+        std::string warn = mDelConfirmIsDir ? "This will delete all files inside!" : "This cannot be undone.";
+        auto [wx2, wy2] = Text::CenterInRect(warn, 11, {px, py+58, pw, 18});
+        Text t3(warn, SDL_Color{255,160,80,255}, wx2, wy2, 11); t3.Render(screen);
+        // Buttons
+        const_cast<SDL_Rect&>(mDelConfirmYes) = {px + 30,          py + ph - 44, 130, 34};
+        const_cast<SDL_Rect&>(mDelConfirmNo)  = {px + pw - 30 - 130, py + ph - 44, 130, 34};
+        DrawRect(screen, mDelConfirmYes, {160,30,30,255});
+        DrawOutline(screen, mDelConfirmYes, {220,80,80,255}, 2);
+        auto [yx, yy] = Text::CenterInRect("Delete", 14, mDelConfirmYes);
+        Text tb1("Delete", SDL_Color{255,200,200,255}, yx, yy, 14); tb1.Render(screen);
+        DrawRect(screen, mDelConfirmNo, {40,40,60,255});
+        DrawOutline(screen, mDelConfirmNo, {80,80,120,255}, 2);
+        auto [cx3, cy3] = Text::CenterInRect("Cancel", 14, mDelConfirmNo);
+        Text tb2("Cancel", SDL_Color{180,180,220,255}, cx3, cy3, 14); tb2.Render(screen);
+        // Esc hint
+        blitBadge(GetBadge("Esc to cancel",{80,80,100,255}), W/2-38, py+ph-12);
     }
 
     window.Update();
@@ -2386,15 +2978,9 @@ void LevelEditorScene::Render(Window& window) {
 std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     if (mLaunchGame) {
         mLaunchGame = false;
-        // If no profile was passed in from TitleScene, auto-pick the first
-        // saved profile so the Play button always uses custom characters.
-        std::string profileToUse = mProfilePath;
-        if (profileToUse.empty()) {
-            auto profiles = ScanPlayerProfiles();
-            if (!profiles.empty())
-                profileToUse = profiles[0].string();
-        }
-        return std::make_unique<GameScene>("levels/"+mLevelName+".json", true, profileToUse);
+        // Pass mProfilePath through directly — empty string means "Frost Knight (default)",
+        // which is correct when the user hasn't selected a custom profile on the title screen.
+        return std::make_unique<GameScene>("levels/"+mLevelName+".json", true, mProfilePath);
     }
     if (mGoBack)     { mGoBack=false;     return std::make_unique<TitleScene>(); }
     return nullptr;

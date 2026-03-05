@@ -223,9 +223,23 @@ struct DestructibleTag {
 struct OpenWorldTag {}; // marks the player as running in open-world (top-down) mode
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
                      // slashes it enough times, then Renderable and Collider are removed.
-    int group        = 0; // 0 = standalone; matching non-zero groups trigger together
-    int hitsRequired = 1; // total slashes needed to destroy (set from editor)
-    int hitsRemaining = 1; // current hits left — decremented each slash
+    int         group           = 0; // 0 = standalone; matching non-zero groups trigger together
+    int         hitsRequired    = 1; // total slashes needed to destroy (set from editor)
+    int         hitsRemaining   = 1; // current hits left — decremented each slash
+    std::string destroyAnimPath;     // optional animated tile JSON to play on destruction
+};
+
+// Attached to an action tile the frame it is destroyed (hitsRemaining hits 0).
+// Signals that the tile is mid-death-animation: no longer solid/visible as a tile,
+// but the anim frames are being played. GameScene::Update() owns the frame counter
+// via tileAnimFrameMap (same mechanism as live animated tiles).
+// When the animation finishes the entity is fully destroyed (reg.destroy).
+struct DestroyAnimTag {
+    int   totalFrames  = 0;     // total frame count for the anim
+    float fps          = 8.0f;
+    bool  reachedEnd   = false; // true once currentFrame has hit totalFrames-1 for the first time
+    // Destruction is deferred one full tick after reachedEnd becomes true so
+    // the last frame is actually rendered at least once before the entity dies.
 };
 
 // ── Slope collision data ──────────────────────────────────────────────────────
@@ -281,4 +295,20 @@ struct ClimbState {
     bool atTop     = false; // true when player reached the top and is hanging there
     bool wPressed  = false; // event-driven: true while W is held on the ladder
     bool sPressed  = false; // event-driven: true while S is held on the ladder
+};
+
+// ── Per-character collider baseline ──────────────────────────────────────────
+// Stores the resolved standing collider dims and render offsets for this
+// specific character (from PlayerProfile or frost-knight defaults).
+// PlayerStateSystem reads these instead of the hardcoded PLAYER_STAND_* /
+// PLAYER_DUCK_* constants so custom characters keep their correct hitbox.
+struct PlayerBaseCollider {
+    int standW    = PLAYER_STAND_WIDTH;
+    int standH    = PLAYER_STAND_HEIGHT;
+    int standRoffX = PLAYER_STAND_ROFF_X;
+    int standRoffY = PLAYER_STAND_ROFF_Y;
+    int duckW     = PLAYER_DUCK_WIDTH;
+    int duckH     = PLAYER_DUCK_HEIGHT;
+    int duckRoffX  = PLAYER_DUCK_ROFF_X;
+    int duckRoffY  = PLAYER_DUCK_ROFF_Y;
 };

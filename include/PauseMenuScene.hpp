@@ -26,8 +26,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 class PauseMenuScene : public Scene {
   public:
-    PauseMenuScene(const std::string& levelPath, bool fromEditor)
-        : mLevelPath(levelPath), mFromEditor(fromEditor) {}
+    PauseMenuScene(const std::string& levelPath, bool fromEditor,
+                   const std::string& profilePath = "")
+        : mLevelPath(levelPath), mFromEditor(fromEditor), mProfilePath(profilePath) {}
 
     void Load(Window& window) override {
         mW = window.GetWidth();
@@ -106,10 +107,10 @@ class PauseMenuScene : public Scene {
 
     std::unique_ptr<Scene> NextScene() override {
         if (mResume)
-            return std::make_unique<GameScene>(mLevelPath, mFromEditor);
+            return std::make_unique<GameScene>(mLevelPath, mFromEditor, mProfilePath);
         if (mGoBack) {
             if (mFromEditor)
-                return std::make_unique<LevelEditorScene>(mLevelPath);
+                return std::make_unique<LevelEditorScene>(mLevelPath, false, "", mProfilePath);
             else
                 return std::make_unique<TitleScene>();
         }
@@ -118,6 +119,7 @@ class PauseMenuScene : public Scene {
 
   private:
     std::string  mLevelPath;
+    std::string  mProfilePath;
     bool         mFromEditor = false;
     bool         mResume     = false;
     bool         mGoBack     = false;

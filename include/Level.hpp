@@ -29,6 +29,9 @@ struct TileSpawn {
                                              // All action tiles sharing the same non-zero group
                                              // are triggered simultaneously when any one is slashed.
     int       actionHits  = 1;              // number of slashes required to destroy (default 1)
+    std::string actionDestroyAnim;          // path to an animated tile JSON to play on destruction
+                                             // (empty = no death animation). The animation plays
+                                             // once at the tile's position then the entity is removed.
     SlopeType slope           = SlopeType::None; // diagonal slope — collision rides the hypotenuse
     float     slopeHeightFrac  = 1.0f;           // 0..1: fraction of tile height the slope rises (1.0=full diagonal)
     int       rotation    = 0;               // clockwise degrees: 0, 90, 180, 270

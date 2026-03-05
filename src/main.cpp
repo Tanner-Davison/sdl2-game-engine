@@ -33,6 +33,7 @@ int main(int argc, char** argv) {
 
         while (SDL_PollEvent(&E)) {
             if (!manager.HandleEvent(E)) {
+                manager.Shutdown();
                 TTF_Quit();
                 SDL_Quit();
                 return 0;
