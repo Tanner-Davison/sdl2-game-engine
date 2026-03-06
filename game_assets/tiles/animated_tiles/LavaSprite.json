@@ -1,12 +1,12 @@
 {
+    "name": "LavaSprite",
     "fps": 8.0,
     "frames": [
-        "/Users/tanner.davison/Desktop/LavaSprite/1.png",
-        "/Users/tanner.davison/Desktop/LavaSprite/2.png",
-        "/Users/tanner.davison/Desktop/LavaSprite/3.png",
-        "/Users/tanner.davison/Desktop/LavaSprite/4.png",
-        "/Users/tanner.davison/Desktop/LavaSprite/5.png",
-        "/Users/tanner.davison/Desktop/LavaSprite/6.png"
-    ],
-    "name": "LavaSprite"
+        "game_assets/tiles/animated_tiles/LavaSprite/1.png",
+        "game_assets/tiles/animated_tiles/LavaSprite/2.png",
+        "game_assets/tiles/animated_tiles/LavaSprite/3.png",
+        "game_assets/tiles/animated_tiles/LavaSprite/4.png",
+        "game_assets/tiles/animated_tiles/LavaSprite/5.png",
+        "game_assets/tiles/animated_tiles/LavaSprite/6.png"
+    ]
 }

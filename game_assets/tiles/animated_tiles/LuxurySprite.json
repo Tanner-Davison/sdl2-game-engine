@@ -1,13 +1,13 @@
 {
+    "name": "LuxurySprite",
     "fps": 8.0,
     "frames": [
-        "/Users/tanner.davison/Desktop/LuxurySprite/1.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/2.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/3.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/4.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/5.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/6.png",
-        "/Users/tanner.davison/Desktop/LuxurySprite/7.png"
-    ],
-    "name": "LuxurySprite"
+        "game_assets/tiles/animated_tiles/LuxurySprite/1.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/2.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/3.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/4.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/5.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/6.png",
+        "game_assets/tiles/animated_tiles/LuxurySprite/7.png"
+    ]
 }

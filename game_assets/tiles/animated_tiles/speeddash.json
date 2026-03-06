@@ -1,14 +1,14 @@
 {
+    "name": "speeddash",
     "fps": 8.0,
     "frames": [
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/1.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/2.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/3.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/4.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/5.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/6.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/7.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Items Sprite/speeddash/8.png"
-    ],
-    "name": "speeddash"
+        "game_assets/tiles/animated_tiles/speeddash/1.png",
+        "game_assets/tiles/animated_tiles/speeddash/2.png",
+        "game_assets/tiles/animated_tiles/speeddash/3.png",
+        "game_assets/tiles/animated_tiles/speeddash/4.png",
+        "game_assets/tiles/animated_tiles/speeddash/5.png",
+        "game_assets/tiles/animated_tiles/speeddash/6.png",
+        "game_assets/tiles/animated_tiles/speeddash/7.png",
+        "game_assets/tiles/animated_tiles/speeddash/8.png"
+    ]
 }

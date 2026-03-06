@@ -1,13 +1,13 @@
 {
+    "name": "blownup",
     "fps": 9.0,
     "frames": [
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/1.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/2.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/3.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/4.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/5.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/6.png",
-        "/Users/tanner.davison/Desktop/craftpix-897809-jetpack-flat-2d-game-kit/PNG/Collision FX/blownup/7.png"
-    ],
-    "name": "blownup"
+        "game_assets/tiles/animated_tiles/blownup/1.png",
+        "game_assets/tiles/animated_tiles/blownup/2.png",
+        "game_assets/tiles/animated_tiles/blownup/3.png",
+        "game_assets/tiles/animated_tiles/blownup/4.png",
+        "game_assets/tiles/animated_tiles/blownup/5.png",
+        "game_assets/tiles/animated_tiles/blownup/6.png",
+        "game_assets/tiles/animated_tiles/blownup/7.png"
+    ]
 }

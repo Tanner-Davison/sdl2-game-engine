@@ -1,16 +1,16 @@
 {
+    "name": "CoinSprite",
     "fps": 8.0,
     "frames": [
-        "/Users/tanner.davison/Desktop/CoinSprite/1.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/2.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/3.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/4.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/5.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/6.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/7.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/8.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/9.png",
-        "/Users/tanner.davison/Desktop/CoinSprite/10.png"
-    ],
-    "name": "CoinSprite"
+        "game_assets/tiles/animated_tiles/CoinSprite/1.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/10.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/2.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/3.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/4.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/5.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/6.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/7.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/8.png",
+        "game_assets/tiles/animated_tiles/CoinSprite/9.png"
+    ]
 }
