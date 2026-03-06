@@ -129,6 +129,7 @@ class TitleScene : public Scene {
                                 rebuildNamePrompt();
                             } else {
                                 mEditorPath = ""; mEditorForce = true; mEditorName = mNewLevelName;
+                                mLevelBrowserOpen = false;
                                 closeNamePrompt(); openEditor = true;
                             }
                         }
@@ -348,6 +349,7 @@ class TitleScene : public Scene {
     // ── Name prompt helpers ───────────────────────────────────────────────────
     void openNamePrompt() {
         mNamingActive = true; mNewLevelName.clear(); mNameError.clear();
+        mLevelBrowserOpen = false;
         SDL_StartTextInput(mSDLWindow);
         rebuildNamePrompt();
     }

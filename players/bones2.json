@@ -58,7 +58,7 @@
         },
         {
             "folderPath": "game_assets/char_sprites/bones2/Slash",
-            "fps": 33.0,
+            "fps": 43.0,
             "hitbox": {
                 "h": 124,
                 "w": 74,

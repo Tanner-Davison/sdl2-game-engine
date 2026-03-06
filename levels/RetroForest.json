@@ -10,8 +10,8 @@
     "gravityMode": "platformer",
     "name": "RetroForest",
     "player": {
-        "x": 4218.0,
-        "y": 190.0
+        "x": 76.0,
+        "y": 380.0
     },
     "tiles": [
         {
