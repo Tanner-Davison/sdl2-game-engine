@@ -18,19 +18,29 @@ static SDL_Surface* MakeThumb(SDL_Surface* src, int w, int h) {
     SDL_Surface* t = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ARGB8888);
     if (!t) return nullptr;
     SDL_SetSurfaceBlendMode(t, SDL_BLENDMODE_NONE);
+    // Set source to BLENDMODE_NONE so raw RGBA (including alpha) is copied as-is.
+    // Without this SDL composites src onto dst and bakes alpha to 255, making
+    // transparent tiles render as opaque in the editor canvas.
+    SDL_BlendMode srcMode;
+    SDL_GetSurfaceBlendMode(src, &srcMode);
+    SDL_SetSurfaceBlendMode(src, SDL_BLENDMODE_NONE);
     SDL_Rect sr = {0, 0, src->w, src->h};
     SDL_Rect dr = {0, 0, w, h};
     SDL_BlitSurfaceScaled(src, &sr, t, &dr, SDL_SCALEMODE_LINEAR);
+    SDL_SetSurfaceBlendMode(src, srcMode);
     SDL_SetSurfaceBlendMode(t, SDL_BLENDMODE_BLEND);
     return t;
 }
 
 // Load a PNG from disk, convert to ARGB8888, return it (caller owns).
+// Blend mode is set to BLEND so the surface composites correctly when
+// blitted to the canvas — transparent pixels show through to the background.
 static SDL_Surface* LoadPNG(const fs::path& p) {
     SDL_Surface* raw = IMG_Load(p.string().c_str());
     if (!raw) return nullptr;
     SDL_Surface* c = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
     SDL_DestroySurface(raw);
+    if (c) SDL_SetSurfaceBlendMode(c, SDL_BLENDMODE_BLEND);
     return c;
 }
 
@@ -618,7 +628,7 @@ void LevelEditorScene::Load(Window& window) {
 
     lblStatus = std::make_unique<Text>(mStatusMsg, SDL_Color{180,180,200,255},
                                        BTN_GAP, TOOLBAR_H + 4, 12);
-    lblTool   = std::make_unique<Text>("Select", SDL_Color{255,215,0,255},
+    lblTool   = std::make_unique<Text>("Pan", SDL_Color{255,215,0,255},
                                        window.GetWidth() - PALETTE_W - 120, 22, 13);
 }
 
@@ -725,7 +735,16 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     int v = std::clamp(std::stoi(mMovPlatSpeedStr), 10, 2000);
                     mMovPlatSpeed    = (float)v;
                     mMovPlatSpeedStr = std::to_string(v);
+                    // Apply to current session tiles
                     for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveSpeed = mMovPlatSpeed;
+                    // Also apply to ALL moving tiles in the current group
+                    for (auto& t : mLevel.tiles) {
+                        if (!t.moving) continue;
+                        bool inGroup = (mMovPlatCurGroupId != 0 && t.moveGroupId == mMovPlatCurGroupId)
+                                    || std::any_of(mMovPlatIndices.begin(), mMovPlatIndices.end(),
+                                                   [&](int i){ return &t == &mLevel.tiles[i]; });
+                        if (inGroup) t.moveSpeed = mMovPlatSpeed;
+                    }
                 }
                 mMovPlatSpeedInput = false;
                 SDL_StopTextInput(mWindow ? mWindow->GetRaw() : nullptr);
@@ -834,13 +853,24 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         int mx=(int)fmx, my=(int)fmy;
 
         // When MovingPlat tool is active, Ctrl+scroll adjusts range instead of zooming.
+        // Adjusts the hovered tile's group, OR the current session group if no hover.
         // Start position stays fixed; only the end (range) moves.
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && mActiveTool == Tool::MovingPlat && mx < CanvasW()) {
             mMovPlatRange = std::max(GRID * 1.0f, mMovPlatRange + e.wheel.y * GRID);
+            // Update current session tiles
             for (int idx : mMovPlatIndices)
                 mLevel.tiles[idx].moveRange = mMovPlatRange;
-            SetStatus("MovePlat range=" + std::to_string((int)mMovPlatRange)
-                      + "  (start fixed, end moves)");
+            // Also update the hovered tile's group (handles already-placed platforms)
+            int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
+            if (hovTi >= 0 && mLevel.tiles[hovTi].moving) {
+                int grp = mLevel.tiles[hovTi].moveGroupId;
+                for (auto& t : mLevel.tiles) {
+                    if (!t.moving) continue;
+                    if (grp != 0 ? (t.moveGroupId == grp) : (&t == &mLevel.tiles[hovTi]))
+                        t.moveRange = mMovPlatRange;
+                }
+            }
+            SetStatus("MovePlat range=" + std::to_string((int)mMovPlatRange));
             return true;
         }
 
@@ -1160,6 +1190,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                               " rotated to " + std::to_string(rot) + "deg");
                 }
                 return true;
+            } else if (mActiveTool == Tool::Tile) {
+                // Hovering empty canvas space — cycle ghost rotation
+                mGhostRotation = (mGhostRotation + 90) % 360;
+                SetStatus("Ghost rotation: " + std::to_string(mGhostRotation) + "deg  (RClick to cycle)");
+                return true;
             }
         }
     }
@@ -1288,6 +1323,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mMovPlatNextGroupId = maxUsed + 1;
             mMovPlatCurGroupId  = mMovPlatNextGroupId++;
             mMovPlatIndices.clear();
+            // Seed editor state from existing moving tiles so re-selecting the tool
+            // doesn't reset values that were already saved on the level tiles.
+            // Find the first existing moving tile and read its values back.
+            for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
+                if (!mLevel.tiles[i].moving) continue;
+                const auto& first = mLevel.tiles[i];
+                mMovPlatHoriz   = first.moveHoriz;
+                mMovPlatRange   = first.moveRange;
+                mMovPlatSpeed   = first.moveSpeed;
+                mMovPlatLoop    = first.moveLoop;
+                mMovPlatTrigger = first.moveTrigger;
+                break;
+            }
             // Open config popup and seed speed string from current value
             mMovPlatPopupOpen  = true;
             mMovPlatSpeedInput = false;
@@ -1393,8 +1441,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     mLastClickIndex = idx;
                     mLastClickTime  = now;
 
-                    mSelectedTile = idx;
-                    mActiveTool   = Tool::Tile;
+                    mSelectedTile  = idx;
+                    mGhostRotation = 0; // reset rotation when a new tile is picked
+                    mActiveTool    = Tool::Tile;
                     lblTool->CreateSurface("Tool: Tile");
                     SetStatus("Selected: " + item.label + (isDouble ? " (double)" : ""));
                 }
@@ -1445,7 +1494,17 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 if (!mMovPlatSpeedStr.empty()) {
                     int v = std::clamp(std::stoi(mMovPlatSpeedStr), 10, 2000);
                     mMovPlatSpeed = (float)v;
+                    // Apply to current session tiles
                     for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveSpeed = mMovPlatSpeed;
+                    // Also apply to ALL moving tiles in the current group so editing
+                    // an already-placed platform actually takes effect.
+                    for (auto& t : mLevel.tiles) {
+                        if (!t.moving) continue;
+                        bool inGroup = (mMovPlatCurGroupId != 0 && t.moveGroupId == mMovPlatCurGroupId)
+                                    || std::any_of(mMovPlatIndices.begin(), mMovPlatIndices.end(),
+                                                   [&](int i){ return &t == &mLevel.tiles[i]; });
+                        if (inGroup) t.moveSpeed = mMovPlatSpeed;
+                    }
                 }
                 mMovPlatPopupOpen  = false;
                 mMovPlatSpeedInput = false;
@@ -1505,9 +1564,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 SetStatus("Enemy at "+std::to_string(sx)+","+std::to_string(sy)); break;
             case Tool::Tile:
                 if (!mPaletteItems.empty() && !mPaletteItems[mSelectedTile].isFolder) {
-                    mLevel.tiles.push_back({(float)sx,(float)sy,mTileW,mTileH,
-                                            mPaletteItems[mSelectedTile].path});
-                    SetStatus("Tile: "+mPaletteItems[mSelectedTile].label);
+                    auto newTile = TileSpawn{(float)sx,(float)sy,mTileW,mTileH,
+                                              mPaletteItems[mSelectedTile].path};
+                    newTile.rotation = mGhostRotation;
+                    mLevel.tiles.push_back(std::move(newTile));
+                    SetStatus("Tile: "+mPaletteItems[mSelectedTile].label
+                              + (mGhostRotation ? "  rot="+std::to_string(mGhostRotation) : ""));
                 }
                 break;
             case Tool::Erase: {
@@ -1686,6 +1748,31 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 int ti = HitTile(mx, my);
                 if (ti >= 0) {
                     auto& t = mLevel.tiles[ti];
+                    // If the tile is already moving but from a *different* session group,
+                    // adopt its group so the speed popup edits the right group.
+                    if (t.moving && std::find(mMovPlatIndices.begin(), mMovPlatIndices.end(), ti) == mMovPlatIndices.end()) {
+                        // Clicking an existing platform from a previous session: adopt its group
+                        mMovPlatCurGroupId = (t.moveGroupId != 0) ? t.moveGroupId : mMovPlatNextGroupId++;
+                        mMovPlatHoriz   = t.moveHoriz;
+                        mMovPlatRange   = t.moveRange;
+                        mMovPlatSpeed   = t.moveSpeed;
+                        mMovPlatLoop    = t.moveLoop;
+                        mMovPlatTrigger = t.moveTrigger;
+                        mMovPlatSpeedStr = std::to_string((int)mMovPlatSpeed);
+                        // Collect all tiles in that group into mMovPlatIndices
+                        mMovPlatIndices.clear();
+                        for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
+                            if (!mLevel.tiles[i].moving) continue;
+                            bool inGrp = (t.moveGroupId != 0)
+                                ? (mLevel.tiles[i].moveGroupId == t.moveGroupId)
+                                : (i == ti);
+                            if (inGrp) mMovPlatIndices.push_back(i);
+                        }
+                        SetStatus("Adopted platform group " + std::to_string(mMovPlatCurGroupId)
+                                  + "  spd=" + std::to_string((int)mMovPlatSpeed)
+                                  + "  tiles=" + std::to_string(mMovPlatIndices.size()));
+                        return true;
+                    }
                     // If already in this group, remove it
                     auto it = std::find(mMovPlatIndices.begin(), mMovPlatIndices.end(), ti);
                     if (it != mMovPlatIndices.end()) {
@@ -2238,21 +2325,24 @@ void LevelEditorScene::Render(Window& window) {
             SDL_Color border = inCurGroup ? SDL_Color{0,255,255,220} : SDL_Color{180,100,255,160};
             DrawOutline(screen, {tsx, tsy, tsw, tsh}, border, 2);
 
-            // Travel path line and ghost tiles share the same endpoints,
-            // computed in screen space from world positions.
+            // Travel path line and ghost tiles.
+            // For grouped platforms, ALL tiles share the same end position (groupOriginX + range)
+            // so the whole group's end ghost moves together as one.
             int cx = tsx + tsw/2, cy = tsy + tsh/2;
             int sw = (int)(t.w * mZoom), sh = (int)(t.h * mZoom);
-            // Compute screen-space ghost positions (reused for line endpoints below)
-            // Both loop and sine modes: start = tile origin, end = tile origin + range.
-            // This gives a clear "start stays, end moves" visual for Ctrl+scroll.
+
             int lineStartX, lineEndX, lineStartY, lineEndY;
             if (t.moveHoriz) {
-                lineStartX = (int)((t.x              - mCamX) * mZoom);
-                lineEndX   = (int)((t.x + t.moveRange - mCamX) * mZoom);
+                lineStartX = tsx;
+                float endWX = t.x + t.moveRange;
+                int endWXSnapped = ((int)endWX / GRID) * GRID;
+                lineEndX = (int)std::round((endWXSnapped - mCamX) * mZoom);
                 DrawRect(screen, {lineStartX, cy-1, lineEndX - lineStartX, 2}, {0,255,255,100});
             } else {
-                lineStartY = (int)((t.y              - mCamY) * mZoom);
-                lineEndY   = (int)((t.y + t.moveRange - mCamY) * mZoom);
+                lineStartY = tsy;
+                float endWY = t.y + t.moveRange;
+                int endWYSnapped = ((int)endWY / GRID) * GRID;
+                lineEndY = (int)std::round((endWYSnapped - mCamY) * mZoom);
                 DrawRect(screen, {cx-1, lineStartY, 2, lineEndY - lineStartY}, {0,255,255,100});
             }
 
@@ -2273,19 +2363,26 @@ void LevelEditorScene::Render(Window& window) {
                     int rx   = (dir > 0) ? tipX + row - 7 : tipX - row + 1;
                     DrawRect(screen, {rx, acy - half, 1, half * 2 + 1}, {255, 220, 0, 220});
                 }
-                // Ghost tiles at start (green) and end (red) of travel line
+                // Ghost tiles at start (green) and end (red) of travel line.
+                // Start ghost uses tsx/tsy exactly so it overlaps the real tile perfectly.
+                // End ghost snaps to the nearest grid cell at t.x + moveRange.
                 if (t.moveRange > 0.0f) {
-                    int gsy = (int)((t.y - mCamY) * mZoom);
-                    // Start ghost
-                    DrawRectAlpha(screen, {lineStartX, gsy, sw, sh}, {0, 200, 80, 60});
-                    DrawOutline(screen, {lineStartX, gsy, sw, sh}, {0, 255, 100, 200}, 2);
-                    blitBadge(GetBadge("S", {0,255,120,255}), lineStartX+2, gsy+2);
-                    // End ghost
-                    DrawRectAlpha(screen, {lineEndX, gsy, sw, sh}, {220, 60, 60, 60});
-                    DrawOutline(screen, {lineEndX, gsy, sw, sh}, {255, 80, 80, 200}, 2);
-                    blitBadge(GetBadge("E", {255,100,100,255}), lineEndX+2, gsy+2);
+                    // Start ghost: sits exactly on the real tile
+                    DrawRectAlpha(screen, {tsx, tsy, sw, sh}, {0, 200, 80, 60});
+                    DrawOutline(screen, {tsx, tsy, sw, sh}, {0, 255, 100, 200}, 2);
+                    blitBadge(GetBadge("S", {0,255,120,255}), tsx+2, tsy+2);
+                    // End ghost: each tile shows its own end at t.x + moveRange.
+                    // All tiles in a group have the same moveRange so they all shift
+                    // by the same distance -- the whole group's ghosts move together.
+                    float endWX = t.x + t.moveRange;
+                    int endWXSnapped = ((int)endWX / GRID) * GRID;
+                    int endSX = (int)std::round((endWXSnapped - mCamX) * mZoom);
+                    DrawRectAlpha(screen, {endSX, tsy, sw, sh}, {220, 60, 60, 60});
+                    DrawOutline(screen, {endSX, tsy, sw, sh}, {255, 80, 80, 200}, 2);
+                    blitBadge(GetBadge("E", {255,100,100,255}), endSX+2, tsy+2);
+                    lineEndX = endSX;
                     // Phase tick on line
-                    int phasePx = lineStartX + (int)((lineEndX - lineStartX) * t.movePhase);
+                    int phasePx = tsx + (int)((lineEndX - tsx) * t.movePhase);
                     DrawRect(screen, {phasePx - 1, cy - 12, 2, 24}, {255, 255, 0, 200});
                     std::string pctStr = std::to_string((int)(t.movePhase * 100)) + "%";
                     blitBadge(GetBadge(pctStr, {255,255,180,255}), phasePx - 8, cy - 24);
@@ -2300,19 +2397,23 @@ void LevelEditorScene::Render(Window& window) {
                     int ry   = (dir > 0) ? tipY + row - 7 : tipY - row + 1;
                     DrawRect(screen, {acx - half, ry, half * 2 + 1, 1}, {255, 220, 0, 220});
                 }
-                // Ghost tiles at start (green) and end (red) of vertical travel line
+                // Ghost tiles at start (green) and end (red) of vertical travel line.
+                // Start ghost uses tsx/tsy exactly. End ghost snaps to grid.
                 if (t.moveRange > 0.0f) {
-                    int gsx = (int)((t.x - mCamX) * mZoom);
-                    // Start ghost
-                    DrawRectAlpha(screen, {gsx, lineStartY, sw, sh}, {0, 200, 80, 60});
-                    DrawOutline(screen, {gsx, lineStartY, sw, sh}, {0, 255, 100, 200}, 2);
-                    blitBadge(GetBadge("S", {0,255,120,255}), gsx+2, lineStartY+2);
-                    // End ghost
-                    DrawRectAlpha(screen, {gsx, lineEndY, sw, sh}, {220, 60, 60, 60});
-                    DrawOutline(screen, {gsx, lineEndY, sw, sh}, {255, 80, 80, 200}, 2);
-                    blitBadge(GetBadge("E", {255,100,100,255}), gsx+2, lineEndY+2);
+                    // Start ghost: sits exactly on the real tile
+                    DrawRectAlpha(screen, {tsx, tsy, sw, sh}, {0, 200, 80, 60});
+                    DrawOutline(screen, {tsx, tsy, sw, sh}, {0, 255, 100, 200}, 2);
+                    blitBadge(GetBadge("S", {0,255,120,255}), tsx+2, tsy+2);
+                    // End ghost: each tile at its own t.y + moveRange
+                    float endWY = t.y + t.moveRange;
+                    int endWYSnapped = ((int)endWY / GRID) * GRID;
+                    int endSY = (int)std::round((endWYSnapped - mCamY) * mZoom);
+                    DrawRectAlpha(screen, {tsx, endSY, sw, sh}, {220, 60, 60, 60});
+                    DrawOutline(screen, {tsx, endSY, sw, sh}, {255, 80, 80, 200}, 2);
+                    blitBadge(GetBadge("E", {255,100,100,255}), tsx+2, endSY+2);
+                    lineEndY = endSY;
                     // Phase tick
-                    int phasePy = lineStartY + (int)((lineEndY - lineStartY) * t.movePhase);
+                    int phasePy = tsy + (int)((lineEndY - tsy) * t.movePhase);
                     DrawRect(screen, {acx - 12, phasePy - 1, 24, 2}, {255, 255, 0, 200});
                     std::string pctStr = std::to_string((int)(t.movePhase * 100)) + "%";
                     blitBadge(GetBadge(pctStr, {255,255,180,255}), acx + 8, phasePy - 6);
@@ -2627,10 +2728,42 @@ void LevelEditorScene::Render(Window& window) {
     if (mActiveTool==Tool::Tile && !mPaletteItems.empty() && !mPaletteItems[mSelectedTile].isFolder) {
         float fmx,fmy; SDL_GetMouseState(&fmx,&fmy); int mx=(int)fmx,my=(int)fmy;
         if (my>=TOOLBAR_H && mx<cw) {
-            auto [wx,wy]=SnapToGrid(mx,my); // world space
-            int gsx=(int)(wx-mCamX), gsy=(int)(wy-mCamY); // screen space
-            DrawRect(screen,{gsx,gsy,mTileW,mTileH},{100,180,255,60});
-            DrawOutline(screen,{gsx,gsy,mTileW,mTileH},{100,180,255,200});
+            auto [wx,wy] = SnapToGrid(mx,my); // world space
+            // Apply zoom to get screen-space position (was missing mZoom)
+            int gsx = (int)((wx - mCamX) * mZoom);
+            int gsy = (int)((wy - mCamY) * mZoom);
+            int gsw = (int)(mTileW * mZoom);
+            int gsh = (int)(mTileH * mZoom);
+            SDL_Rect ghostDst = {gsx, gsy, gsw, gsh};
+            // Draw the actual selected tile image as a semi-transparent ghost
+            const auto& selItem = mPaletteItems[mSelectedTile];
+            auto cacheIt = mTileSurfaceCache.find(selItem.path);
+            SDL_Surface* ghostSurf = (cacheIt != mTileSurfaceCache.end()) ? cacheIt->second
+                                   : (selItem.full ? selItem.full : nullptr);
+            if (ghostSurf) {
+                // Apply ghost rotation using the same rotation cache as placed tiles
+                SDL_Surface* drawSurf = (mGhostRotation != 0)
+                    ? GetRotated(selItem.path, ghostSurf, mGhostRotation)
+                    : ghostSurf;
+                if (!drawSurf) drawSurf = ghostSurf; // fallback if rotation failed
+                SDL_SetSurfaceAlphaMod(drawSurf, 140);
+                SDL_BlitSurfaceScaled(drawSurf, nullptr, screen, &ghostDst, SDL_SCALEMODE_LINEAR);
+                SDL_SetSurfaceAlphaMod(drawSurf, 255);
+            } else {
+                DrawRectAlpha(screen, ghostDst, {100, 180, 255, 60});
+            }
+            // Show rotation badge on ghost so user knows current angle
+            if (mGhostRotation != 0) {
+                std::string rBadge = std::to_string(mGhostRotation) + "\xc2\xb0";
+                SDL_Surface* rb = GetBadge(rBadge, {255, 220, 80, 255});
+                if (rb) {
+                    int bx = gsx + gsw - rb->w - 3;
+                    int by = gsy + 3;
+                    SDL_Rect bd = {bx, by, rb->w, rb->h};
+                    SDL_BlitSurface(rb, nullptr, screen, &bd);
+                }
+            }
+            DrawOutline(screen, ghostDst, {100,180,255,200});
         }
     }
 

@@ -267,15 +267,27 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             });
 
             if (onSlope) {
-                // Snap to slope surface regardless of velocity direction.
-                // The old g.velocity >= 0.0f guard caused isGrounded to stay
-                // false while walking uphill (SLOPE_STICK_VELOCITY can briefly
-                // make velocity negative), blocking jumps on ascending slopes.
-                if (g.velocity >= 0.0f || pt.y > bestSurface - pc.h) {
-                    pt.y       = bestSurface - pc.h;
-                    g.velocity = 0.0f;
+                // Only snap & ground the player when they are falling onto (or
+                // resting on) the slope.  If velocity is meaningfully upward
+                // (player just jumped or is still rising), leave them airborne so
+                // the jump isn't immediately cancelled by the surface snap.
+                //
+                // SLOPE_JUMP_THRESHOLD gives a small tolerance: gentle upward
+                // corrections from SLOPE_STICK_VELOCITY (walking uphill) are
+                // still treated as grounded, but a real jump (-JUMP_FORCE) is not.
+                constexpr float SLOPE_JUMP_THRESHOLD = -80.0f; // px/s — below this = real jump
+                bool risingFast = (g.velocity < SLOPE_JUMP_THRESHOLD);
+
+                if (!risingFast) {
+                    // Descending, stationary, or barely rising (walk-uphill correction):
+                    // snap to slope and mark grounded.
+                    pt.y         = bestSurface - pc.h;
+                    g.velocity   = 0.0f;
+                    g.isGrounded = true;
                 }
-                g.isGrounded     = true;
+                // Always set onSlopeThisFrame so Pass 1/2 flat-tile corrections
+                // are suppressed — we don’t want flat tiles fighting the slope
+                // geometry even while the player is jumping off it.
                 onSlopeThisFrame = true;
             }
         }

@@ -97,7 +97,7 @@ class LevelEditorScene : public Scene {
     std::string mPresetName;   // name chosen in title-screen modal (overrides "level1")
     std::string mProfilePath;  // PlayerProfile JSON path to pass through to GameScene (empty = frost knight)
     Window*     mWindow     = nullptr;
-    Tool        mActiveTool = Tool::Select;
+    Tool        mActiveTool = Tool::MoveCam;
     PaletteTab  mActiveTab  = PaletteTab::Tiles;
     bool        mLaunchGame = false;
     bool        mGoBack     = false; // true = return to TitleScene
@@ -161,6 +161,7 @@ class LevelEditorScene : public Scene {
     int                  mSelectedTile    = 0;
     int                  mSelectedBg      = 0;
     int                  mTileW = GRID, mTileH = GRID;
+    int                  mGhostRotation = 0; // pending rotation for next tile placement (0/90/180/270)
     float mScrollAccum = 0.0f; // fractional scroll accumulator for tile sizing
 
     // Tile palette navigation

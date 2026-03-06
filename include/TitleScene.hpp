@@ -31,10 +31,6 @@ class TitleScene : public Scene {
 
         SDL_Rect windowRect = {0, 0, mWindowW, mWindowH};
 
-        auto [titleX, titleY] = Text::CenterInRect("SDL Sandbox", 72, windowRect);
-        titleText = std::make_unique<Text>("SDL Sandbox", SDL_Color{255, 255, 255, 255},
-                                           titleX, titleY - 120, 72);
-
         // ── Layout constants ──────────────────────────────────────────────────
         const int btnW  = 180;  // button width
         const int btnH  = 50;   // button height
@@ -42,8 +38,14 @@ class TitleScene : public Scene {
         const int rowGap = 14;  // vertical gap between button rows
         const int cx    = mWindowW / 2;
 
-        // Row 1 starts just above centre so there's room for rows 2 + level list
-        const int row1Y = mWindowH / 2 - 100;
+        // Title sits well above the button cluster
+        auto [titleX, titleY] = Text::CenterInRect("SDL Sandbox", 72, windowRect);
+        // Anchor buttons so they're centred in the lower portion of the window;
+        // leave ~100px of clear space below the title baseline.
+        const int row1Y = mWindowH / 2 - 60;  // shifted down so title has room
+        // Place title so its bottom edge is ~80px above row1Y
+        titleText = std::make_unique<Text>("SDL Sandbox", SDL_Color{255, 255, 255, 255},
+                                           titleX, row1Y - 80 - 72, 72);  // 72 ≈ font height
         const int row2Y = row1Y + btnH + rowGap;
         // Row 1: Play  |  Level Editor  (centred as a pair)
         playBtnRect = {cx - btnW - gap / 2, row1Y, btnW, btnH};
