@@ -396,7 +396,6 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         constexpr float FLOAT_PUSH_H   = 220.0f; // base H impulse (px/s)
         constexpr float FLOAT_PUSH_V   = 140.0f; // base V impulse (px/s)
         constexpr float FLOAT_SPIN_HIT =  80.0f; // spin imparted on hit
-        constexpr float MIN_CLOSING    =  20.0f; // px/s closing speed below which we skip impulse
 
         // Canonical pair key: always store lower entity value first
         using Pair = std::pair<entt::entity, entt::entity>;
@@ -453,37 +452,31 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                     ftB.y -= vDir * half;  fsB.baseY -= vDir * half;
                 }
 
-                // Impulse: only when objects are actually closing (not already separating)
-                // This prevents re-triggering after push-out leaves them just touching.
-                bool closingH = (hDir * relVx) > -MIN_CLOSING; // A moving toward B on H axis
-                bool closingV = (vDir * relVy) > -MIN_CLOSING;
-
+                // Impulse — scale by relative closing speed so a fast hit sends
+                // the target flying; two slow-drifting objects get a gentle nudge.
+                // We always apply the impulse here: the push-out above already
+                // separated the AABBs so they won't overlap next frame, preventing
+                // re-triggering without needing a closing-velocity gate.
                 if (minH < minV) {
-                    // Horizontal collision
-                    if (closingH) {
-                        float imp = std::max(FLOAT_PUSH_H, std::abs(relVx) * 1.2f);
-                        fsA.driftVx  +=  hDir * imp * 0.5f;
-                        fsB.driftVx  -= hDir * imp * 0.5f;
-                        fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT;
-                        fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT;
-                        // Small vertical scatter so stacked objects don't stay perfectly locked
-                        float scatter = FLOAT_PUSH_V * 0.25f;
-                        fsA.driftVy  += vDir * scatter;
-                        fsB.driftVy  -= vDir * scatter;
-                    }
+                    // Horizontal collision — exchange horizontal momentum
+                    float imp = std::max(FLOAT_PUSH_H, std::abs(relVx) * 1.2f);
+                    fsA.driftVx   +=  hDir * imp * 0.5f;
+                    fsB.driftVx   -= hDir * imp * 0.5f;
+                    fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT;
+                    fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT;
+                    // Small vertical scatter so stacked objects don't lock together
+                    fsA.driftVy  += vDir * FLOAT_PUSH_V * 0.2f;
+                    fsB.driftVy  -= vDir * FLOAT_PUSH_V * 0.2f;
                 } else {
-                    // Vertical collision
-                    if (closingV) {
-                        float imp = std::max(FLOAT_PUSH_V, std::abs(relVy) * 1.2f);
-                        fsA.driftVy  +=  vDir * imp * 0.5f;
-                        fsB.driftVy  -= vDir * imp * 0.5f;
-                        // Small horizontal scatter
-                        float scatter = FLOAT_PUSH_H * 0.25f;
-                        fsA.driftVx  += hDir * scatter;
-                        fsB.driftVx  -= hDir * scatter;
-                        fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT * 0.5f;
-                        fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT * 0.5f;
-                    }
+                    // Vertical collision — exchange vertical momentum
+                    float imp = std::max(FLOAT_PUSH_V, std::abs(relVy) * 1.2f);
+                    fsA.driftVy   +=  vDir * imp * 0.5f;
+                    fsB.driftVy   -= vDir * imp * 0.5f;
+                    // Small horizontal scatter
+                    fsA.driftVx  += hDir * FLOAT_PUSH_H * 0.2f;
+                    fsB.driftVx  -= hDir * FLOAT_PUSH_H * 0.2f;
+                    fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT * 0.5f;
+                    fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT * 0.5f;
                 }
             }
         }
