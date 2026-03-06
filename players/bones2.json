@@ -2,7 +2,7 @@
     "name": "bones2",
     "slots": [
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Idle",
+            "folderPath": "game_assets/char_sprites/bones2/Idle",
             "fps": 0.0,
             "hitbox": {
                 "h": 105,
@@ -13,7 +13,7 @@
             "slot": 0
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Walking",
+            "folderPath": "game_assets/char_sprites/bones2/Walk",
             "fps": 0.0,
             "hitbox": {
                 "h": 125,
@@ -24,7 +24,7 @@
             "slot": 1
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Idle Blink",
+            "folderPath": "game_assets/char_sprites/bones2/Crouch",
             "fps": 0.0,
             "hitbox": {
                 "h": 114,
@@ -35,7 +35,7 @@
             "slot": 2
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Jump Start",
+            "folderPath": "game_assets/char_sprites/bones2/Jump",
             "fps": 0.0,
             "hitbox": {
                 "h": 114,
@@ -46,7 +46,7 @@
             "slot": 3
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Jump Loop",
+            "folderPath": "game_assets/char_sprites/bones2/Fall",
             "fps": 0.0,
             "hitbox": {
                 "h": 124,
@@ -57,7 +57,7 @@
             "slot": 4
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Attacking",
+            "folderPath": "game_assets/char_sprites/bones2/Slash",
             "fps": 33.0,
             "hitbox": {
                 "h": 124,
@@ -68,7 +68,7 @@
             "slot": 5
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Hurt",
+            "folderPath": "game_assets/char_sprites/bones2/Hurt",
             "fps": 0.0,
             "hitbox": {
                 "h": 125,
@@ -79,7 +79,7 @@
             "slot": 6
         },
         {
-            "folderPath": "/Users/tanner.davison/Desktop/char-sprites/PNG/Skull 02/PNG Sequences/Dying",
+            "folderPath": "game_assets/char_sprites/bones2/Death",
             "fps": 0.0,
             "hitbox": {
                 "h": 127,
