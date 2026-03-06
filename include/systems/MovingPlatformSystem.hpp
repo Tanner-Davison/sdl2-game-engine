@@ -162,26 +162,28 @@ inline void MovingPlatformCarry(entt::registry& reg) {
     auto mpView     = reg.view<Transform, MovingPlatformState>();
     auto playerView = reg.view<PlayerTag, Transform>();
 
-    // Collect the carry to apply — use the first tile that reports playerOnTop.
-    // Without deduplication, multi-tile platforms apply the delta once per tile.
+    // Collect the carry to apply.
+    // For multi-tile platforms, pick the tile with the greatest absolute motion
+    // rather than whichever happens to be first in EnTT's sparse_set.
+    // This avoids a rare bug where a stationary tile (vx==0 on the lag frame)
+    // sorts before the actually-moving tile and silently drops carry.
     float carryVx = 0.0f;
     float carryVy = 0.0f;
     bool  carried = false;
+    float bestMotion = 0.0f;
     for (auto platEnt : mpView) {
         if (!reg.all_of<MovingPlatformTag>(platEnt)) continue;
         const auto& mps = mpView.get<MovingPlatformState>(platEnt);
         if (!mps.playerOnTop) continue;
-        // Only skip carry if genuinely stationary (not triggered yet or truly no movement).
-        // Don't skip on vx==0.0 alone — the first frame after triggering may have a tiny
-        // or zero vx if the tile just started moving; the player would slide off.
-        bool hasMotion = (mps.horiz ? std::abs(mps.vx) : std::abs(mps.vy)) > 0.001f;
-        if (!hasMotion && !(mps.trigger && mps.triggered)) continue;
-        if (!carried) {
+        float motion = mps.horiz ? std::abs(mps.vx) : std::abs(mps.vy);
+        // Always accept triggered platforms even on vx==0 start frame.
+        bool forceAccept = (mps.trigger && mps.triggered && !carried);
+        if (motion > bestMotion || forceAccept) {
+            bestMotion = motion;
             carryVx = mps.vx;
             carryVy = mps.vy;
             carried = true;
         }
-        break;
     }
 
     if (!carried) return;

@@ -11,7 +11,20 @@
 #include <cstdlib>
 #include <filesystem>
 #include <print>
+#include <unordered_map>
 namespace fs = std::filesystem;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Level-scoped tile texture cache
+//
+// Key: "<path>|<w>x<h>|r<rotation>"  Value: non-owning ptr into tileScaledTextures
+// Populated during Spawn(); cleared in Unload() along with tileScaledTextures.
+// This avoids re-loading and re-uploading tile images on every Respawn().
+// ─────────────────────────────────────────────────────────────────────────────
+static std::string TileCacheKey(const std::string& path, int w, int h, int rot) {
+    return path + '|' + std::to_string(w) + 'x' + std::to_string(h)
+                + "|r" + std::to_string(rot);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: load a surface, scale it, convert to texture, free the surface.
@@ -90,16 +103,24 @@ void GameScene::Load(Window& window) {
                 return std::make_unique<SpriteSheet>(dir + "/", pfx, (int)pngs.size(), KW, KH, pad, startIdx);
             }
         }
+        // No custom sprites for this slot — fall back to frost knight at its
+        // native dimensions. We deliberately ignore KW/KH here: those are the
+        // custom character's sprite size and must NOT be applied to the frost
+        // knight sheets (doing so squashes/stretches the wrong character).
         return std::make_unique<SpriteSheet>(
             "game_assets/frost_knight_png_sequences/" + fallbackFolder + "/",
-            fallbackPrefix, fallbackCount, KW, KH, 3);
+            fallbackPrefix, fallbackCount, PLAYER_SPRITE_WIDTH, PLAYER_SPRITE_HEIGHT, 3);
     };
 
     mSlotFps.fill(0.0f);
     if (useProfile) {
+        // Apply FPS overrides for every slot, regardless of whether that slot
+        // has custom sprites. A hitbox-only profile (e.g. "bones") may still
+        // define custom FPS values that should take effect with the fallback visuals.
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
             auto slot = static_cast<PlayerAnimSlot>(i);
-            mSlotFps[i] = profile.Slot(slot).fps > 0.0f ? profile.Slot(slot).fps : 0.0f;
+            if (profile.HasFps(slot))
+                mSlotFps[i] = profile.Slot(slot).fps;
         }
     }
 
@@ -108,21 +129,27 @@ void GameScene::Load(Window& window) {
     knightHurtSheet  = loadSlot(PlayerAnimSlot::Hurt,  "Hurt",         "0_Knight_Hurt_",        12);
     knightJumpSheet  = loadSlot(PlayerAnimSlot::Jump,  "Jump Start",   "0_Knight_Jump Start_",   6);
     knightFallSheet  = loadSlot(PlayerAnimSlot::Fall,  "Falling Down", "0_Knight_Falling Down_", 6);
-    knightSlideSheet = loadSlot(PlayerAnimSlot::Run,   "Sliding",      "0_Knight_Sliding_",      6);
+    knightSlideSheet = loadSlot(PlayerAnimSlot::Crouch, "Sliding",      "0_Knight_Sliding_",      6);
     knightSlashSheet = loadSlot(PlayerAnimSlot::Slash, "Slashing",     "0_Knight_Slashing_",    12);
 
-    // Upload all sprite sheets to GPU
-    knightIdleSheet->CreateTexture(ren);
-    knightWalkSheet->CreateTexture(ren);
-    knightHurtSheet->CreateTexture(ren);
-    knightJumpSheet->CreateTexture(ren);
-    knightFallSheet->CreateTexture(ren);
-    knightSlideSheet->CreateTexture(ren);
-    knightSlashSheet->CreateTexture(ren);
+    // Upload all sprite sheets to GPU then free the CPU surfaces — GameScene
+    // only needs the GPU textures at runtime. PlayerCreatorScene skips FreeSurface()
+    // so its preview blits can still read from the CPU surface.
+    knightIdleSheet->CreateTexture(ren);  knightIdleSheet->FreeSurface();
+    knightWalkSheet->CreateTexture(ren);  knightWalkSheet->FreeSurface();
+    knightHurtSheet->CreateTexture(ren);  knightHurtSheet->FreeSurface();
+    knightJumpSheet->CreateTexture(ren);  knightJumpSheet->FreeSurface();
+    knightFallSheet->CreateTexture(ren);  knightFallSheet->FreeSurface();
+    knightSlideSheet->CreateTexture(ren); knightSlideSheet->FreeSurface();
+    knightSlashSheet->CreateTexture(ren); knightSlashSheet->FreeSurface();
 
     auto getFrames = [&](std::unique_ptr<SpriteSheet>& sheet,
                          PlayerAnimSlot slot,
                          const std::string& knightKey) -> std::vector<SDL_Rect> {
+        // Only use the "get all frames" path when the slot actually has custom
+        // sprites loaded. If the profile has a hitbox/fps override but no folder
+        // (e.g. "bones"), the sheet is still the frost knight fallback and we
+        // must use the named key — GetAnimation("") would match every frame.
         if (useProfile && profile.HasSlot(slot)) {
             auto all = sheet->GetAnimation("");
             if (!all.empty()) return all;
@@ -134,7 +161,7 @@ void GameScene::Load(Window& window) {
     walkFrames  = getFrames(knightWalkSheet,  PlayerAnimSlot::Walk,  "0_Knight_Walking_");
     jumpFrames  = getFrames(knightJumpSheet,  PlayerAnimSlot::Jump,  "0_Knight_Jump Start_");
     hurtFrames  = getFrames(knightHurtSheet,  PlayerAnimSlot::Hurt,  "0_Knight_Hurt_");
-    duckFrames  = getFrames(knightSlideSheet, PlayerAnimSlot::Run,   "0_Knight_Sliding_");
+    duckFrames  = getFrames(knightSlideSheet, PlayerAnimSlot::Crouch, "0_Knight_Sliding_");
     frontFrames = getFrames(knightFallSheet,  PlayerAnimSlot::Fall,  "0_Knight_Falling Down_");
     slashFrames = getFrames(knightSlashSheet, PlayerAnimSlot::Slash, "0_Knight_Slashing_");
 
@@ -181,7 +208,9 @@ void GameScene::Unload() {
     reg.clear();
     for (auto* t : tileScaledTextures) SDL_DestroyTexture(t);
     tileScaledTextures.clear();
+    tileTextureCache.clear();  // non-owning refs — textures already freed above
     tileAnimFrameMap.clear();
+    mSortedTileRenderList.clear();
     mWindow = nullptr;
 }
 
@@ -194,6 +223,8 @@ std::unique_ptr<Scene> GameScene::NextScene() {
             return std::make_unique<TitleScene>();
     }
     if (levelComplete && levelCompleteTimer <= 0.0f) {
+        // Always return to the editor when launched via Play button,
+        // regardless of whether there's a "next level" to go to.
         if (mFromEditor)
             return std::make_unique<LevelEditorScene>(mLevelPath, false, "", mProfilePath);
         return std::make_unique<LevelTwo>();
@@ -405,10 +436,13 @@ void GameScene::Update(float dt) {
     }
 
     if (mLevel.gravityMode != GravityMode::OpenWorld) {
-        auto jumpView = reg.view<PlayerTag, GravityState>();
-        jumpView.each([](GravityState& g) {
-            if (g.active && g.jumpHeld && g.isGrounded) {
+        auto jumpView = reg.view<PlayerTag, GravityState, AnimationSet>();
+        jumpView.each([](GravityState& g, const AnimationSet& set) {
+            // Respect slot capability: no jump frames = jumping disabled.
+            if (g.active && g.jumpHeld && g.isGrounded && !set.jump.empty()) {
                 g.velocity = -JUMP_FORCE; g.isGrounded = false; g.jumpHeld = false;
+            } else if (set.jump.empty()) {
+                g.jumpHeld = false; // drain the held flag so it doesn't queue
             }
         });
     }
@@ -429,9 +463,11 @@ void GameScene::Render(Window& window) {
     window.Render(); // clear
     background->Render(ren);
 
+    const int W = window.GetWidth();
+    const int H = window.GetHeight();
     if (levelComplete) {
-        RenderSystem(reg, ren, mCamera.x, mCamera.y);
-        HUDSystem(reg, ren, window.GetWidth(),
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList);
+        HUDSystem(reg, ren, W,
                   healthText.get(), gravityText.get(),
                   coinText.get(), coinCount, stompText.get(), stompCount);
         if (levelCompleteText) levelCompleteText->Render(ren);
@@ -443,7 +479,7 @@ void GameScene::Render(Window& window) {
     } else {
         locationText->Render(ren);
         actionText->Render(ren);
-        RenderSystem(reg, ren, mCamera.x, mCamera.y);
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList);
 
         // ── Debug hitbox overlay (F1) ─────────────────────────────────────
         if (mDebugHitboxes) {
@@ -512,7 +548,7 @@ void GameScene::Render(Window& window) {
             hint.Render(ren);
         }
 
-        HUDSystem(reg, ren, window.GetWidth(),
+        HUDSystem(reg, ren, W,
                   healthText.get(), gravityText.get(),
                   coinText.get(), coinCount, stompText.get(), stompCount);
     }
@@ -700,10 +736,26 @@ void GameScene::Spawn() {
         .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetTexture(),  .walkFps  = slotFps(PlayerAnimSlot::Walk),
         .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetTexture(),  .jumpFps  = slotFps(PlayerAnimSlot::Jump),
         .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetTexture(),  .hurtFps  = slotFps(PlayerAnimSlot::Hurt),
-        .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetTexture(), .duckFps  = slotFps(PlayerAnimSlot::Run),
+        .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetTexture(), .duckFps  = slotFps(PlayerAnimSlot::Crouch),
         .front      = frontFrames, .frontSheet = knightFallSheet->GetTexture(),  .frontFps = slotFps(PlayerAnimSlot::Fall),
         .slash      = slashFrames, .slashSheet = knightSlashSheet->GetTexture(), .slashFps = slotFps(PlayerAnimSlot::Slash),
     });
+
+    // Cache-aware tile texture helper.
+    // On first Spawn: loads from disk, uploads to GPU, caches the pointer.
+    // On subsequent Spawn() calls (Respawn): returns the cached GPU texture instantly.
+    auto getCachedTex = [&](const std::string& path, int w, int h,
+                             int rot = 0) -> SDL_Texture* {
+        std::string key = TileCacheKey(path, w, h, rot);
+        auto it = tileTextureCache.find(key);
+        if (it != tileTextureCache.end()) return it->second;
+        SDL_Texture* tex = LoadScaledTexture(ren, path, w, h, rot);
+        if (tex) {
+            tileScaledTextures.push_back(tex);
+            tileTextureCache[key] = tex;
+        }
+        return tex;
+    };
 
     // ── Spawn tiles ───────────────────────────────────────────────────────────
     for (const auto& ts : mLevel.tiles) {
@@ -714,16 +766,12 @@ void GameScene::Spawn() {
                 continue;
             }
 
+            // Each animation frame gets its own cache entry so they're reused
+            // across Respawn() calls without hitting disk again.
             std::vector<SDL_Texture*> frameTex;
-            for (const auto& fp : def.framePaths) {
-                SDL_Texture* t = LoadScaledTexture(ren, fp, ts.w, ts.h, ts.rotation);
-                frameTex.push_back(t);
-                if (t) tileScaledTextures.push_back(t);
-            }
-            if (frameTex.empty() || !frameTex[0]) {
-                for (auto* t : frameTex) if (t) SDL_DestroyTexture(t);
-                continue;
-            }
+            for (const auto& fp : def.framePaths)
+                frameTex.push_back(getCachedTex(fp, ts.w, ts.h, ts.rotation));
+            if (frameTex.empty() || !frameTex[0]) continue;
 
             std::vector<SDL_Rect> frameRects((int)frameTex.size(), SDL_Rect{0, 0, ts.w, ts.h});
             auto tile = reg.create();
@@ -750,9 +798,10 @@ void GameScene::Spawn() {
         }
 
         // ── Normal PNG tile ────────────────────────────────────────────────
-        SDL_Texture* tex = LoadScaledTexture(ren, ts.imagePath, ts.w, ts.h, ts.rotation);
+        // Use cache: on Respawn this returns the already-uploaded GPU texture
+        // without touching disk or the CPU scaling pipeline.
+        SDL_Texture* tex = getCachedTex(ts.imagePath, ts.w, ts.h, ts.rotation);
         if (!tex) continue;
-        tileScaledTextures.push_back(tex);
 
         auto tile = reg.create();
         reg.emplace<Transform>(tile, ts.x, ts.y);
@@ -835,13 +884,32 @@ void GameScene::Spawn() {
             spawnEnemy(x, y, speed);
         }
     }
+
+    // Build the pre-sorted tile render list used by RenderSystem Pass 1.
+    // Tile entity IDs are stable for the lifetime of Spawn() -- they are never
+    // re-created mid-level, only destroyed (action tiles). RenderSystem uses
+    // this list instead of building+sorting a vector on every frame.
+    // We rebuild it here on each Spawn() because Respawn() clears the registry.
+    {
+        mSortedTileRenderList.clear();
+        auto tv = reg.view<TileTag,   AnimationState, Renderable>();
+        auto lv = reg.view<LadderTag, AnimationState, Renderable>();
+        auto pv = reg.view<PropTag,   AnimationState, Renderable>();
+        mSortedTileRenderList.reserve(tv.size_hint() + lv.size_hint() + pv.size_hint());
+        for (auto e : tv) mSortedTileRenderList.push_back(e);
+        for (auto e : lv) mSortedTileRenderList.push_back(e);
+        for (auto e : pv) mSortedTileRenderList.push_back(e);
+        std::sort(mSortedTileRenderList.begin(), mSortedTileRenderList.end());
+    }
 }
 
 void GameScene::Respawn() {
     reg.clear();
     tileAnimFrameMap.clear();
-    for (auto* t : tileScaledTextures) SDL_DestroyTexture(t);
-    tileScaledTextures.clear();
+    mSortedTileRenderList.clear();
+    // tileScaledTextures and tileTextureCache are intentionally NOT cleared here.
+    // All tile textures are already uploaded to the GPU and can be reused as-is.
+    // They are only freed in Unload() when the scene is torn down entirely.
     gameOver = false; levelComplete = false;
     levelCompleteTimer = 2.0f; coinCount = 0; stompCount = 0;
     mCamera = Camera{};

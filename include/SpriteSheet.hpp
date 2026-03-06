@@ -2,8 +2,8 @@
 #define SPRITESHEET_HPP
 
 #include <SDL3/SDL.h>
-#include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 /**
@@ -94,11 +94,20 @@ class SpriteSheet {
 
     /// Upload the stitched surface to the GPU and cache the texture.
     /// Must be called once after construction, before GetTexture() is used.
-    /// The surface is kept so additional calls are cheap (already uploaded).
+    /// The CPU surface is kept alive so scenes that blit directly from it
+    /// (e.g. PlayerCreatorScene preview) can still access it via GetSurface().
+    /// Call FreeSurface() explicitly once you no longer need CPU-side access.
     SDL_Texture* CreateTexture(SDL_Renderer* renderer) {
         if (!texture && surface)
             texture = SDL_CreateTextureFromSurface(renderer, surface);
         return texture;
+    }
+
+    /// Free the CPU surface after GPU upload when it is no longer needed.
+    /// Safe to call multiple times. GameScene calls this after Load() to
+    /// reclaim RAM; PlayerCreatorScene does NOT call it so the preview blit works.
+    void FreeSurface() {
+        if (surface) { SDL_DestroySurface(surface); surface = nullptr; }
     }
 
     /// Returns the GPU texture, or nullptr if CreateTexture() hasn't been called.
@@ -107,7 +116,7 @@ class SpriteSheet {
   private:
     SDL_Surface*                    surface  = nullptr; ///< The loaded sprite sheet surface.
     SDL_Texture*                    texture  = nullptr; ///< GPU texture built from surface.
-    std::map<std::string, SDL_Rect> frames;             ///< Named frame rectangles parsed from the coord file.
+    std::unordered_map<std::string, SDL_Rect> frames;    ///< Named frame rectangles parsed from the coord file.
 
     /// Detects format and dispatches to the appropriate loader.
     void LoadCoordinates(const std::string& coordFile);

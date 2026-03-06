@@ -82,11 +82,12 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                 return;
             }
             if (sHeld) {
+                // Don't teleport — just release the top-lock and let the
+                // climbing branch's sHeld path move the player down smoothly.
                 climb.atTop    = false;
                 climb.climbing = true;
                 g.active       = false;
                 g.velocity     = 0.0f;
-                pt.y           = columnTop + 1.0f;
             }
             // W or no input — stay at top, walk freely horizontally
             return;

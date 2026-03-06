@@ -15,7 +15,7 @@ namespace fs = std::filesystem;
 enum class PlayerAnimSlot : int {
     Idle   = 0,
     Walk   = 1,
-    Run    = 2,
+    Crouch = 2,  // crouch / duck — triggered by Ctrl in-game (was "Run", value unchanged)
     Jump   = 3,
     Fall   = 4,
     Slash  = 5,
@@ -28,15 +28,15 @@ inline constexpr int PLAYER_ANIM_SLOT_COUNT = static_cast<int>(PlayerAnimSlot::C
 
 inline const char* PlayerAnimSlotName(PlayerAnimSlot s) {
     switch (s) {
-        case PlayerAnimSlot::Idle:  return "Idle";
-        case PlayerAnimSlot::Walk:  return "Walk";
-        case PlayerAnimSlot::Run:   return "Run";
-        case PlayerAnimSlot::Jump:  return "Jump";
-        case PlayerAnimSlot::Fall:  return "Fall";
-        case PlayerAnimSlot::Slash: return "Slash";
-        case PlayerAnimSlot::Hurt:  return "Hurt";
-        case PlayerAnimSlot::Death: return "Death";
-        default:                    return "Unknown";
+        case PlayerAnimSlot::Idle:   return "Idle";
+        case PlayerAnimSlot::Walk:   return "Walk";
+        case PlayerAnimSlot::Crouch: return "Crouch";  // Ctrl in-game
+        case PlayerAnimSlot::Jump:   return "Jump";
+        case PlayerAnimSlot::Fall:   return "Fall";
+        case PlayerAnimSlot::Slash:  return "Slash";
+        case PlayerAnimSlot::Hurt:   return "Hurt";
+        case PlayerAnimSlot::Death:  return "Death";
+        default:                     return "Unknown";
     }
 }
 
@@ -73,8 +73,17 @@ struct PlayerProfile {
     SlotData&       Slot(PlayerAnimSlot s)       { return slots[static_cast<int>(s)]; }
     const SlotData& Slot(PlayerAnimSlot s) const { return slots[static_cast<int>(s)]; }
 
+    // HasSlot: true if this slot has custom sprite frames to load.
+    // Distinct from HasHitbox/HasFps — a profile can override hitbox and fps
+    // without providing custom sprites (falls back to frost knight visuals).
     bool HasSlot(PlayerAnimSlot s) const {
         return !Slot(s).folderPath.empty();
+    }
+    bool HasHitbox(PlayerAnimSlot s) const {
+        return !Slot(s).hitbox.IsDefault();
+    }
+    bool HasFps(PlayerAnimSlot s) const {
+        return Slot(s).fps > 0.0f;
     }
 };
 

@@ -155,10 +155,11 @@ class PlayerCreatorScene : public Scene {
     // the user first clicks + on a slot that has no override yet)
     static float defaultFps(PlayerAnimSlot s) {
         switch (s) {
-            case PlayerAnimSlot::Walk:  return 24.0f;
-            case PlayerAnimSlot::Jump:  return 4.0f;
-            case PlayerAnimSlot::Slash: return 18.0f;
-            default:                    return 12.0f;
+            case PlayerAnimSlot::Walk:   return 24.0f;
+            case PlayerAnimSlot::Jump:   return 4.0f;
+            case PlayerAnimSlot::Slash:  return 18.0f;
+            case PlayerAnimSlot::Crouch: return 12.0f;
+            default:                     return 12.0f;
         }
     }
 

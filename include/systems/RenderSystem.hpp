@@ -9,10 +9,20 @@
 // camX/camY: world-space top-left of the viewport.
 // All world positions are offset by (-camX, -camY) before rendering.
 // Entities whose bounding rect lies fully outside the viewport are culled.
+//
+// vw/vh: logical viewport dimensions. Pass Window::GetWidth()/GetHeight() to
+//        avoid an SDL driver query every frame. Leave at 0 to auto-query.
+//
+// sortedTiles: pre-sorted tile entity list built once in Spawn() and stored on
+//        GameScene. Passing it eliminates the per-frame heap alloc + sort for
+//        Pass 1. Pass nullptr to fall back to building the list inline (used by
+//        scenes that don't maintain their own sorted list, e.g. the editor).
 inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
-                         float camX = 0.0f, float camY = 0.0f) {
-    int vw, vh;
-    SDL_GetRenderOutputSize(renderer, &vw, &vh);
+                         float camX = 0.0f, float camY = 0.0f,
+                         int vw = 0, int vh = 0,
+                         const std::vector<entt::entity>* sortedTiles = nullptr) {
+    if (vw == 0 || vh == 0)
+        SDL_GetRenderOutputSize(renderer, &vw, &vh);
 
     auto culled = [&](float wx, float wy, int w, int h) -> bool {
         return wx + w  <= camX      ||
@@ -21,23 +31,38 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                wy      >= camY + vh;
     };
 
-    // ── Pass 1: tiles in strict spawn order ──────────────────────────────────
+    // Pass 1: tiles in strict spawn order
+    // Uses the pre-sorted list from GameScene::Spawn() when available to avoid
+    // a per-frame allocation + sort. Falls back to building inline when called
+    // from scenes that don't maintain a sorted list (e.g. editor previews).
     {
-        auto tileView   = reg.view<Transform, Renderable, AnimationState, TileTag>();
-        auto ladderView = reg.view<Transform, Renderable, AnimationState, LadderTag>();
-        auto propView   = reg.view<Transform, Renderable, AnimationState, PropTag>();
+        std::vector<entt::entity> localTiles;
+        const std::vector<entt::entity>* tiles = sortedTiles;
+        if (!tiles) {
+            auto tileView   = reg.view<Transform, Renderable, AnimationState, TileTag>();
+            auto ladderView = reg.view<Transform, Renderable, AnimationState, LadderTag>();
+            auto propView   = reg.view<Transform, Renderable, AnimationState, PropTag>();
+            localTiles.reserve(tileView.size_hint() + ladderView.size_hint() + propView.size_hint());
+            for (auto e : tileView)   localTiles.push_back(e);
+            for (auto e : ladderView) localTiles.push_back(e);
+            for (auto e : propView)   localTiles.push_back(e);
+            std::sort(localTiles.begin(), localTiles.end());
+            tiles = &localTiles;
+        }
 
-        std::vector<entt::entity> tiles;
-        tiles.reserve(tileView.size_hint() + ladderView.size_hint() + propView.size_hint());
-        for (auto e : tileView)   tiles.push_back(e);
-        for (auto e : ladderView) tiles.push_back(e);
-        for (auto e : propView)   tiles.push_back(e);
-        std::sort(tiles.begin(), tiles.end());
+        for (auto entity : *tiles) {
+            // Guard: action tiles can be destroyed mid-level; the sorted list
+            // isn't pruned until the next Spawn(), so we must validate here.
+            if (!reg.valid(entity)) continue;
 
-        for (auto entity : tiles) {
-            auto& t    = reg.get<Transform>(entity);
-            auto& r    = reg.get<Renderable>(entity);
-            auto& anim = reg.get<AnimationState>(entity);
+            auto* rp   = reg.try_get<Renderable>(entity);
+            auto* tp   = reg.try_get<Transform>(entity);
+            auto* anip = reg.try_get<AnimationState>(entity);
+            if (!rp || !tp || !anip) continue;
+
+            auto& t    = *tp;
+            auto& r    = *rp;
+            auto& anim = *anip;
             if (!r.sheet || r.frames.empty()) continue;
 
             const SDL_Rect& src = r.frames[anim.currentFrame];
@@ -63,7 +88,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         }
     }
 
-    // ── Pass 2: player, enemies, coins ───────────────────────────────────────
+    // Pass 2: player, enemies, coins
     auto view = reg.view<Transform, Renderable, AnimationState>(
         entt::exclude<TileTag, LadderTag, PropTag>);
 
@@ -74,13 +99,13 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         const SDL_Rect& src = r.frames[anim.currentFrame];
         if (culled(t.x, t.y, src.w, src.h)) return;
 
-        auto* g   = reg.try_get<GravityState>(entity);
-        auto* inv = reg.try_get<InvincibilityTimer>(entity);
-        auto* hz  = reg.try_get<HazardState>(entity);
-        auto* col = reg.try_get<Collider>(entity);
+        auto* g    = reg.try_get<GravityState>(entity);
+        auto* inv  = reg.try_get<InvincibilityTimer>(entity);
+        auto* hz   = reg.try_get<HazardState>(entity);
+        auto* col  = reg.try_get<Collider>(entity);
         auto* roff = reg.try_get<RenderOffset>(entity);
 
-        // ── Colour mod for invincibility / hazard flash ─────────────────────
+        // Colour mod for invincibility / hazard flash
         bool colorModded = false;
         if (inv && inv->isInvincible && (int)(inv->remaining * 10.0f) % 2 == 0) {
             SDL_SetTextureColorMod(r.sheet, 255, 0, 0);
@@ -90,8 +115,8 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             colorModded = true;
         }
 
-        // ── Flip / rotation flags ────────────────────────────────────────────
-        SDL_FlipMode flip = r.flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
+        // Flip / rotation flags
+        SDL_FlipMode flip  = r.flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
         double       angle = 0.0;
 
         if (g && g->active) {
@@ -103,13 +128,11 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             }
         }
 
-        // ── Render position ──────────────────────────────────────────────────
+        // Render position
         float rx = t.x - camX;
         float ry = t.y - camY;
 
         if (g && g->active && col) {
-            // When gravity direction isn't DOWN, adjust the render origin so
-            // the sprite stays centred over the physics collider.
             switch (g->direction) {
                 case GravityDir::DOWN:
                     if (roff) { rx += roff->x; ry += roff->y; }

@@ -82,12 +82,12 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
     }
 
     // ── 3. Float update ───────────────────────────────────────────────────────
-    // FloatTag is an empty struct — passing it through view.each() triggers a
-    // libc++ std::apply / deleted-function error on this compiler.
-    // Iterate by FloatState+Transform+Collider and gate on all_of<FloatTag>.
-    auto floatView = reg.view<FloatState, Transform, Collider>();
+    // FloatTag is an empty struct. Including it in the view filter (not as a
+    // lambda parameter) lets EnTT build the correct intersection without the
+    // libc++ std::apply deleted-function error that triggered when it was
+    // unpacked in view.each(). The per-entity all_of<FloatTag> guard is gone.
+    auto floatView = reg.view<FloatState, Transform, Collider, FloatTag>();
     for (auto entity : floatView) {
-        if (!reg.all_of<FloatTag>(entity)) continue;
 
         auto& fs        = floatView.get<FloatState>(entity);
         auto& ft        = floatView.get<Transform>(entity);

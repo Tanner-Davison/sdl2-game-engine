@@ -85,18 +85,13 @@ void PlayerCreatorScene::computeLayout() {
     mSaveBtnRect = {mCenterPanel.x,            mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
     mBackBtnRect = {mCenterPanel.x + MID_W - 130, mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
 
-    // Preview cell: sized to fit the sprite at 1:1 scale with padding.
-    // recomputePreviewRect() resizes this whenever the sprite dimensions change.
-    int previewTop = mCenterPanel.y + 126;
-    const int sprW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
-    const int sprH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
-    const int cellW = sprW + PREVIEW_PAD * 2;
-    const int cellH = sprH + PREVIEW_PAD * 2;
-    mPreviewCellRect   = {mCenterPanel.x + (MID_W - cellW) / 2, previewTop, cellW, cellH};
-    mPreviewRenderRect = mPreviewCellRect;
-
-    mDropZone = {mCenterPanel.x, previewTop + cellH + 14, MID_W - 2, 56};
-    mClearSlotRect = {mDropZone.x + mDropZone.w - 100, mDropZone.y, 96, mDropZone.h};
+    // Preview cell, drop zone, and clear button are all computed by
+    // recomputePreviewRect() which runs immediately after computeLayout().
+    // Initialize to zero here so they're never used uninitialized.
+    mPreviewCellRect   = {};
+    mPreviewRenderRect = {};
+    mDropZone          = {};
+    mClearSlotRect     = {};
 
     // Slot rows — left panel
     mSlotRowRects.resize(PLAYER_ANIM_SLOT_COUNT);
@@ -157,8 +152,9 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
 
                 if (hasPng) {
                     mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).folderPath = dir;
-                    rebuildPreview(mSelectedSlot);
-                    initHBFromProfile(mSelectedSlot);
+                    rebuildPreview(mSelectedSlot);    // may auto-fill spriteW/H
+                    recomputePreviewRect();            // resize cell to match new sprite dims
+                    initHBFromProfile(mSelectedSlot); // reposition hitbox in updated cell
                     mDropMsg = "Loaded: " + fs::path(dir).filename().string();
                 } else {
                     mDropMsg = "No PNGs found in that folder.";
@@ -425,11 +421,15 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void PlayerCreatorScene::Update(float dt) {
-    // Advance animation preview for selected slot
+    // Advance animation preview for selected slot.
+    // Use the slot's authored FPS if set, otherwise fall back to ANIM_FPS.
+    // This means the preview immediately reflects any +/- FPS button press.
     const auto& prev = mPreviews[mSelectedSlot];
     if (prev.has_value() && !prev->frames.empty()) {
+        float slotFps = mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).fps;
+        float previewFps = (slotFps > 0.0f) ? slotFps : ANIM_FPS;
         mAnimTimer += dt;
-        if (mAnimTimer >= 1.0f / ANIM_FPS) {
+        if (mAnimTimer >= 1.0f / previewFps) {
             mAnimTimer = 0.0f;
             mAnimFrame = (mAnimFrame + 1) % (int)prev->frames.size();
         }
@@ -572,8 +572,15 @@ void PlayerCreatorScene::Render(Window& window) {
         // Just blit the current animation frame into it directly.
         SDL_Surface* sheet = prev->sheet->GetSurface();
         const SDL_Rect& fr = prev->frames[std::min(mAnimFrame, (int)prev->frames.size() - 1)];
-        // Frames are already spriteW x spriteH — blit 1:1, no scaling.
-        SDL_BlitSurface(sheet, &fr, s, &mPreviewRenderRect);
+        // Extract just this frame into a temp surface, then scale-blit into
+        // mPreviewRenderRect. This handles the case where the raw PNG is a
+        // different size than spriteW/H (e.g. new character with no size set yet).
+        SDL_Surface* frameSurf = SDL_CreateSurface(fr.w, fr.h, sheet->format);
+        if (frameSurf) {
+            SDL_BlitSurface(sheet, &fr, frameSurf, nullptr);
+            blitScaled(s, frameSurf, mPreviewRenderRect);
+            SDL_DestroySurface(frameSurf);
+        }
 
         // Floor line = collider bottom = where physics plants the player on a tile.
         // This is the ground line in-game: the sprite may extend below it.
@@ -774,6 +781,18 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
         startIndex = numPart.empty() ? 0 : std::stoi(numPart);
     }
 
+    // Auto-fill spriteW/H from the raw frame size if not yet set by the user.
+    // This sizes the preview cell correctly on first drop so the hitbox editor
+    // is immediately accurate without requiring a manual size entry.
+    if (mProfile.spriteW <= 0) {
+        mProfile.spriteW = fw;
+        mWidthStr = std::to_string(fw);
+    }
+    if (mProfile.spriteH <= 0) {
+        mProfile.spriteH = fh;
+        mHeightStr = std::to_string(fh);
+    }
+
     try {
         const int tW = (mProfile.spriteW > 0) ? mProfile.spriteW : 0;
         const int tH = (mProfile.spriteH > 0) ? mProfile.spriteH : 0;
@@ -811,11 +830,13 @@ void PlayerCreatorScene::recomputePreviewRect() {
     const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
 
-    // Resize the cell to exactly fit the sprite + padding (1:1 scale)
+    // Preview top is always anchored relative to the centre panel, never
+    // derived from the old mPreviewCellRect.y (which may be stale/zero).
+    const int previewTop = mCenterPanel.y + 126;
+    const int MID_W      = mCenterPanel.w;
+
     const int cellW = srcW + PREVIEW_PAD * 2;
     const int cellH = srcH + PREVIEW_PAD * 2;
-    const int MID_W = mCenterPanel.w;
-    const int previewTop = mPreviewCellRect.y; // keep same vertical position
     mPreviewCellRect = {mCenterPanel.x + (MID_W - cellW) / 2, previewTop, cellW, cellH};
 
     // Sprite sits at cell top-left + padding, 1:1
@@ -823,7 +844,7 @@ void PlayerCreatorScene::recomputePreviewRect() {
                           mPreviewCellRect.y + PREVIEW_PAD,
                           srcW, srcH};
 
-    mDropZone = {mCenterPanel.x, mPreviewCellRect.y + cellH + 14, MID_W - 2, 56};
+    mDropZone      = {mCenterPanel.x, mPreviewCellRect.y + cellH + 14, MID_W - 2, 56};
     mClearSlotRect = {mDropZone.x + mDropZone.w - 100, mDropZone.y, 96, mDropZone.h};
 }
 

@@ -98,33 +98,55 @@ inline void PlayerStateSystem(entt::registry& reg) {
             return profileFps > 0.0f ? profileFps : engineDefault;
         };
 
+        // Slot capability helpers — an empty frames vector means the character
+        // profile has no animation for that action, which disables it entirely.
+        // No jump frames = can't jump. No slash frames = can't attack. Etc.
+        const bool canJump  = !set.jump.empty();
+        const bool canDuck  = !set.duck.empty();
+        const bool canSlash = !set.slash.empty();
+        const bool canHurt  = !set.hurt.empty();
+        const bool canWalk  = !set.walk.empty();
+
+        // Disable jump at the physics level if no jump animation exists.
+        // Clear jumpHeld so InputSystem can't queue a jump either.
+        if (!canJump) {
+            const_cast<GravityState&>(g).jumpHeld = false;
+        }
+        // Disable slash at the input level if no slash animation exists.
+        if (!canSlash) {
+            if (auto* atk = reg.try_get<AttackState>(entity)) {
+                atk->attackPressed = false;
+                atk->isAttacking   = false;
+            }
+        }
+
         // While on a ladder, force idle — skip all airborne checks.
         const ClimbState* climb = reg.try_get<ClimbState>(entity);
         if (climb && (climb->climbing || climb->atTop)) {
             frames  = &set.idle;
             fps     = resolveFps(set.idleFps, 12.0f);
             id      = AnimationID::IDLE;
-        } else if (inv.isInvincible && !(reg.try_get<AttackState>(entity) &&
-                                          reg.get<AttackState>(entity).isAttacking)) {
+        } else if (canHurt && inv.isInvincible && !(reg.try_get<AttackState>(entity) &&
+                                                     reg.get<AttackState>(entity).isAttacking)) {
             // Show hurt anim during invincibility, but only if not mid-slash.
-            // The player can always attack even while flashing from a hit.
             frames  = &set.hurt;
             fps     = resolveFps(set.hurtFps, 12.0f);
             looping = false;
             id      = AnimationID::HURT;
-        } else if (!openWorld && g.active && !g.isGrounded) {
+        } else if (canJump && !openWorld && g.active && !g.isGrounded) {
             frames = &set.jump;
             fps    = resolveFps(set.jumpFps, 4.0f);
             id     = AnimationID::JUMP;
-        } else if (!openWorld && g.isCrouching) {
+        } else if (canDuck && !openWorld && g.isCrouching) {
             frames = &set.duck;
             fps    = resolveFps(set.duckFps, 12.0f);
             id     = AnimationID::DUCK;
-        } else if (moving) {
+        } else if (canWalk && moving) {
             frames = &set.walk;
             fps    = resolveFps(set.walkFps, 24.0f);
             id     = AnimationID::WALK;
         } else {
+            // Always fall back to idle — every character must have idle frames.
             frames = &set.idle;
             fps    = resolveFps(set.idleFps, 12.0f);
             id     = AnimationID::IDLE;

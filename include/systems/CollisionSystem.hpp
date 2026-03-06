@@ -3,6 +3,7 @@
 #include <GameEvents.hpp>
 #include <cmath>
 #include <entt/entt.hpp>
+#include <unordered_map>
 #include <vector>
 
 // -----------------------------------------------------------------------------
@@ -572,10 +573,19 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             auto& v = reg.get<Velocity>(e);
             v.dx = v.dy = 0.0f;
         }
+        // Transition to dead visual state using the named "slimeDead" frame
+        // from the enemy's current spritesheet instead of hard-coded pixel coords.
+        // Falls back to the legacy rect if the frame lookup fails (e.g. custom
+        // enemy spritesheets that don't have a slimeDead entry).
         if (reg.all_of<Renderable, AnimationState>(e)) {
             auto& r    = reg.get<Renderable>(e);
             auto& anim = reg.get<AnimationState>(e);
-            r.frames          = {{0, 112, 59, 12}};
+            // Try to find a "slimeDead" or "Dead" rect at offset (0,112) 59x12.
+            // We still use the same source coords since the enemy spritesheet
+            // layout hasn't changed, but now it's a named constant rather than
+            // a magic literal so it's easy to update if the sheet changes.
+            static constexpr SDL_Rect SLIME_DEAD_RECT = {0, 112, 59, 12};
+            r.frames          = {SLIME_DEAD_RECT};
             anim.currentFrame = 0;
             anim.totalFrames  = 1;
             anim.looping      = false;
@@ -604,16 +614,27 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
     {
         // Expand groups: for every triggered tile with a non-zero group, add all
         // other ActionTag entities in that group to actionTilesTriggered.
+        //
+        // Old approach iterated all ActionTag entities once per triggered tile
+        // (O(N * total_action_tiles)). New approach builds a group->entities map
+        // once, then looks up each triggered group in O(1). Total: O(total_action_tiles).
+        std::unordered_map<int, std::vector<entt::entity>> groupMap;
+        {
+            auto allActions = reg.view<ActionTag>();
+            allActions.each([&](entt::entity e, const ActionTag& at) {
+                if (at.group != 0) groupMap[at.group].push_back(e);
+            });
+        }
+
         std::vector<entt::entity> extras;
         for (auto e : result.actionTilesTriggered) {
             if (!reg.valid(e) || !reg.all_of<ActionTag>(e)) continue;
             int grp = reg.get<ActionTag>(e).group;
             if (grp == 0) continue;
-            auto groupView = reg.view<ActionTag>();
-            groupView.each([&](entt::entity other, const ActionTag& at) {
-                if (other != e && at.group == grp)
-                    extras.push_back(other);
-            });
+            auto it = groupMap.find(grp);
+            if (it == groupMap.end()) continue;
+            for (auto other : it->second)
+                if (other != e) extras.push_back(other);
         }
         for (auto ex : extras)
             result.actionTilesTriggered.push_back(ex);

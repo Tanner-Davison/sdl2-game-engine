@@ -18,6 +18,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <array>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GameScene — Level 1
@@ -89,10 +90,16 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> knightSlashSheet;
     std::unique_ptr<SpriteSheet> enemySheet;
     std::unique_ptr<SpriteSheet> coinSheet;
-    std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload/Respawn
+    std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload only
+    // Tile texture cache: key = "path|WxH|rROT" → non-owning ptr into tileScaledTextures.
+    // Populated in Spawn(), never cleared between Respawn() calls — only in Unload().
+    std::unordered_map<std::string, SDL_Texture*> tileTextureCache;
     // Animated tile frame textures, keyed by entity. Each vector is parallel to
     // the entity's AnimationState frame count.
     std::unordered_map<entt::entity, std::vector<SDL_Texture*>> tileAnimFrameMap;
+    // Pre-sorted render list for tile Pass 1 (built in Spawn, updated when action
+    // tiles are destroyed).  Avoids per-frame allocation + sort in RenderSystem.
+    std::vector<entt::entity> mSortedTileRenderList;
     std::vector<SDL_Rect>        walkFrames;
     std::vector<SDL_Rect>        jumpFrames;
     std::vector<SDL_Rect>        idleFrames;
