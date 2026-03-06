@@ -68,7 +68,22 @@ inline bool SaveAnimatedTileDef(const AnimatedTileDef& def, const std::string& p
     json j;
     j["name"]  = def.name;
     j["fps"]   = def.fps;
-    j["frames"] = def.framePaths;
+
+    // Always save frame paths relative to the working directory so the JSON
+    // is portable across machines (no Mac/Windows absolute paths baked in).
+    json frames = json::array();
+    fs::path cwd = fs::current_path();
+    for (const auto& fp : def.framePaths) {
+        fs::path p(fp);
+        std::string stored = fp;
+        if (p.is_absolute()) {
+            std::error_code ec;
+            auto rel = fs::relative(p, cwd, ec);
+            if (!ec && !rel.empty()) stored = rel.string();
+        }
+        frames.push_back(stored);
+    }
+    j["frames"] = frames;
 
     if (!fs::exists(ANIMATED_TILE_DIR))
         fs::create_directories(ANIMATED_TILE_DIR);
@@ -98,8 +113,22 @@ inline bool LoadAnimatedTileDef(const std::string& path, AnimatedTileDef& out) {
     out.name  = j.value("name", "Unnamed");
     out.fps   = j.value("fps", 8.0f);
     out.framePaths.clear();
-    for (const auto& fp : j.value("frames", json::array()))
-        out.framePaths.push_back(fp.get<std::string>());
+    for (const auto& fp : j.value("frames", json::array())) {
+        std::string p = fp.get<std::string>();
+        // Skip frames that don't exist — avoids spamming errors for JSONs
+        // created on another machine with absolute paths.
+        std::error_code ec;
+        if (!fs::exists(p, ec) || ec) {
+            std::print("AnimatedTile: skipping missing frame: {}\n", p);
+            continue;
+        }
+        out.framePaths.push_back(p);
+    }
+    // If all frames are missing, treat the def as invalid
+    if (out.framePaths.empty()) {
+        std::print("AnimatedTile: no valid frames found in {}\n", path);
+        return false;
+    }
     return true;
 }
 

@@ -722,7 +722,15 @@ std::unique_ptr<Scene> PlayerCreatorScene::NextScene() {
 void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     clearPreview(slotIdx);
     const std::string& dir = mProfile.slots[slotIdx].folderPath;
-    if (dir.empty() || !fs::exists(dir)) return;
+    if (dir.empty()) return;
+
+    // Guard against stale absolute paths from other machines (e.g. Mac paths on WSL)
+    std::error_code ec;
+    if (!fs::exists(dir, ec) || ec) {
+        mDropMsg = "Folder not found (path may be from another machine): " + fs::path(dir).filename().string();
+        mProfile.slots[slotIdx].folderPath.clear(); // clear so it doesn't crash on next load
+        return;
+    }
 
     // Collect sorted PNGs
     std::vector<fs::path> pngs;
@@ -730,7 +738,10 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
         for (const auto& e : fs::directory_iterator(dir))
             if (e.path().extension() == ".png" || e.path().extension() == ".PNG")
                 pngs.push_back(e.path());
-    } catch (...) { return; }
+    } catch (const std::exception& ex) {
+        mDropMsg = std::string("Cannot read folder: ") + ex.what();
+        return;
+    }
     if (pngs.empty()) return;
     std::sort(pngs.begin(), pngs.end());
 
@@ -1025,10 +1036,10 @@ void PlayerCreatorScene::loadRosterEntry(int idx) {
         mLoadedName  = mProfile.name;
         mWidthStr    = mProfile.spriteW > 0 ? std::to_string(mProfile.spriteW) : "120";
         mHeightStr   = mProfile.spriteH > 0 ? std::to_string(mProfile.spriteH) : "160";
-        // Rebuild previews for slots that have a path
+        // Rebuild previews for slots that have a path.
+        // rebuildPreview() safely skips missing/stale paths (e.g. Mac paths on WSL).
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i)
-            if (!mProfile.slots[i].folderPath.empty())
-                rebuildPreview(i);
+            rebuildPreview(i);
         mSelectedSlot = 0;
         recomputePreviewRect();
         initHBFromProfile(0);
