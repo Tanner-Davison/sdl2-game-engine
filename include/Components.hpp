@@ -40,29 +40,29 @@ struct AnimationState {
     AnimationID currentAnim  = AnimationID::NONE;
 };
 
-// Holds all animation frame sets and their source sheets for an entity.
-// sheet pointers are non-owning — the SpriteSheet objects must outlive this.
+// Holds all animation frame sets and their source textures for an entity.
+// texture pointers are non-owning — the SpriteSheet objects must outlive this.
 struct AnimationSet {
     std::vector<SDL_Rect> idle;
-    SDL_Surface*          idleSheet  = nullptr;
+    SDL_Texture*          idleSheet  = nullptr;
     float                 idleFps    = 0.0f; // 0 = use engine default
     std::vector<SDL_Rect> walk;
-    SDL_Surface*          walkSheet  = nullptr;
+    SDL_Texture*          walkSheet  = nullptr;
     float                 walkFps    = 0.0f;
     std::vector<SDL_Rect> jump;
-    SDL_Surface*          jumpSheet  = nullptr;
+    SDL_Texture*          jumpSheet  = nullptr;
     float                 jumpFps    = 0.0f;
     std::vector<SDL_Rect> hurt;
-    SDL_Surface*          hurtSheet  = nullptr;
+    SDL_Texture*          hurtSheet  = nullptr;
     float                 hurtFps    = 0.0f;
     std::vector<SDL_Rect> duck;
-    SDL_Surface*          duckSheet  = nullptr;
+    SDL_Texture*          duckSheet  = nullptr;
     float                 duckFps    = 0.0f;
     std::vector<SDL_Rect> front;
-    SDL_Surface*          frontSheet = nullptr;
+    SDL_Texture*          frontSheet = nullptr;
     float                 frontFps   = 0.0f;
     std::vector<SDL_Rect> slash;
-    SDL_Surface*          slashSheet = nullptr;
+    SDL_Texture*          slashSheet = nullptr;
     float                 slashFps   = 0.0f;
 };
 
@@ -70,7 +70,7 @@ struct AnimationSet {
 
 // What to draw
 struct Renderable {
-    SDL_Surface*          sheet = nullptr;
+    SDL_Texture*          sheet = nullptr;
     std::vector<SDL_Rect> frames;
     bool                  flipH = false;
 };
@@ -82,37 +82,10 @@ struct RenderOffset {
     int y = 0;
 };
 
-// Per-frame flip cache for RenderSystem.
-// Stores one pre-flipped SDL_Surface* per animation frame, built lazily on
-// first use and reused every subsequent frame. Invalidated when the animation
-// set changes (detected by frame count mismatch).
-struct FlipCache {
-    std::vector<SDL_Surface*> frames;
-
-    FlipCache() = default;
-
-    // Non-copyable
-    FlipCache(const FlipCache&)            = delete;
-    FlipCache& operator=(const FlipCache&) = delete;
-
-    // Movable
-    FlipCache(FlipCache&& o) noexcept : frames(std::move(o.frames)) {}
-    FlipCache& operator=(FlipCache&& o) noexcept {
-        if (this != &o) {
-            for (auto* s : frames)
-                if (s)
-                    SDL_DestroySurface(s);
-            frames = std::move(o.frames);
-        }
-        return *this;
-    }
-
-    ~FlipCache() {
-        for (auto* s : frames)
-            if (s)
-                SDL_DestroySurface(s);
-    }
-};
+// FlipCache is no longer needed — SDL_RenderTextureRotated handles flipping natively.
+// Kept as an empty placeholder so code that references it still compiles;
+// GameScene should stop emplace<FlipCache> and RenderSystem no longer uses it.
+struct FlipCache {};
 
 // ── Collision ─────────────────────────────────────────────────────────────────
 
@@ -210,11 +183,11 @@ struct FloatState {
 };
 
 struct DestructibleTag {
-    SDL_Surface* breakSurface = nullptr;
+    SDL_Texture* breakSurface = nullptr;
 
     // Non-copyable: EnTT storage uses move-only path; prevents accidental copies.
     DestructibleTag() = default;
-    explicit DestructibleTag(SDL_Surface* s) : breakSurface(s) {}
+    explicit DestructibleTag(SDL_Texture* s) : breakSurface(s) {}
     DestructibleTag(const DestructibleTag&)            = delete;
     DestructibleTag& operator=(const DestructibleTag&) = delete;
     DestructibleTag(DestructibleTag&&)                 = default;

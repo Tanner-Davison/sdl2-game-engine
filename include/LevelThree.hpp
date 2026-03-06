@@ -33,7 +33,7 @@ class LevelThree : public Scene {
     void Render(Window& window) override {
         window.Render();
         if (comingSoonText)
-            comingSoonText->Render(window.GetSurface());
+            comingSoonText->Render(window.GetRenderer());
         window.Update();
     }
 

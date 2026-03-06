@@ -88,13 +88,26 @@ class SpriteSheet {
      * The surface is owned by this SpriteSheet and must not be freed externally.
      * @return Non-owning pointer to the sheet's SDL_Surface.
      */
-    SDL_Surface* GetSurface() const {
-        return surface;
+    /// Returns the raw stitched surface (used for building textures at load time).
+    /// Do NOT hold onto this after CreateTexture() has been called.
+    SDL_Surface* GetSurface() const { return surface; }
+
+    /// Upload the stitched surface to the GPU and cache the texture.
+    /// Must be called once after construction, before GetTexture() is used.
+    /// The surface is kept so additional calls are cheap (already uploaded).
+    SDL_Texture* CreateTexture(SDL_Renderer* renderer) {
+        if (!texture && surface)
+            texture = SDL_CreateTextureFromSurface(renderer, surface);
+        return texture;
     }
 
+    /// Returns the GPU texture, or nullptr if CreateTexture() hasn't been called.
+    SDL_Texture* GetTexture() const { return texture; }
+
   private:
-    SDL_Surface*                    surface; ///< The loaded sprite sheet surface.
-    std::map<std::string, SDL_Rect> frames;  ///< Named frame rectangles parsed from the coord file.
+    SDL_Surface*                    surface  = nullptr; ///< The loaded sprite sheet surface.
+    SDL_Texture*                    texture  = nullptr; ///< GPU texture built from surface.
+    std::map<std::string, SDL_Rect> frames;             ///< Named frame rectangles parsed from the coord file.
 
     /// Detects format and dispatches to the appropriate loader.
     void LoadCoordinates(const std::string& coordFile);

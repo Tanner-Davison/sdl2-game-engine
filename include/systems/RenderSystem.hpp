@@ -1,24 +1,19 @@
 #pragma once
 #include <Components.hpp>
 #include <SDL3/SDL.h>
-#include <SurfaceUtils.hpp>
 #include <algorithm>
 #include <cmath>
 #include <entt/entt.hpp>
 #include <vector>
 
-// camX/camY: world-space position of the top-left corner of the viewport.
-// All world positions are offset by (-camX, -camY) before blitting.
+// camX/camY: world-space top-left of the viewport.
+// All world positions are offset by (-camX, -camY) before rendering.
 // Entities whose bounding rect lies fully outside the viewport are culled.
-inline void RenderSystem(entt::registry& reg, SDL_Surface* screen,
+inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                          float camX = 0.0f, float camY = 0.0f) {
-    const int vw = screen->w;
-    const int vh = screen->h;
+    int vw, vh;
+    SDL_GetRenderOutputSize(renderer, &vw, &vh);
 
-    // Cache format details once per frame — same for all entities
-    const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
-
-    // Returns true when a world-space rect is completely off-screen.
     auto culled = [&](float wx, float wy, int w, int h) -> bool {
         return wx + w  <= camX      ||
                wx      >= camX + vw ||
@@ -43,183 +38,104 @@ inline void RenderSystem(entt::registry& reg, SDL_Surface* screen,
             auto& t    = reg.get<Transform>(entity);
             auto& r    = reg.get<Renderable>(entity);
             auto& anim = reg.get<AnimationState>(entity);
-            if (r.frames.empty()) continue;
-            if (culled(t.x, t.y, r.frames[anim.currentFrame].w,
-                                  r.frames[anim.currentFrame].h)) continue;
+            if (!r.sheet || r.frames.empty()) continue;
 
-            const SDL_Rect& src  = r.frames[anim.currentFrame];
-            int sx = (int)(t.x - camX);
-            int sy = (int)(t.y - camY);
-            SDL_Rect dest = {sx, sy, src.w, src.h};
+            const SDL_Rect& src = r.frames[anim.currentFrame];
+            if (culled(t.x, t.y, src.w, src.h)) continue;
 
-            if (const auto* fs = reg.try_get<FloatState>(entity);
-                fs && std::abs(fs->spinAngle) > 0.1f) {
-                SDL_Surface* rotated = RotateSurfaceDeg(r.sheet, (int)fs->spinAngle);
-                if (rotated) {
-                    SDL_BlitSurfaceScaled(rotated, nullptr, screen, &dest, SDL_SCALEMODE_LINEAR);
-                    SDL_DestroySurface(rotated);
-                } else {
-                    SDL_BlitSurface(r.sheet, &src, screen, &dest);
-                }
-            } else {
-                SDL_BlitSurface(r.sheet, &src, screen, &dest);
-            }
+            SDL_FRect dst = {t.x - camX, t.y - camY, (float)src.w, (float)src.h};
 
-            // HitFlash: overlay a pulsing transparent red rect on struck action tiles
+            // Spin rotation for floating tiles
+            double angle = 0.0;
+            if (const auto* fs = reg.try_get<FloatState>(entity))
+                angle = (double)fs->spinAngle;
+
+            SDL_FRect srcF = {(float)src.x, (float)src.y, (float)src.w, (float)src.h};
+            SDL_RenderTextureRotated(renderer, r.sheet, &srcF, &dst, angle, nullptr, SDL_FLIP_NONE);
+
+            // HitFlash overlay
             if (const auto* hf = reg.try_get<HitFlash>(entity)) {
-                // Pulse: fade from ~160 alpha at hit to 0 at expiry
-                float frac = hf->timer / hf->duration;  // 1.0 -> 0.0
-                Uint8 alpha = static_cast<Uint8>(frac * 160.0f);
-                SDL_Surface* ov = SDL_CreateSurface(dest.w, dest.h, SDL_PIXELFORMAT_ARGB8888);
-                if (ov) {
-                    SDL_SetSurfaceBlendMode(ov, SDL_BLENDMODE_BLEND);
-                    const SDL_PixelFormatDetails* ovf = SDL_GetPixelFormatDetails(ov->format);
-                    SDL_FillSurfaceRect(ov, nullptr, SDL_MapRGBA(ovf, nullptr, 220, 30, 30, alpha));
-                    SDL_BlitSurface(ov, nullptr, screen, &dest);
-                    SDL_DestroySurface(ov);
-                }
+                float frac  = hf->timer / hf->duration;
+                Uint8 alpha = (Uint8)(frac * 160.0f);
+                SDL_SetRenderDrawColor(renderer, 220, 30, 30, alpha);
+                SDL_RenderFillRect(renderer, &dst);
             }
         }
     }
 
-    // ── Pass 2: player, enemies, coins — always on top of tiles ─────────────
+    // ── Pass 2: player, enemies, coins ───────────────────────────────────────
     auto view = reg.view<Transform, Renderable, AnimationState>(
         entt::exclude<TileTag, LadderTag, PropTag>);
 
     view.each([&](entt::entity entity, const Transform& t, Renderable& r,
                   const AnimationState& anim) {
-        if (r.frames.empty()) return;
+        if (!r.sheet || r.frames.empty()) return;
 
         const SDL_Rect& src = r.frames[anim.currentFrame];
-
-        // Sprite size for culling — use the raw src rect; rotated frames are the same area
         if (culled(t.x, t.y, src.w, src.h)) return;
 
         auto* g   = reg.try_get<GravityState>(entity);
         auto* inv = reg.try_get<InvincibilityTimer>(entity);
+        auto* hz  = reg.try_get<HazardState>(entity);
         auto* col = reg.try_get<Collider>(entity);
+        auto* roff = reg.try_get<RenderOffset>(entity);
 
-        bool needsFlip     = r.flipH;
-        bool needsRotation = g && g->active && g->direction != GravityDir::DOWN;
-
-        if (!needsFlip && !needsRotation) {
-            auto* hz   = reg.try_get<HazardState>(entity);
-            if (inv && inv->isInvincible) {
-                if (static_cast<int>(inv->remaining * 10.0f) % 2 == 0)
-                    SDL_SetSurfaceColorMod(r.sheet, 255, 0, 0);
-            } else if (hz && hz->active) {
-                if (static_cast<int>(hz->flashTimer * 8.0f) % 2 == 0)
-                    SDL_SetSurfaceColorMod(r.sheet, 255, 80, 80);
-            }
-
-            auto* roff = reg.try_get<RenderOffset>(entity);
-            int   rx   = (int)(t.x - camX) + (roff ? roff->x : 0);
-            int   ry   = (int)(t.y - camY) + (roff ? roff->y : 0);
-            SDL_Rect dest = {rx, ry, src.w, src.h};
-            SDL_BlitSurface(r.sheet, &src, screen, &dest);
-            SDL_SetSurfaceColorMod(r.sheet, 255, 255, 255);
-            return;
+        // ── Colour mod for invincibility / hazard flash ─────────────────────
+        bool colorModded = false;
+        if (inv && inv->isInvincible && (int)(inv->remaining * 10.0f) % 2 == 0) {
+            SDL_SetTextureColorMod(r.sheet, 255, 0, 0);
+            colorModded = true;
+        } else if (hz && hz->active && (int)(hz->flashTimer * 8.0f) % 2 == 0) {
+            SDL_SetTextureColorMod(r.sheet, 255, 80, 80);
+            colorModded = true;
         }
 
-        // Slow path: flip / rotation
-        SDL_Surface* frame    = SDL_CreateSurface(src.w, src.h, r.sheet->format);
-        bool         ownFrame = true;
-        SDL_SetSurfaceBlendMode(frame, SDL_BLENDMODE_BLEND);
-        SDL_BlitSurface(r.sheet, &src, frame, nullptr);
-
-        if (r.flipH) {
-            auto* cache = reg.try_get<FlipCache>(entity);
-            if (cache && static_cast<int>(cache->frames.size()) != anim.totalFrames) {
-                for (auto* s : cache->frames) if (s) SDL_DestroySurface(s);
-                cache->frames.assign(anim.totalFrames, nullptr);
-            }
-            if (!cache) {
-                reg.emplace<FlipCache>(entity);
-                cache = reg.try_get<FlipCache>(entity);
-                cache->frames.resize(anim.totalFrames, nullptr);
-            }
-            int idx = anim.currentFrame;
-            if (!cache->frames[idx]) {
-                SDL_Surface* flipped = SDL_CreateSurface(frame->w, frame->h, frame->format);
-                SDL_SetSurfaceBlendMode(flipped, SDL_BLENDMODE_BLEND);
-                SDL_LockSurface(frame);
-                SDL_LockSurface(flipped);
-                for (int py = 0; py < frame->h; py++)
-                    for (int px = 0; px < frame->w; px++) {
-                        *reinterpret_cast<Uint32*>(static_cast<Uint8*>(flipped->pixels) +
-                                                   py * flipped->pitch +
-                                                   (frame->w - 1 - px) * 4) =
-                            *reinterpret_cast<Uint32*>(static_cast<Uint8*>(frame->pixels) +
-                                                       py * frame->pitch + px * 4);
-                    }
-                SDL_UnlockSurface(frame);
-                SDL_UnlockSurface(flipped);
-                cache->frames[idx] = flipped;
-            }
-            SDL_DestroySurface(frame);
-            frame    = cache->frames[idx];
-            ownFrame = false;
-        }
+        // ── Flip / rotation flags ────────────────────────────────────────────
+        SDL_FlipMode flip = r.flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
+        double       angle = 0.0;
 
         if (g && g->active) {
-            SDL_Surface* rotated = nullptr;
             switch (g->direction) {
                 case GravityDir::DOWN:  break;
-                case GravityDir::UP:    rotated = RotateSurface180(frame);   break;
-                case GravityDir::RIGHT: rotated = RotateSurface90CCW(frame); break;
-                case GravityDir::LEFT:  rotated = RotateSurface90CW(frame);  break;
-            }
-            if (rotated) {
-                if (ownFrame) SDL_DestroySurface(frame);
-                frame    = rotated;
-                ownFrame = true;
+                case GravityDir::UP:    angle = 180.0; break;
+                case GravityDir::RIGHT: angle = 90.0;  break;
+                case GravityDir::LEFT:  angle = -90.0; break;
             }
         }
 
-        int   renderX = (int)(t.x - camX);
-        int   renderY = (int)(t.y - camY);
-        auto* roff    = reg.try_get<RenderOffset>(entity);
+        // ── Render position ──────────────────────────────────────────────────
+        float rx = t.x - camX;
+        float ry = t.y - camY;
 
-        if (g && g->active) {
-            if (col) {
-                int cx = roff ? roff->x : -(frame->w - col->w) / 2;
-                int fy = roff ? roff->y : 0;
-                switch (g->direction) {
-                    case GravityDir::DOWN:
-                        if (roff) { renderX += roff->x; renderY += roff->y; }
-                        break;
-                    case GravityDir::UP:
-                        renderX += cx;
-                        renderY += fy;
-                        break;
-                    case GravityDir::LEFT:
-                        renderX += fy;
-                        renderY += cx;
-                        break;
-                    case GravityDir::RIGHT:
-                        renderX = (int)(t.x - camX) + col->h - frame->w - fy;
-                        renderY += cx;
-                        break;
-                }
+        if (g && g->active && col) {
+            // When gravity direction isn't DOWN, adjust the render origin so
+            // the sprite stays centred over the physics collider.
+            switch (g->direction) {
+                case GravityDir::DOWN:
+                    if (roff) { rx += roff->x; ry += roff->y; }
+                    break;
+                case GravityDir::UP:
+                    rx += roff ? roff->x : -(src.w - col->w) / 2;
+                    ry += roff ? roff->y : 0;
+                    break;
+                case GravityDir::LEFT:
+                    rx += roff ? roff->y : 0;
+                    ry += roff ? roff->x : -(src.h - col->h) / 2;
+                    break;
+                case GravityDir::RIGHT:
+                    rx  = (t.x - camX) + col->h - src.w - (roff ? roff->y : 0);
+                    ry += roff ? roff->x : -(src.h - col->h) / 2;
+                    break;
             }
         } else {
-            if (roff) { renderX += roff->x; renderY += roff->y; }
+            if (roff) { rx += roff->x; ry += roff->y; }
         }
 
-        {
-            auto* hz2 = reg.try_get<HazardState>(entity);
-            if (inv && inv->isInvincible) {
-                if (static_cast<int>(inv->remaining * 10.0f) % 2 == 0)
-                    SDL_SetSurfaceColorMod(frame, 255, 0, 0);
-            } else if (hz2 && hz2->active) {
-                if (static_cast<int>(hz2->flashTimer * 8.0f) % 2 == 0)
-                    SDL_SetSurfaceColorMod(frame, 255, 80, 80);
-            }
-        }
+        SDL_FRect srcF = {(float)src.x, (float)src.y, (float)src.w, (float)src.h};
+        SDL_FRect dst  = {rx, ry, (float)src.w, (float)src.h};
+        SDL_RenderTextureRotated(renderer, r.sheet, &srcF, &dst, angle, nullptr, flip);
 
-        SDL_Rect dest = {renderX, renderY, frame->w, frame->h};
-        SDL_BlitSurface(frame, nullptr, screen, &dest);
-        SDL_SetSurfaceColorMod(frame, 255, 255, 255);
-        if (ownFrame) SDL_DestroySurface(frame);
+        if (colorModded)
+            SDL_SetTextureColorMod(r.sheet, 255, 255, 255);
     });
 }

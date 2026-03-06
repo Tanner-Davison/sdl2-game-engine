@@ -89,11 +89,10 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> knightSlashSheet;
     std::unique_ptr<SpriteSheet> enemySheet;
     std::unique_ptr<SpriteSheet> coinSheet;
-    std::vector<SDL_Surface*>    tileScaledSurfaces; // owned; freed on Unload/Respawn
-    // Animated tile frame surfaces, keyed by entity. Each vector is parallel to
-    // the entity's AnimationState frame count. Freed via tileScaledSurfaces above
-    // (all pointers are also pushed into tileScaledSurfaces at spawn time).
-    std::unordered_map<entt::entity, std::vector<SDL_Surface*>> tileAnimFrameMap;
+    std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload/Respawn
+    // Animated tile frame textures, keyed by entity. Each vector is parallel to
+    // the entity's AnimationState frame count.
+    std::unordered_map<entt::entity, std::vector<SDL_Texture*>> tileAnimFrameMap;
     std::vector<SDL_Rect>        walkFrames;
     std::vector<SDL_Rect>        jumpFrames;
     std::vector<SDL_Rect>        idleFrames;

@@ -7,49 +7,57 @@ enum class FitMode {
     COVER,
     STRETCH,
     SRCSIZE,
-    PRESCALED // bakes a scaled surface on first render (or on resize), then blits 1:1 every frame
+    PRESCALED // scales the texture dst rect to fill the viewport each frame
 };
 
 class Image {
   public:
-    Image(std::string File,
-          const SDL_PixelFormatDetails* PreferredFormat = nullptr,
-          FitMode mode = FitMode::CONTAIN);
+    // Load from file and optionally upload to GPU immediately
+    Image(std::string File, FitMode mode = FitMode::CONTAIN);
 
-    Image(std::string File);
+    // Take ownership of an existing surface and convert to texture on first render
     Image(SDL_Surface* surface, FitMode mode);
 
     ~Image();
 
-    void Render(SDL_Surface* DestinationSurface);
-    void SetDestinationRectangle(SDL_Rect Requested);
+    // Non-copyable (owns GPU texture)
+    Image(const Image&)            = delete;
+    Image& operator=(const Image&) = delete;
 
-    Image(const Image& Source);
-    Image& operator=(const Image& Source);
+    // Movable
+    Image(Image&&) noexcept;
+    Image& operator=(Image&&) noexcept;
+
+    // Render to renderer. For PRESCALED/COVER/CONTAIN the dst fills rendererW x rendererH.
+    void Render(SDL_Renderer* renderer);
+
+    // Set an explicit destination rect (used by scenes that place images at fixed positions)
+    void SetDestinationRectangle(SDL_FRect dest);
 
     void    SetFitMode(FitMode mode);
     FitMode GetFitMode() const;
     void    SetFlipHorizontal(bool flip);
-    void    SaveToFile(std::string Location);
 
-  protected:
-    void HandleContain(SDL_Rect& Requested);
-    void HandleCover(SDL_Rect& Requested);
-    void HandleStretch(SDL_Rect& Requested);
-    void HandleSrcSize(SDL_Rect& Requested);
+    void SaveToFile(std::string Location);
+
+    int GetOriginalWidth()  const { return mOrigW; }
+    int GetOriginalHeight() const { return mOrigH; }
 
   private:
-    void RebakeScaled(int w, int h, SDL_PixelFormat destFormat);
+    // Upload mPendingSurface to GPU and store in mTexture. Called lazily on first Render.
+    void UploadSurface(SDL_Renderer* renderer);
 
-    bool         flipHorizontal{false};
-    int          destHeight{0};
-    int          destWidth{0};
-    int          originalWidth{0};
-    int          originalHeight{0};
-    SDL_Surface* mImageSurface{nullptr};
-    SDL_Surface* mScaledSurface{nullptr}; // PRESCALED baked cache
-    SDL_Rect     mDestRectangle{0, 0, 0, 0};
-    SDL_Rect     mSrcRectangle{0, 0, 0, 0};
-    FitMode      fitMode{FitMode::COVER};
-    bool         destinationInitialized{false};
+    // Compute mDestRect from current renderer output size based on fit mode
+    SDL_FRect ComputeDest(int rendW, int rendH) const;
+
+    SDL_Surface* mPendingSurface = nullptr; // held until first Render call
+    SDL_Texture* mTexture        = nullptr;
+    int          mOrigW          = 0;
+    int          mOrigH          = 0;
+    FitMode      mFitMode        = FitMode::CONTAIN;
+    bool         mFlipH          = false;
+
+    // For SRCSIZE / explicit placement
+    SDL_FRect mExplicitDest{0, 0, 0, 0};
+    bool      mHasExplicitDest = false;
 };

@@ -14,7 +14,7 @@ Text::Text(std::string Content, SDL_Color ColorFg, int posX, int posY, int fontS
 Text::Text(std::string Content, SDL_Color ColorFg,
            std::optional<SDL_Color> ColorBg,
            int posX, int posY, int fontSize)
-    : mFont{FontCache::Get(fontSize)}  // shared cached font — never close this
+    : mFont{FontCache::Get(fontSize)}
     , mColor{ColorFg}
     , mColorBg{ColorBg}
     , mFontSize{fontSize}
@@ -28,35 +28,45 @@ Text::Text(std::string Content, SDL_Color ColorFg,
 }
 
 Text::~Text() {
+    if (mTexture)     SDL_DestroyTexture(mTexture);
     if (mTextSurface) SDL_DestroySurface(mTextSurface);
-    // mFont is owned by FontCache — do NOT close it here
 }
 
-void Text::Render(SDL_Surface* DestinationSurface) {
-    if (!mTextSurface || !DestinationSurface) return;
-    SDL_BlitSurface(mTextSurface, nullptr, DestinationSurface,
-                    &mDestinationRectangle);
+void Text::Render(SDL_Renderer* renderer) {
+    if (!renderer) return;
+
+    // Upload pending surface to texture on first render (or after text change)
+    if (mDirty && mTextSurface) {
+        if (mTexture) SDL_DestroyTexture(mTexture);
+        mTexture = SDL_CreateTextureFromSurface(renderer, mTextSurface);
+        SDL_DestroySurface(mTextSurface);
+        mTextSurface = nullptr;
+        mDirty       = false;
+    }
+
+    if (!mTexture) return;
+
+    SDL_FRect dst = {(float)mPosX, (float)mPosY, (float)mTexW, (float)mTexH};
+    SDL_RenderTexture(renderer, mTexture, nullptr, &dst);
 }
 
 void Text::CreateSurface(std::string Content) {
-    if (!mFont) {
-        std::print("Cannot create surface: font is null\n");
-        return;
-    }
-    if (Content.empty()) return;
+    if (!mFont || Content.empty()) return;
+    mContent = Content;
 
-    SDL_Surface* newSurface = nullptr;
-    if (mColorBg.has_value()) {
-        newSurface = TTF_RenderText_Shaded(mFont, Content.c_str(), 0,
-                                           mColor, *mColorBg);
-    } else {
-        newSurface = TTF_RenderText_Blended(mFont, Content.c_str(), 0, mColor);
-    }
+    SDL_Surface* s = nullptr;
+    if (mColorBg.has_value())
+        s = TTF_RenderText_Shaded(mFont, Content.c_str(), 0, mColor, *mColorBg);
+    else
+        s = TTF_RenderText_Blended(mFont, Content.c_str(), 0, mColor);
 
-    if (newSurface) {
+    if (s) {
         if (mTextSurface) SDL_DestroySurface(mTextSurface);
-        mTextSurface = newSurface;
-        mDestinationRectangle = {mPosX, mPosY, newSurface->w, newSurface->h};
+        if (mTexture)     { SDL_DestroyTexture(mTexture); mTexture = nullptr; }
+        mTextSurface = s;
+        mTexW        = s->w;
+        mTexH        = s->h;
+        mDirty       = true;
     } else {
         std::print("Error creating text surface: {}\n", SDL_GetError());
     }

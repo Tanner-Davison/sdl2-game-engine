@@ -33,12 +33,11 @@ class SettingsMenu {
             isOpen = false;
         }
     }
-    void Render(SDL_Surface* Surface) const {
-        if (!isOpen)
-            return;
-        const SDL_PixelFormatDetails* details = SDL_GetPixelFormatDetails(Surface->format);
-        SDL_FillSurfaceRect(Surface, &Rect,
-                            SDL_MapRGB(details, nullptr, Color.r, Color.g, Color.b));
+    void Render(SDL_Renderer* renderer) const {
+        if (!isOpen) return;
+        SDL_SetRenderDrawColor(renderer, Color.r, Color.g, Color.b, Color.a);
+        SDL_FRect fr = {(float)Rect.x, (float)Rect.y, (float)Rect.w, (float)Rect.h};
+        SDL_RenderFillRect(renderer, &fr);
     }
 
   private:

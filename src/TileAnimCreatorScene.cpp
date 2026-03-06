@@ -2,6 +2,7 @@
 #include "TitleScene.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
 #include <charconv>
 #include <filesystem>
@@ -345,7 +346,9 @@ void TileAnimCreatorScene::Update(float dt) {
 
 void TileAnimCreatorScene::Render(Window& window) {
     window.Render();
-    SDL_Surface* s = window.GetSurface();
+    SDL_Renderer* ren = window.GetRenderer();
+    SDL_Surface* s = SDL_CreateSurface(mW, mH, SDL_PIXELFORMAT_ARGB8888);
+    if (!s) { window.Update(); return; }
 
     fillRect(s, {0, 0, mW, mH}, BG);
     drawTextCentered(s, "Tile Animation Creator", {0, 4, mW, 32}, 22, {255, 180, 60, 255});
@@ -501,6 +504,13 @@ void TileAnimCreatorScene::Render(Window& window) {
         }
     }
 
+    // Upload the completed surface to GPU and present
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
+    SDL_DestroySurface(s);
+    if (tex) {
+        SDL_RenderTexture(ren, tex, nullptr, nullptr);
+        SDL_DestroyTexture(tex);
+    }
     window.Update();
 }
 
@@ -669,15 +679,16 @@ void TileAnimCreatorScene::outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, 
 void TileAnimCreatorScene::drawText(SDL_Surface* s, const std::string& str,
                                      int x, int y, int sz, SDL_Color col) {
     if (str.empty()) return;
-    Text t(str, col, x, y, sz);
-    t.Render(s);
+    TTF_Font* font = FontCache::Get(sz);
+    if (!font) return;
+    SDL_Surface* ts = TTF_RenderText_Blended(font, str.c_str(), 0, col);
+    if (ts) { SDL_Rect dst = {x, y, ts->w, ts->h}; SDL_BlitSurface(ts, nullptr, s, &dst); SDL_DestroySurface(ts); }
 }
 void TileAnimCreatorScene::drawTextCentered(SDL_Surface* s, const std::string& str,
                                              SDL_Rect r, int sz, SDL_Color col) {
     if (str.empty()) return;
     auto [tx, ty] = Text::CenterInRect(str, sz, r);
-    Text t(str, col, tx, ty, sz);
-    t.Render(s);
+    drawText(s, str, tx, ty, sz, col);
 }
 void TileAnimCreatorScene::blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dr) {
     if (!src || !dst) return;

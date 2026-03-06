@@ -97,9 +97,8 @@ SpriteSheet::SpriteSheet(const std::string& directory, const std::string& prefix
 }
 
 SpriteSheet::~SpriteSheet() {
-    if (surface) {
-        SDL_DestroySurface(surface);
-    }
+    if (texture) SDL_DestroyTexture(texture);
+    if (surface) SDL_DestroySurface(surface);
 }
 
 void SpriteSheet::LoadCoordinates(const std::string& coordFile) {

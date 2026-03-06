@@ -54,11 +54,6 @@ inline void PlayerStateSystem(entt::registry& reg) {
                 anim.looping       = false;
                 anim.totalFrames   = (int)set.slash.size();
                 anim.currentAnim   = AnimationID::SLASH;
-                if (reg.all_of<FlipCache>(entity)) {
-                    auto& fc = reg.get<FlipCache>(entity);
-                    for (auto* s : fc.frames) if (s) SDL_DestroySurface(s);
-                    fc.frames.clear();
-                }
                 return;
             }
             if (atk->isAttacking) {
@@ -80,11 +75,6 @@ inline void PlayerStateSystem(entt::registry& reg) {
                         anim.looping      = false;
                         anim.totalFrames  = (int)set.hurt.size();
                         anim.currentAnim  = AnimationID::HURT;
-                        if (reg.all_of<FlipCache>(entity)) {
-                            auto& fc = reg.get<FlipCache>(entity);
-                            for (auto* s : fc.frames) if (s) SDL_DestroySurface(s);
-                            fc.frames.clear();
-                        }
                         return;
                     }
                     anim.currentAnim = AnimationID::NONE;
@@ -176,41 +166,19 @@ inline void PlayerStateSystem(entt::registry& reg) {
         if (!frames || anim.currentAnim == id)
             return;
 
-        SDL_Surface* sheet = nullptr;
+        SDL_Texture* sheet = nullptr;
         switch (id) {
-            case AnimationID::IDLE:
-                sheet = set.idleSheet;
-                break;
-            case AnimationID::WALK:
-                sheet = set.walkSheet;
-                break;
-            case AnimationID::JUMP:
-                sheet = set.jumpSheet;
-                break;
-            case AnimationID::HURT:
-                sheet = set.hurtSheet;
-                break;
-            case AnimationID::DUCK:
-                sheet = set.duckSheet;
-                break;
-            case AnimationID::FRONT:
-                sheet = set.frontSheet;
-                break;
-            case AnimationID::SLASH:
-                sheet = set.slashSheet;
-                break;
-            default:
-                break;
+            case AnimationID::IDLE:  sheet = set.idleSheet;  break;
+            case AnimationID::WALK:  sheet = set.walkSheet;  break;
+            case AnimationID::JUMP:  sheet = set.jumpSheet;  break;
+            case AnimationID::HURT:  sheet = set.hurtSheet;  break;
+            case AnimationID::DUCK:  sheet = set.duckSheet;  break;
+            case AnimationID::FRONT: sheet = set.frontSheet; break;
+            case AnimationID::SLASH: sheet = set.slashSheet; break;
+            default: break;
         }
         if (sheet && sheet != r.sheet) {
             r.sheet = sheet;
-            if (reg.all_of<FlipCache>(entity)) {
-                auto& fc = reg.get<FlipCache>(entity);
-                for (auto* s : fc.frames)
-                    if (s)
-                        SDL_DestroySurface(s);
-                fc.frames.clear();
-            }
         }
 
         r.frames          = *frames;

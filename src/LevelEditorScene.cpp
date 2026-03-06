@@ -3,6 +3,7 @@
 #include "GameScene.hpp"
 #include "TitleScene.hpp"
 #include "SurfaceUtils.hpp"
+#include <SDL3_ttf/SDL_ttf.h>
 #include <climits>
 #include <print>
 
@@ -492,7 +493,7 @@ void LevelEditorScene::ApplyBackground(int idx) {
     if (idx < 0 || idx >= (int)mBgItems.size()) return;
     mSelectedBg       = idx;
     mLevel.background = mBgItems[idx].path;
-    background        = std::make_unique<Image>(mLevel.background, nullptr, FitMode::PRESCALED);
+    background        = std::make_unique<Image>(mLevel.background, FitMode::PRESCALED);
     SetStatus("Background: " + mBgItems[idx].label);
 }
 
@@ -506,7 +507,7 @@ void LevelEditorScene::Load(Window& window) {
     SDL_SetHint("SDL_MOUSE_TOUCH_EVENTS", "0");
 
     background = std::make_unique<Image>(
-        "game_assets/backgrounds/deepspace_scene.png", nullptr, FitMode::PRESCALED);
+        "game_assets/backgrounds/deepspace_scene.png", FitMode::PRESCALED);
     coinSheet  = std::make_unique<SpriteSheet>(
         "game_assets/gold_coins/", "Gold_", 30, ICON_SIZE, ICON_SIZE);
     enemySheet = std::make_unique<SpriteSheet>(
@@ -531,7 +532,7 @@ void LevelEditorScene::Load(Window& window) {
             LoadLevel(autoPath, mLevel);
             SetStatus("Resumed: " + autoPath);
             if (!mLevel.background.empty())
-                background = std::make_unique<Image>(mLevel.background, nullptr, FitMode::PRESCALED);
+                background = std::make_unique<Image>(mLevel.background, FitMode::PRESCALED);
         } else if (!mOpenPath.empty()) {
             // Path given but file doesn't exist yet — new level with that name
             SetStatus("New level: " + mLevelName);
@@ -1355,7 +1356,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (LoadLevel(path,mLevel)) {
                 SetStatus("Loaded: "+path);
                 if (!mLevel.background.empty())
-                    background=std::make_unique<Image>(mLevel.background,nullptr,FitMode::PRESCALED);
+                    background=std::make_unique<Image>(mLevel.background,FitMode::PRESCALED);
                 LoadBgPalette();
                 mCamX = mCamY = 0.0f; // reset editor camera on load
             } else SetStatus("No file: "+path);
@@ -2117,8 +2118,20 @@ void LevelEditorScene::Update(float /*dt*/) {
 // --- Render ----------------------------------------------------------------
 void LevelEditorScene::Render(Window& window) {
     window.Render();
-    SDL_Surface* screen = window.GetSurface();
+    SDL_Renderer* ren = window.GetRenderer();
+    // The editor is an SDL_Surface-based pipeline (pixel manipulation, cached
+    // surface transforms, badge blitting). Render to an intermediate surface
+    // then upload to the GPU renderer once per frame.
+    int W = mWindow->GetWidth(), H = mWindow->GetHeight();
+    SDL_Surface* screen = SDL_CreateSurface(W, H, SDL_PIXELFORMAT_ARGB8888);
+    if (!screen) { window.Update(); return; }
+    // Transparent initial state so background shows through undrawn areas
+    SDL_SetSurfaceBlendMode(screen, SDL_BLENDMODE_BLEND);
+    SDL_FillSurfaceRect(screen, nullptr, SDL_MapRGBA(SDL_GetPixelFormatDetails(screen->format), nullptr, 0,0,0,0));
     int cw = CanvasW();
+
+    // Background renders directly to the GPU renderer (it's a full-screen image)
+    background->Render(ren);
 
     // Shared badge blit helper — hoisted here so it's available throughout Render.
     auto blitBadge = [&](SDL_Surface* s, int bx, int by) {
@@ -2126,8 +2139,6 @@ void LevelEditorScene::Render(Window& window) {
         SDL_Rect d = {bx, by, s->w, s->h};
         SDL_BlitSurface(s, nullptr, screen, &d);
     };
-
-    background->Render(screen);
 
     // Grid — each line's screen position is computed fresh from its world coordinate
     // so lines always land exactly where tile edges land. Stepping by an integer
@@ -2489,7 +2500,7 @@ void LevelEditorScene::Render(Window& window) {
                 std::string title = "Platform Config  (grp " + std::to_string(mMovPlatCurGroupId) + ")";
                 auto [tx, ty] = Text::CenterInRect(title, 12, {px, py+4, PW, TITLE_H-4});
                 Text tt(title, SDL_Color{0,230,200,255}, tx, ty, 12);
-                tt.Render(screen);
+                tt.RenderToSurface(screen);
             }
 
             int ry = py + TITLE_H;
@@ -2601,7 +2612,7 @@ void LevelEditorScene::Render(Window& window) {
             if (en.antiGravity) {
                 DrawRect(screen,{ex+iconS/2-4,ey-10,8,8},{0,200,220,220});
                 Text fb("F",SDL_Color{255,255,255,255},ex+iconS/2-3,ey-11,8);
-                fb.Render(screen);
+                fb.RenderToSurface(screen);
             }
         }
     // Player marker
@@ -2636,7 +2647,7 @@ void LevelEditorScene::Render(Window& window) {
         std::string selLabel = std::to_string(mSelIndices.size()) + " selected";
         DrawRect(screen, {sbx, sby-16, (int)selLabel.size()*7+4, 14}, {0, 60, 70, 200});
         Text selT(selLabel, SDL_Color{0,255,255,255}, sbx+2, sby-15, 10);
-        selT.Render(screen);
+        selT.RenderToSurface(screen);
     }
     // Rubber-band marquee rect
     if (mSelBoxing) {
@@ -2676,7 +2687,7 @@ void LevelEditorScene::Render(Window& window) {
             DrawOutline(screen,{rx,ry,rw,rh},{255,220,80,255},2);
             Text szT(std::to_string(t.w/GRID)+"x"+std::to_string(t.h/GRID)+" tiles",
                      dragCol,rx+4,ry+4,12);
-            szT.Render(screen);
+            szT.RenderToSurface(screen);
         }
     }
 
@@ -2728,7 +2739,7 @@ void LevelEditorScene::Render(Window& window) {
                          + std::to_string(t.hitboxOffY) + ")";
         DrawRect(screen, {hx, hy - 16, (int)info.size() * 7, 14}, {10, 20, 50, 200});
         Text infoT(info, SDL_Color{180, 220, 255, 255}, hx + 2, hy - 15, 10);
-        infoT.Render(screen);
+        infoT.RenderToSurface(screen);
     }
 
     // Tile ghost — SnapToGrid returns world coords; convert to screen for drawing
@@ -2785,8 +2796,8 @@ void LevelEditorScene::Render(Window& window) {
         DrawRect(screen, r, bg);
         DrawOutline(screen, r, border);
         DrawRect(screen, {r.x+1, r.y+1, r.w-2, 3}, topBar);
-        if (lbl)  lbl->Render(screen);
-        if (hint) hint->Render(screen);
+        if (lbl)  lbl->RenderToSurface(screen);
+        if (hint) hint->RenderToSurface(screen);
     };
 
     constexpr SDL_Color ACCENT_PLACE    = {80,  160, 255, 255};
@@ -2896,11 +2907,11 @@ void LevelEditorScene::Render(Window& window) {
         int tx = window.GetWidth() - PALETTE_W - 8;
         if (!lblToolPrefix) const_cast<std::unique_ptr<Text>&>(lblToolPrefix)
             = std::make_unique<Text>("Tool:", SDL_Color{120,120,150,255}, tx-80, TOOLBAR_H+3, 12);
-        lblToolPrefix->Render(screen);
+        lblToolPrefix->RenderToSurface(screen);
         lblTool->SetPosition(tx - 40, TOOLBAR_H + 3);
-        lblTool->Render(screen);
+        lblTool->RenderToSurface(screen);
     }
-    if (lblStatus) lblStatus->Render(screen);
+    if (lblStatus) lblStatus->RenderToSurface(screen);
 
     // ── Palette panel ─────────────────────────────────────────────────────────
     if (mPaletteCollapsed) {
@@ -2961,9 +2972,9 @@ void LevelEditorScene::Render(Window& window) {
                 const_cast<std::unique_ptr<Text>&>(lblPalHint1)  = std::make_unique<Text>("Size: "+std::to_string(mTileW)+"  Esc=up  Click=enter",SDL_Color{100,120,140,255},cw+4,palY+18,9);
                 if (!lblPalHint2) const_cast<std::unique_ptr<Text>&>(lblPalHint2) = std::make_unique<Text>("Click folder to open",SDL_Color{100,120,140,255},cw+4,palY+30,9);
             }
-            if (lblPalHeader) lblPalHeader->Render(screen);
-            if (lblPalHint1)  lblPalHint1->Render(screen);
-            if (lblPalHint2)  lblPalHint2->Render(screen);
+            if (lblPalHeader) lblPalHeader->RenderToSurface(screen);
+            if (lblPalHint1)  lblPalHint1->RenderToSurface(screen);
+            if (lblPalHint2)  lblPalHint2->RenderToSurface(screen);
         }
         palY += 44;
 
@@ -3062,7 +3073,7 @@ void LevelEditorScene::Render(Window& window) {
         DrawRect(screen,{cw,palY,PALETTE_W,24},{30,30,45,255});
         if (!lblBgHeader) const_cast<std::unique_ptr<Text>&>(lblBgHeader)
             = std::make_unique<Text>("Backgrounds  (I=import)",SDL_Color{200,200,220,255},cw+4,palY+6,10);
-        if (lblBgHeader) lblBgHeader->Render(screen);
+        if (lblBgHeader) lblBgHeader->RenderToSurface(screen);
         palY+=24;
 
         constexpr int PAD=4, LBL_H=16;
@@ -3113,7 +3124,7 @@ void LevelEditorScene::Render(Window& window) {
                 = std::make_unique<Text>(std::to_string(cc)+" coins  "+std::to_string(ec)+" enemies  "+std::to_string(tc)+" tiles",
                                          SDL_Color{120,120,150,255}, 8, window.GetHeight()-18, 11);
         }
-        if (lblStatusBar) lblStatusBar->Render(screen);
+        if (lblStatusBar) lblStatusBar->RenderToSurface(screen);
     }
     {
         int cx=(int)mCamX, cy=(int)mCamY;
@@ -3123,7 +3134,7 @@ void LevelEditorScene::Render(Window& window) {
                 = std::make_unique<Text>("Cam: "+std::to_string(cx)+","+std::to_string(cy),
                                          SDL_Color{70,70,90,255}, cw-100, window.GetHeight()-18, 11);
         }
-        if (lblCamPos) lblCamPos->Render(screen);
+        if (lblCamPos) lblCamPos->RenderToSurface(screen);
     }
     // Rebuild hint — tool-specific for Action, generic otherwise
     {
@@ -3136,7 +3147,7 @@ void LevelEditorScene::Render(Window& window) {
         const_cast<std::unique_ptr<Text>&>(lblBottomHint)
             = std::make_unique<Text>(hint, SDL_Color{70,70,90,255}, cw/2-200, window.GetHeight()-18, 11);
     }
-    if (lblBottomHint) lblBottomHint->Render(screen);
+    if (lblBottomHint) lblBottomHint->RenderToSurface(screen);
 
     // ── Destroy-anim picker popup ─────────────────────────────────────────────────
     if (mActionAnimPickerTile >= 0
@@ -3183,7 +3194,7 @@ void LevelEditorScene::Render(Window& window) {
             std::string title = "Death Animation  — Tile " + std::to_string(mActionAnimPickerTile);
             auto [tx, ty] = Text::CenterInRect(title, 12, {px, py+4, PW, TITLE_H-4});
             Text t(title, SDL_Color{200,160,255,255}, tx, ty, 12);
-            t.Render(screen);
+            t.RenderToSurface(screen);
         }
 
         // Entries grid
@@ -3259,11 +3270,11 @@ void LevelEditorScene::Render(Window& window) {
         DrawOutline(screen,{0,panelY,cw,panelH},{80,180,255,255},2);
         std::string dest=(mActiveTab==PaletteTab::Backgrounds)?"game_assets/backgrounds/":"game_assets/tiles/";
         Text il("Import into "+dest+"  — file or folder path  (Enter=go, Esc=cancel)",SDL_Color{140,200,255,255},8,panelY+4,11);
-        il.Render(screen);
+        il.RenderToSurface(screen);
         int fx=8,fy=panelY+18,fw=cw-16,fh=20;
         DrawRect(screen,{fx,fy,fw,fh},{20,35,80,255}); DrawOutline(screen,{fx,fy,fw,fh},{80,180,255,200});
         Text it(mImportInputText+"|",SDL_Color{255,255,255,255},fx+4,fy+2,12);
-        it.Render(screen);
+        it.RenderToSurface(screen);
     }
 
     // ── Drop overlay ──────────────────────────────────────────────────────────
@@ -3277,11 +3288,11 @@ void LevelEditorScene::Render(Window& window) {
         DrawRect(screen,{cx2-220,cy2-44,440,88},{10,30,70,220});
         DrawOutline(screen,{cx2-220,cy2-44,440,88},{80,180,255,255},2);
         if (mActiveTool == Tool::Action) {
-            Text d1("Drop animated tile .json onto an Action tile",SDL_Color{255,200,255,255},cx2-200,cy2-32,20); d1.Render(screen);
+            Text d1("Drop animated tile .json onto an Action tile",SDL_Color{255,200,255,255},cx2-200,cy2-32,20); d1.RenderToSurface(screen);
             blitBadge(GetBadge("The tile will play that animation when destroyed",{200,160,255,255}), cx2-164, cy2+4);
         } else {
             std::string hint=(mActiveTab==PaletteTab::Backgrounds)?"Drop .png or folder → backgrounds":"Drop .png or folder → tiles";
-            Text d1(hint,SDL_Color{255,255,255,255},cx2-168,cy2-32,24); d1.Render(screen);
+            Text d1(hint,SDL_Color{255,255,255,255},cx2-168,cy2-32,24); d1.RenderToSurface(screen);
             blitBadge(GetBadge("Folders become subfolders in the palette",{140,200,255,255}), cx2-150, cy2+4);
         }
     }
@@ -3297,7 +3308,6 @@ void LevelEditorScene::Render(Window& window) {
             SDL_DestroySurface(ov);
         }
         // Panel
-        int W = window.GetWidth(), H = window.GetHeight();
         int pw = 360, ph = 140;
         int px = W/2 - pw/2, py = H/2 - ph/2;
         DrawRect(screen, {px, py, pw, ph}, {20, 18, 28, 250});
@@ -3305,31 +3315,38 @@ void LevelEditorScene::Render(Window& window) {
         // Title
         std::string title = mDelConfirmIsDir ? "Delete Folder?" : "Delete File?";
         auto [tx, ty] = Text::CenterInRect(title, 18, {px, py+8, pw, 28});
-        Text t1(title, SDL_Color{255,100,100,255}, tx, ty, 18); t1.Render(screen);
+        Text t1(title, SDL_Color{255,100,100,255}, tx, ty, 18); t1.RenderToSurface(screen);
         // Name
         std::string nameStr = mDelConfirmName;
         if ((int)nameStr.size() > 32) nameStr = nameStr.substr(0,30) + "...";
         auto [nx, ny] = Text::CenterInRect(nameStr, 12, {px, py+38, pw, 20});
-        Text t2(nameStr, SDL_Color{220,200,200,255}, nx, ny, 12); t2.Render(screen);
+        Text t2(nameStr, SDL_Color{220,200,200,255}, nx, ny, 12); t2.RenderToSurface(screen);
         // Warning
         std::string warn = mDelConfirmIsDir ? "This will delete all files inside!" : "This cannot be undone.";
         auto [wx2, wy2] = Text::CenterInRect(warn, 11, {px, py+58, pw, 18});
-        Text t3(warn, SDL_Color{255,160,80,255}, wx2, wy2, 11); t3.Render(screen);
+        Text t3(warn, SDL_Color{255,160,80,255}, wx2, wy2, 11); t3.RenderToSurface(screen);
         // Buttons
         const_cast<SDL_Rect&>(mDelConfirmYes) = {px + 30,          py + ph - 44, 130, 34};
         const_cast<SDL_Rect&>(mDelConfirmNo)  = {px + pw - 30 - 130, py + ph - 44, 130, 34};
         DrawRect(screen, mDelConfirmYes, {160,30,30,255});
         DrawOutline(screen, mDelConfirmYes, {220,80,80,255}, 2);
         auto [yx, yy] = Text::CenterInRect("Delete", 14, mDelConfirmYes);
-        Text tb1("Delete", SDL_Color{255,200,200,255}, yx, yy, 14); tb1.Render(screen);
+        Text tb1("Delete", SDL_Color{255,200,200,255}, yx, yy, 14); tb1.RenderToSurface(screen);
         DrawRect(screen, mDelConfirmNo, {40,40,60,255});
         DrawOutline(screen, mDelConfirmNo, {80,80,120,255}, 2);
         auto [cx3, cy3] = Text::CenterInRect("Cancel", 14, mDelConfirmNo);
-        Text tb2("Cancel", SDL_Color{180,180,220,255}, cx3, cy3, 14); tb2.Render(screen);
+        Text tb2("Cancel", SDL_Color{180,180,220,255}, cx3, cy3, 14); tb2.RenderToSurface(screen);
         // Esc hint
         blitBadge(GetBadge("Esc to cancel",{80,80,100,255}), W/2-38, py+ph-12);
     }
 
+    // Upload completed surface to GPU and present
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, screen);
+    SDL_DestroySurface(screen);
+    if (tex) {
+        SDL_RenderTexture(ren, tex, nullptr, nullptr);
+        SDL_DestroyTexture(tex);
+    }
     window.Update();
 }
 

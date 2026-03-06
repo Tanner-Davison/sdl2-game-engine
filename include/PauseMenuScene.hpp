@@ -33,23 +33,10 @@ class PauseMenuScene : public Scene {
     void Load(Window& window) override {
         mW = window.GetWidth();
         mH = window.GetHeight();
-
-        // Grab a snapshot of the current framebuffer to use as backdrop.
-        // SceneManager already called Unload on GameScene, so the window surface
-        // holds whatever the last rendered frame was — capture it now.
-        SDL_Surface* win = window.GetSurface();
-        if (win) {
-            mBackdrop.reset(SDL_CreateSurface(win->w, win->h, win->format));
-            if (mBackdrop)
-                SDL_BlitSurface(win, nullptr, mBackdrop.get(), nullptr);
-        }
-
         buildUI(mW, mH);
     }
 
-    void Unload() override {
-        mBackdrop.reset();
-    }
+    void Unload() override {}
 
     bool HandleEvent(SDL_Event& e) override {
         if (e.type == SDL_EVENT_QUIT) return false;
@@ -76,31 +63,28 @@ class PauseMenuScene : public Scene {
     void Update(float /*dt*/) override {}
 
     void Render(Window& window) override {
-        SDL_Surface* screen = window.GetSurface();
+        SDL_Renderer* ren = window.GetRenderer();
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
-        // 1. Draw the frozen game frame
-        if (mBackdrop)
-            SDL_BlitSurface(mBackdrop.get(), nullptr, screen, nullptr);
+        // Dim overlay over whatever was rendered last frame
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 160);
+        SDL_FRect full = {0,0,(float)mW,(float)mH};
+        SDL_RenderFillRect(ren, &full);
 
-        // 2. Dark semi-transparent overlay
-        const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
-        Uint32 dim = SDL_MapRGBA(fmt, nullptr, 0, 0, 0, 160);
-        SDL_FillSurfaceRect(screen, nullptr, dim);
+        // Panel background
+        SDL_Rect panel = {mW/2-180, mH/2-160, 360, 320};
+        SDL_SetRenderDrawColor(ren, 18, 20, 32, 230);
+        SDL_FRect fp = {(float)panel.x,(float)panel.y,(float)panel.w,(float)panel.h};
+        SDL_RenderFillRect(ren, &fp);
+        SDL_SetRenderDrawColor(ren, 80, 120, 220, 255);
+        SDL_RenderRect(ren, &fp);
 
-        // 3. Panel background
-        SDL_Rect panel = {mW/2 - 180, mH/2 - 160, 360, 320};
-        Uint32 panelCol = SDL_MapRGBA(fmt, nullptr, 18, 20, 32, 230);
-        SDL_FillSurfaceRect(screen, &panel, panelCol);
-        // Panel border
-        drawOutline(screen, panel, {80, 120, 220, 255}, fmt);
-
-        // 4. UI elements
-        if (mTitle)     mTitle->Render(screen);
-        if (mResumeBtn) mResumeBtn->Render(screen);
-        if (mResumeLbl) mResumeLbl->Render(screen);
-        if (mBackBtn)   mBackBtn->Render(screen);
-        if (mBackLbl)   mBackLbl->Render(screen);
-        if (mHint)      mHint->Render(screen);
+        if (mTitle)     mTitle->Render(ren);
+        if (mResumeBtn) mResumeBtn->Render(ren);
+        if (mResumeLbl) mResumeLbl->Render(ren);
+        if (mBackBtn)   mBackBtn->Render(ren);
+        if (mBackLbl)   mBackLbl->Render(ren);
+        if (mHint)      mHint->Render(ren);
 
         window.Update();
     }
@@ -125,10 +109,6 @@ class PauseMenuScene : public Scene {
     bool         mGoBack     = false;
     int          mW = 0, mH = 0;
 
-    // Captured backdrop surface (owned)
-    struct SurfaceDeleter { void operator()(SDL_Surface* s) { if (s) SDL_DestroySurface(s); } };
-    std::unique_ptr<SDL_Surface, SurfaceDeleter> mBackdrop;
-
     SDL_Rect mResumeRect{};
     SDL_Rect mBackRect{};
 
@@ -139,22 +119,8 @@ class PauseMenuScene : public Scene {
     std::unique_ptr<Text>      mBackLbl;
     std::unique_ptr<Text>      mHint;
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
     static bool hit(const SDL_Rect& r, int x, int y) {
         return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
-    }
-
-    static void drawOutline(SDL_Surface* s, SDL_Rect r,
-                            SDL_Color c, const SDL_PixelFormatDetails* fmt) {
-        Uint32 col = SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a);
-        constexpr int T = 2;
-        SDL_Rect rects[4] = {
-            {r.x,       r.y,       r.w, T},
-            {r.x,       r.y+r.h-T, r.w, T},
-            {r.x,       r.y,       T,   r.h},
-            {r.x+r.w-T, r.y,       T,   r.h},
-        };
-        for (auto& rr : rects) SDL_FillSurfaceRect(s, &rr, col);
     }
 
     void buildUI(int W, int H) {

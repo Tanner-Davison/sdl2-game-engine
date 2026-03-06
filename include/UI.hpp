@@ -26,7 +26,7 @@ class UI {
      * @brief Renders all UI elements to the given surface.
      * @param Surface The window surface to draw UI elements onto.
      */
-    void Render(SDL_Surface* Surface) const;
+    void Render(SDL_Renderer* renderer) const;
 
     /**
      * @brief Forwards an SDL event to all child UI elements.

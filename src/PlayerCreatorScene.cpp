@@ -2,6 +2,7 @@
 #include "TitleScene.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <SDL3_ttf/SDL_ttf.h>
 #include <algorithm>
 #include <filesystem>
 #include <print>
@@ -441,7 +442,11 @@ void PlayerCreatorScene::Update(float dt) {
 
 void PlayerCreatorScene::Render(Window& window) {
     window.Render();
-    SDL_Surface* s = window.GetSurface();
+    SDL_Renderer* ren = window.GetRenderer();
+    // Render this scene to an intermediate surface, then upload to renderer.
+    // This preserves all pixel-exact surface-based hitbox drawing.
+    SDL_Surface* s = SDL_CreateSurface(mW, mH, SDL_PIXELFORMAT_ARGB8888);
+    if (!s) { window.Update(); return; }
 
     // Background
     fillRect(s, {0, 0, mW, mH}, BG);
@@ -676,27 +681,25 @@ void PlayerCreatorScene::Render(Window& window) {
         for (int i = mRosterScroll; i < (int)mRoster.size(); ++i) {
             auto& entry = mRoster[i];
             if (ry + 44 > mRosterPanel.y + mRosterPanel.h) break;
-
-            // Row bg
             fillRect(s, {mRosterPanel.x + 4, ry, mRosterPanel.w - 8, 44}, {36, 40, 60, 255});
-
-            // Name
             drawText(s, entry.name, mRosterPanel.x + 10, ry + 4, 15, {220, 220, 255, 255});
-
-            // Load button
             entry.loadRect = {mRosterPanel.x + 4,              ry + 24, 80, 18};
             entry.delRect  = {mRosterPanel.x + mRosterPanel.w - 54, ry + 24, 50, 18};
-
             fillRect(s, entry.loadRect, BTN_LOAD);
             drawTextCentered(s, "Load", entry.loadRect, 11);
-
             fillRect(s, entry.delRect, BTN_DEL);
             drawTextCentered(s, "Delete", entry.delRect, 11, {255, 200, 200, 255});
-
             ry += 50;
         }
     }
 
+    // Upload the completed surface to a texture and render it
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
+    SDL_DestroySurface(s);
+    if (tex) {
+        SDL_RenderTexture(ren, tex, nullptr, nullptr);
+        SDL_DestroyTexture(tex);
+    }
     window.Update();
 }
 
@@ -1073,15 +1076,18 @@ void PlayerCreatorScene::outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, in
 
 void PlayerCreatorScene::drawText(SDL_Surface* s, const std::string& str,
                                    int x, int y, int ptSize, SDL_Color col) {
-    Text t(str, col, x, y, ptSize);
-    t.Render(s);
+    if (str.empty()) return;
+    TTF_Font* font = FontCache::Get(ptSize);
+    if (!font) return;
+    SDL_Surface* ts = TTF_RenderText_Blended(font, str.c_str(), 0, col);
+    if (ts) { SDL_Rect dst = {x, y, ts->w, ts->h}; SDL_BlitSurface(ts, nullptr, s, &dst); SDL_DestroySurface(ts); }
 }
 
 void PlayerCreatorScene::drawTextCentered(SDL_Surface* s, const std::string& str,
                                            SDL_Rect r, int ptSize, SDL_Color col) {
+    if (str.empty()) return;
     auto [tx, ty] = Text::CenterInRect(str, ptSize, r);
-    Text t(str, col, tx, ty, ptSize);
-    t.Render(s);
+    drawText(s, str, tx, ty, ptSize, col);
 }
 
 void PlayerCreatorScene::blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect) {
