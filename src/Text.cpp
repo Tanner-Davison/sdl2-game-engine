@@ -14,7 +14,7 @@ Text::Text(std::string Content, SDL_Color ColorFg, int posX, int posY, int fontS
 Text::Text(std::string Content, SDL_Color ColorFg,
            std::optional<SDL_Color> ColorBg,
            int posX, int posY, int fontSize)
-    : mFont{TTF_OpenFont("fonts/Roboto-VariableFont_wdth,wght.ttf", fontSize)}
+    : mFont{FontCache::Get(fontSize)}  // shared cached font — never close this
     , mColor{ColorFg}
     , mColorBg{ColorBg}
     , mFontSize{fontSize}
@@ -29,7 +29,7 @@ Text::Text(std::string Content, SDL_Color ColorFg,
 
 Text::~Text() {
     if (mTextSurface) SDL_DestroySurface(mTextSurface);
-    if (mFont)        TTF_CloseFont(mFont);
+    // mFont is owned by FontCache — do NOT close it here
 }
 
 void Text::Render(SDL_Surface* DestinationSurface) {

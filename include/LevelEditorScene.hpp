@@ -336,7 +336,13 @@ class LevelEditorScene : public Scene {
     float            mMovPlatRange       = 96.0f;
     float            mMovPlatSpeed       = 60.0f;
     bool             mMovPlatLoop        = false; // true = one-way left→right loop
-    bool             mMovPlatTrigger = false; // true = only starts when player lands on it
+    bool             mMovPlatTrigger     = false; // true = only starts when player lands on it
+
+    // Moving-platform config popup
+    bool        mMovPlatPopupOpen   = false; // true = popup is visible
+    bool        mMovPlatSpeedInput  = false; // true = speed text field has focus
+    std::string mMovPlatSpeedStr    = "60";  // live text buffer for speed input
+    SDL_Rect    mMovPlatPopupRect{};          // screen rect of the popup panel
     // Group 3
     std::unique_ptr<Text> lblGravity, lblSave, lblLoad, lblClear, lblPlay, lblBack;
     // Status / active tool display

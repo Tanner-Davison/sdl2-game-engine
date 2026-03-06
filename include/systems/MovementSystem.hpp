@@ -18,7 +18,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
                 // Horizontal movement is allowed but capped to CLIMB_STRAFE_SPEED
                 // so the player shuffles slowly left/right instead of running at
                 // full speed while on the ladder.
-                bool movingH = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D];
+                bool movingH = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D]
+                             || keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
                 if (!movingH) {
                     v.dx -= v.dx * friction * dt;
                     if (std::abs(v.dx) < 0.5f) v.dx = 0.0f;
@@ -33,7 +34,9 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
             }
             // Free-float mode (gravity off for other reasons, e.g. wall-run punishment)
             bool moving = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
-                          keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D];
+                          keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D] ||
+                          keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_DOWN] ||
+                          keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
             if (!moving) {
                 v.dx -= v.dx * friction * dt;
                 v.dy -= v.dy * friction * dt;
@@ -62,11 +65,12 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
             switch (g.direction) {
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
-                    if (keys[SDL_SCANCODE_A])
+                    if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT])
                         v.dx = -v.speed;
-                    if (keys[SDL_SCANCODE_D])
+                    if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT])
                         v.dx = v.speed;
-                    if (!keys[SDL_SCANCODE_A] && !keys[SDL_SCANCODE_D]) {
+                    if (!keys[SDL_SCANCODE_A] && !keys[SDL_SCANCODE_D]
+                     && !keys[SDL_SCANCODE_LEFT] && !keys[SDL_SCANCODE_RIGHT]) {
                         v.dx -= v.dx * friction * dt;
                         if (std::abs(v.dx) < 0.5f)
                             v.dx = 0.0f;
@@ -76,11 +80,12 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
                 }
                 case GravityDir::LEFT:
                 case GravityDir::RIGHT: {
-                    if (keys[SDL_SCANCODE_W])
+                    if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP])
                         v.dy = -v.speed;
-                    if (keys[SDL_SCANCODE_S])
+                    if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN])
                         v.dy = v.speed;
-                    if (!keys[SDL_SCANCODE_W] && !keys[SDL_SCANCODE_S]) {
+                    if (!keys[SDL_SCANCODE_W] && !keys[SDL_SCANCODE_S]
+                     && !keys[SDL_SCANCODE_UP] && !keys[SDL_SCANCODE_DOWN]) {
                         v.dy -= v.dy * friction * dt;
                         if (std::abs(v.dy) < 0.5f)
                             v.dy = 0.0f;

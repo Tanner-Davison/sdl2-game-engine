@@ -18,7 +18,7 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         bool invertFlip = g.active && g.direction == GravityDir::UP;
         if (e.type == SDL_EVENT_KEY_DOWN) {
             switch (e.key.key) {
-                case SDLK_A:
+                case SDLK_A: case SDLK_LEFT:
                     if (!g.isCrouching) {
                         v.dx    = -v.speed;
                         // Only set flip for horizontal movement on horizontal-gravity walls
@@ -26,14 +26,14 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                             r.flipH = !invertFlip;
                     }
                     break;
-                case SDLK_D:
+                case SDLK_D: case SDLK_RIGHT:
                     if (!g.isCrouching) {
                         v.dx    = v.speed;
                         if (g.direction == GravityDir::DOWN || g.direction == GravityDir::UP)
                             r.flipH = invertFlip;
                     }
                     break;
-                case SDLK_W:
+                case SDLK_W: case SDLK_UP:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
                             // 90CW: flipH=true (face left) -> face up the left wall
@@ -44,7 +44,7 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                         }
                     }
                     break;
-                case SDLK_S:
+                case SDLK_S: case SDLK_DOWN:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
                             // 90CW: flipH=false (face right) -> face down the left wall
@@ -68,12 +68,12 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         // These flags are set/cleared by events so LadderSystem never polls the
         // keyboard state — a tap only moves for exactly the frames the key is down.
         if (e.type == SDL_EVENT_KEY_DOWN) {
-            if (e.key.key == SDLK_W) climb.wPressed = true;
-            if (e.key.key == SDLK_S) climb.sPressed = true;
+            if (e.key.key == SDLK_W || e.key.key == SDLK_UP)   climb.wPressed = true;
+            if (e.key.key == SDLK_S || e.key.key == SDLK_DOWN) climb.sPressed = true;
         }
         if (e.type == SDL_EVENT_KEY_UP) {
-            if (e.key.key == SDLK_W) climb.wPressed = false;
-            if (e.key.key == SDLK_S) climb.sPressed = false;
+            if (e.key.key == SDLK_W || e.key.key == SDLK_UP)   climb.wPressed = false;
+            if (e.key.key == SDLK_S || e.key.key == SDLK_DOWN) climb.sPressed = false;
         }
 
         if (!g.active) {
@@ -82,17 +82,17 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
             if (!climb.climbing && !climb.atTop) {
                 if (e.type == SDL_EVENT_KEY_DOWN) {
                     switch (e.key.key) {
-                        case SDLK_W: v.dy = -v.speed; break;
-                        case SDLK_S: v.dy =  v.speed; break;
+                        case SDLK_W: case SDLK_UP:   v.dy = -v.speed; break;
+                        case SDLK_S: case SDLK_DOWN: v.dy =  v.speed; break;
                     }
                 }
             }
         } else {
             // Track spacebar held state via events — actual jump fires each frame
             // in MovementSystem after CollisionSystem has settled isGrounded.
-            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_SPACE)
+            if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
                 g.jumpHeld = true;
-            if (e.type == SDL_EVENT_KEY_UP && e.key.key == SDLK_SPACE)
+            if (e.type == SDL_EVENT_KEY_UP && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
                 g.jumpHeld = false;
         }
     });

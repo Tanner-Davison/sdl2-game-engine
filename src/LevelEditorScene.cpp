@@ -8,9 +8,9 @@
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 // Internal helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
 
 // Build a PAL_ICON×PAL_ICON thumbnail from a full-res SDL_Surface.
 // Returns nullptr on failure. Caller owns the result.
@@ -34,7 +34,7 @@ static SDL_Surface* LoadPNG(const fs::path& p) {
     return c;
 }
 
-// ─── RebuildToolbarLayout ──────────────────────────────────────────────────
+// --- RebuildToolbarLayout --------------------------------------------------
 // Recomputes all button rects based on current collapse state.
 // Called once in Load() and again whenever a group is toggled.
 void LevelEditorScene::RebuildToolbarLayout() {
@@ -128,7 +128,7 @@ void LevelEditorScene::RebuildToolbarLayout() {
     recentre(lblErase,  "Erase",  btnErase);  recentreHint(hintErase,  btnErase);
     recentre(lblPlayer, "Player", btnPlayerStart, 12); recentreHint(hintPlayer, btnPlayerStart);
     recentre(lblSelect,  "Select",  btnSelect,  11); recentreHint(hintSelect,  btnSelect);
-    recentre(lblMoveCam, "MoveCam", btnMoveCam, 10); recentreHint(hintMoveCam, btnMoveCam);
+    recentre(lblMoveCam, "Pan", btnMoveCam, 11); recentreHint(hintMoveCam, btnMoveCam);
     recentre(lblProp,    "Prop",   btnProp);   recentreHint(hintProp,   btnProp);
     recentre(lblLadder,  "Ladder", btnLadder); recentreHint(hintLadder, btnLadder);
     recentre(lblAction,  "Action", btnAction); recentreHint(hintAction, btnAction);
@@ -185,7 +185,7 @@ SDL_Surface* LevelEditorScene::GetBadge(const std::string& text, SDL_Color col) 
     return owned;
 }
 
-// ─── GetDestroyAnimThumb ─────────────────────────────────────────────────────
+// --- GetDestroyAnimThumb ---------------------------------------------------
 // Returns a 16x16 thumbnail for an animated tile JSON path, built from the
 // first frame. Cached permanently for the editor lifetime.
 SDL_Surface* LevelEditorScene::GetDestroyAnimThumb(const std::string& jsonPath) {
@@ -218,7 +218,7 @@ SDL_Surface* LevelEditorScene::GetDestroyAnimThumb(const std::string& jsonPath) 
     return result;
 }
 
-// ─── OpenAnimPicker / CloseAnimPicker ────────────────────────────────────────
+// --- OpenAnimPicker / CloseAnimPicker --------------------------------------
 void LevelEditorScene::OpenAnimPicker(int tileIdx) {
     mActionAnimPickerTile = tileIdx;
     mAnimPickerEntries.clear();
@@ -245,7 +245,7 @@ void LevelEditorScene::CloseAnimPicker() {
     mAnimPickerEntries.clear();
 }
 
-// ─── LoadTileView ──────────────────────────────────────────────────────────
+// --- LoadTileView ----------------------------------------------------------
 void LevelEditorScene::LoadTileView(const std::string& dir) {
     // Free existing surface memory — folders use non-owning mFolderIcon pointer,
     // so only free surfaces for file entries.
@@ -425,31 +425,30 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
     }
 }
 
-// ─── DetectResizeEdge ───────────────────────────────────────────────────────────
+// --- DetectResizeEdge ------------------------------------------------------
 LevelEditorScene::ResizeEdge LevelEditorScene::DetectResizeEdge(int idx, int mx, int my) const {
     if (idx < 0 || idx >= (int)mLevel.tiles.size()) return ResizeEdge::None;
     const auto& t = mLevel.tiles[idx];
     // mx/my are screen-space; convert to world space to compare with tile world coords
-    mx = (int)(mx / mZoom + mCamX);
-    my = (int)(my / mZoom + mCamY);
+    int wx = (int)(mx / mZoom + mCamX);
+    int wy = (int)(my / mZoom + mCamY);
     int rx = (int)t.x, ry = (int)t.y, rw = t.w, rh = t.h;
 
-    // Must be inside (or very near) the tile first
-    if (mx < rx - RESIZE_HANDLE || mx > rx + rw + RESIZE_HANDLE) return ResizeEdge::None;
-    if (my < ry - RESIZE_HANDLE || my > ry + rh + RESIZE_HANDLE) return ResizeEdge::None;
+    // Cursor must be strictly inside the tile's visual bounds — this prevents
+    // handle zones on one tile from bleeding into an adjacent tile.
+    if (wx < rx || wx > rx + rw) return ResizeEdge::None;
+    if (wy < ry || wy > ry + rh) return ResizeEdge::None;
 
-    bool nearRight  = (mx >= rx + rw - RESIZE_HANDLE && mx <= rx + rw + RESIZE_HANDLE);
-    bool nearBottom = (my >= ry + rh - RESIZE_HANDLE && my <= ry + rh + RESIZE_HANDLE);
-    bool insideH    = (mx >= rx && mx <= rx + rw);
-    bool insideV    = (my >= ry && my <= ry + rh);
+    bool nearRight  = (wx >= rx + rw - RESIZE_HANDLE);
+    bool nearBottom = (wy >= ry + rh - RESIZE_HANDLE);
 
-    if (nearRight && nearBottom)              return ResizeEdge::Corner;
-    if (nearRight  && (insideV || nearBottom)) return ResizeEdge::Right;
-    if (nearBottom && (insideH || nearRight))  return ResizeEdge::Bottom;
+    if (nearRight && nearBottom) return ResizeEdge::Corner;
+    if (nearRight)               return ResizeEdge::Right;
+    if (nearBottom)              return ResizeEdge::Bottom;
     return ResizeEdge::None;
 }
 
-// ─── LoadBgPalette ────────────────────────────────────────────────────────────
+// --- LoadBgPalette ---------------------------------------------------------
 void LevelEditorScene::LoadBgPalette() {
     for (auto& item : mBgItems)
         if (item.thumb) SDL_DestroySurface(item.thumb);
@@ -478,7 +477,7 @@ void LevelEditorScene::LoadBgPalette() {
     }
 }
 
-// ─── ApplyBackground ─────────────────────────────────────────────────────────
+// --- ApplyBackground -------------------------------------------------------
 void LevelEditorScene::ApplyBackground(int idx) {
     if (idx < 0 || idx >= (int)mBgItems.size()) return;
     mSelectedBg       = idx;
@@ -583,7 +582,7 @@ void LevelEditorScene::Load(Window& window) {
     hintErase      = mkHint("4", btnErase);
     hintPlayer     = mkHint("5", btnPlayerStart);
     hintSelect     = mkHint("Q", btnSelect);
-    lblMoveCam     = mkLbl("MoveCam", btnMoveCam, 10);
+    lblMoveCam     = mkLbl("Pan", btnMoveCam, 11);
     hintMoveCam    = mkHint("T", btnMoveCam);
 
     // Group 2 labels + hints
@@ -623,7 +622,7 @@ void LevelEditorScene::Load(Window& window) {
                                        window.GetWidth() - PALETTE_W - 120, 22, 13);
 }
 
-// ─── Unload ───────────────────────────────────────────────────────────────────
+// --- Unload ----------------------------------------------------------------
 void LevelEditorScene::Unload() {
     // PaletteItems for folders point to mFolderIcon (non-owning), so don't free
     // item.thumb for folder entries — only free file thumbnails.
@@ -663,7 +662,7 @@ void LevelEditorScene::Unload() {
     mWindow = nullptr;
 }
 
-// ─── HandleEvent ──────────────────────────────────────────────────────────────
+// --- HandleEvent -----------------------------------------------------------
 bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) return false;
 
@@ -704,6 +703,36 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     // in motion events below; this just resets when the drop window closes)
     if (e.type == SDL_EVENT_DROP_COMPLETE) {
         mActionAnimDropHover = -1;
+    }
+
+    // ── Moving-platform popup: text input for speed field ─────────────────────
+    if (mMovPlatSpeedInput) {
+        if (e.type == SDL_EVENT_TEXT_INPUT) {
+            // Only allow digits
+            for (char ch : std::string(e.text.text))
+                if (ch >= '0' && ch <= '9') mMovPlatSpeedStr += ch;
+            return true;
+        }
+        if (e.type == SDL_EVENT_KEY_DOWN) {
+            if (e.key.key == SDLK_BACKSPACE && !mMovPlatSpeedStr.empty()) {
+                mMovPlatSpeedStr.pop_back();
+                return true;
+            }
+            if (e.key.key == SDLK_RETURN || e.key.key == SDLK_KP_ENTER
+                || e.key.key == SDLK_ESCAPE || e.key.key == SDLK_TAB) {
+                // Commit value
+                if (!mMovPlatSpeedStr.empty()) {
+                    int v = std::clamp(std::stoi(mMovPlatSpeedStr), 10, 2000);
+                    mMovPlatSpeed    = (float)v;
+                    mMovPlatSpeedStr = std::to_string(v);
+                    for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveSpeed = mMovPlatSpeed;
+                }
+                mMovPlatSpeedInput = false;
+                SDL_StopTextInput(mWindow ? mWindow->GetRaw() : nullptr);
+                return true;
+            }
+        }
+        return true; // swallow all other input while field is focused
     }
 
     // ── Import text input ─────────────────────────────────────────────────────
@@ -803,6 +832,17 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
         int mx=(int)fmx, my=(int)fmy;
+
+        // When MovingPlat tool is active, Ctrl+scroll adjusts range instead of zooming.
+        // Start position stays fixed; only the end (range) moves.
+        if ((SDL_GetModState() & SDL_KMOD_CTRL) && mActiveTool == Tool::MovingPlat && mx < CanvasW()) {
+            mMovPlatRange = std::max(GRID * 1.0f, mMovPlatRange + e.wheel.y * GRID);
+            for (int idx : mMovPlatIndices)
+                mLevel.tiles[idx].moveRange = mMovPlatRange;
+            SetStatus("MovePlat range=" + std::to_string((int)mMovPlatRange)
+                      + "  (start fixed, end moves)");
+            return true;
+        }
 
         // Ctrl+scroll = zoom in/out, anchored to mouse position
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && mx < CanvasW()) {
@@ -950,7 +990,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 CloseAnimPicker();
                 break;
             case SDLK_T:
-                mActiveTool=Tool::MoveCam; lblTool->CreateSurface("MoveCam");
+                mActiveTool=Tool::MoveCam; lblTool->CreateSurface("Pan");
                 break;
             case SDLK_MINUS:
                 mActiveTool=Tool::Slope; lblTool->CreateSurface("Slope");
@@ -1227,7 +1267,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
         if (HitTest(btnMoveCam,mx,my)) {
-            mActiveTool=Tool::MoveCam; lblTool->CreateSurface("MoveCam");
+            mActiveTool=Tool::MoveCam; lblTool->CreateSurface("Pan");
             return true;
         }
         if (tb(btnProp,        Tool::Prop,        "Prop"))   return true;
@@ -1248,6 +1288,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mMovPlatNextGroupId = maxUsed + 1;
             mMovPlatCurGroupId  = mMovPlatNextGroupId++;
             mMovPlatIndices.clear();
+            // Open config popup and seed speed string from current value
+            mMovPlatPopupOpen  = true;
+            mMovPlatSpeedInput = false;
+            mMovPlatSpeedStr   = std::to_string((int)mMovPlatSpeed);
             SetStatus("MovingPlat: click tiles to add. RClick=axis/range. New group ID="
                       + std::to_string(mMovPlatCurGroupId));
             return true;
@@ -1379,6 +1423,76 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
 
         // ── Canvas ─────────────────────────────────────────────────────────────
+        // Moving-platform config popup click handling
+        if (mMovPlatPopupOpen && HitTest(mMovPlatPopupRect, mx, my)) {
+            const int PW      = 280;
+            const int PAD     = 8;
+            const int ROW_H   = 26;
+            const int TITLE_H = 30;
+            const int px      = mMovPlatPopupRect.x;
+            const int py      = mMovPlatPopupRect.y;
+            int ry = py + TITLE_H;
+
+            // Row 0: speed field + close button
+            SDL_Rect speedField = {px + PAD + 90, ry + (ROW_H - 20)/2, PW - PAD*2 - 90 - 44, 20};
+            SDL_Rect closeBtnR  = {px + PW - PAD - 36, ry + (ROW_H - 20)/2, 36, 20};
+            if (HitTest(speedField, mx, my)) {
+                mMovPlatSpeedInput = true;
+                SDL_StartTextInput(mWindow ? mWindow->GetRaw() : nullptr);
+                return true;
+            }
+            if (HitTest(closeBtnR, mx, my)) {
+                if (!mMovPlatSpeedStr.empty()) {
+                    int v = std::clamp(std::stoi(mMovPlatSpeedStr), 10, 2000);
+                    mMovPlatSpeed = (float)v;
+                    for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveSpeed = mMovPlatSpeed;
+                }
+                mMovPlatPopupOpen  = false;
+                mMovPlatSpeedInput = false;
+                SDL_StopTextInput(mWindow ? mWindow->GetRaw() : nullptr);
+                return true;
+            }
+            ry += ROW_H + PAD;
+
+            // Row 1: H/V direction toggle
+            SDL_Rect btnH = {px + PAD + 90,      ry, 48, ROW_H - 4};
+            SDL_Rect btnV = {px + PAD + 90 + 54, ry, 48, ROW_H - 4};
+            if (HitTest(btnH, mx, my)) {
+                mMovPlatHoriz = true;
+                for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveHoriz = true;
+                return true;
+            }
+            if (HitTest(btnV, mx, my)) {
+                mMovPlatHoriz = false;
+                for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveHoriz = false;
+                return true;
+            }
+            ry += ROW_H + PAD;
+
+            // Row 2: Loop (ping-pong) checkbox row
+            SDL_Rect loopRow = {px + PAD, ry, PW - PAD*2, ROW_H};
+            if (HitTest(loopRow, mx, my)) {
+                mMovPlatLoop = !mMovPlatLoop;
+                if (!mMovPlatLoop) mMovPlatTrigger = false;
+                for (int idx : mMovPlatIndices) {
+                    mLevel.tiles[idx].moveLoop    = mMovPlatLoop;
+                    mLevel.tiles[idx].moveTrigger = mMovPlatTrigger;
+                }
+                return true;
+            }
+            ry += ROW_H + PAD;
+
+            // Row 3: Move on Touch checkbox row
+            SDL_Rect trigRow = {px + PAD, ry, PW - PAD*2, ROW_H};
+            if (HitTest(trigRow, mx, my)) {
+                mMovPlatTrigger = !mMovPlatTrigger;
+                for (int idx : mMovPlatIndices) mLevel.tiles[idx].moveTrigger = mMovPlatTrigger;
+                return true;
+            }
+
+            return true; // absorb all other clicks inside popup
+        }
+
         if (my < TOOLBAR_H || mx >= CanvasW()) return true;
         auto [sx, sy] = SnapToGrid(mx, my);
 
@@ -1482,24 +1596,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 return true;
             }
             case Tool::Hitbox: {
-                // Click a tile to select it for hitbox editing.
-                // Click empty space to deselect.
-                // Drag handles are handled in MOUSE_MOTION.
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    mHitboxTileIdx = ti;
-                    auto& t = mLevel.tiles[ti];
-                    // Initialise hitbox to full tile on first use
-                    if (t.hitboxW == 0 && t.hitboxH == 0) {
-                        t.hitboxOffX = 0; t.hitboxOffY = 0;
-                        t.hitboxW = t.w; t.hitboxH = t.h;
-                    }
-                    SetStatus("Hitbox: tile " + std::to_string(ti) +
-                              "  drag edges to adjust");
-                } else if (mHoverHitboxHdl == HitboxHandle::None) {
-                    mHitboxTileIdx = -1; // deselect
-                }
-                // Start drag if hovering a handle
+                // Priority 1: if we already have a tile selected and the cursor
+                // is on one of its handles, start the drag immediately — don't
+                // let HitTile() steal focus to an adjacent tile.
                 if (mHitboxTileIdx >= 0 && mHoverHitboxHdl != HitboxHandle::None) {
                     auto& t = mLevel.tiles[mHitboxTileIdx];
                     mHitboxDragging  = true;
@@ -1510,6 +1609,38 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     mHitboxOrigOffY  = t.hitboxOffY;
                     mHitboxOrigW     = t.hitboxW;
                     mHitboxOrigH     = t.hitboxH;
+                    return true;
+                }
+                // Priority 2: if a tile is already selected and the click lands
+                // inside its visual bounds, keep it selected (don't switch to a
+                // neighbour that also happens to overlap the cursor position).
+                bool keptCurrent = false;
+                if (mHitboxTileIdx >= 0 && mHitboxTileIdx < (int)mLevel.tiles.size()) {
+                    const auto& ct = mLevel.tiles[mHitboxTileIdx];
+                    int csx = (int)((ct.x - mCamX) * mZoom);
+                    int csy = (int)((ct.y - mCamY) * mZoom);
+                    int csw = (int)(ct.w * mZoom);
+                    int csh = (int)(ct.h * mZoom);
+                    if (mx >= csx && mx <= csx + csw && my >= csy && my <= csy + csh)
+                        keptCurrent = true;
+                }
+                if (!keptCurrent) {
+                    // Click is outside the current tile — select whichever tile
+                    // the cursor is over, or deselect if on empty space.
+                    int ti = HitTile(mx, my);
+                    if (ti >= 0) {
+                        mHitboxTileIdx = ti;
+                        auto& t = mLevel.tiles[ti];
+                        // Initialise hitbox to full tile on first use
+                        if (t.hitboxW == 0 && t.hitboxH == 0) {
+                            t.hitboxOffX = 0; t.hitboxOffY = 0;
+                            t.hitboxW = t.w; t.hitboxH = t.h;
+                        }
+                        SetStatus("Hitbox: tile " + std::to_string(ti) +
+                                  "  drag edges to adjust");
+                    } else {
+                        mHitboxTileIdx = -1; // deselect on empty space
+                    }
                 }
                 return true;
             }
@@ -1863,7 +1994,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (mActiveTool == Tool::Resize && my >= TOOLBAR_H && mx < CanvasW()) {
             mHoverEdge    = ResizeEdge::None;
             mHoverTileIdx = -1;
-            for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
+            // Iterate reverse (topmost drawn tile first) so a small tile in
+            // front of a large one gets handle priority, matching HitTile().
+            for (int i = (int)mLevel.tiles.size() - 1; i >= 0; i--) {
                 ResizeEdge edge = DetectResizeEdge(i, mx, my);
                 if (edge != ResizeEdge::None) {
                     mHoverEdge    = edge;
@@ -1885,24 +2018,16 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     return true;
 }
 
-// ─── Update ──────────────────────────────────────────────────────────────────
+// --- Update ----------------------------------------------------------------
 void LevelEditorScene::Update(float /*dt*/) {
-    // Poll current mouse position every frame as a catch-up pass.
-    // MOUSE_MOTION events are the primary driver, but on macOS SDL can coalesce
-    // or drop motion events between frames. This ensures the camera is always
-    // flush with the actual cursor position by the time Render runs.
-    if (mIsPanning) {
-        float fx, fy;
-        SDL_GetMouseState(&fx, &fy);
-        int mx = (int)fx, my = (int)fy;
-        mCamX = mPanCamStartX - (mx - mPanStartX) / mZoom;
-        mCamY = mPanCamStartY - (my - mPanStartY) / mZoom;
-        if (mCamX < 0.0f) mCamX = 0.0f;
-        if (mCamY < 0.0f) mCamY = 0.0f;
-    }
+    // Pan is driven entirely by SDL_EVENT_MOUSE_MOTION in HandleEvent using
+    // absolute position delta from the recorded start point. SDL_CaptureMouse
+    // ensures motion events are delivered reliably, so no polling catch-up is
+    // needed here. Having two writers to mCamX/Y caused jitter, especially
+    // under thermal throttling where frame timing is inconsistent.
 }
 
-// ─── Render ───────────────────────────────────────────────────────────────────
+// --- Render ----------------------------------------------------------------
 void LevelEditorScene::Render(Window& window) {
     window.Render();
     SDL_Surface* screen = window.GetSurface();
@@ -2113,26 +2238,22 @@ void LevelEditorScene::Render(Window& window) {
             SDL_Color border = inCurGroup ? SDL_Color{0,255,255,220} : SDL_Color{180,100,255,160};
             DrawOutline(screen, {tsx, tsy, tsw, tsh}, border, 2);
 
-            // Draw travel path: a line showing the range
+            // Travel path line and ghost tiles share the same endpoints,
+            // computed in screen space from world positions.
             int cx = tsx + tsw/2, cy = tsy + tsh/2;
-            int range = (int)t.moveRange;
+            int sw = (int)(t.w * mZoom), sh = (int)(t.h * mZoom);
+            // Compute screen-space ghost positions (reused for line endpoints below)
+            // Both loop and sine modes: start = tile origin, end = tile origin + range.
+            // This gives a clear "start stays, end moves" visual for Ctrl+scroll.
+            int lineStartX, lineEndX, lineStartY, lineEndY;
             if (t.moveHoriz) {
-                if (t.moveLoop) {
-                    // Ping-pong: full range from tile origin
-                    int ox = (int)(t.x - mCamX);
-                    DrawRect(screen, {ox, cy-1, range, 2}, {0,255,255,100});
-                    DrawRect(screen, {ox - 4,     cy-4, 4, 8}, {0,255,255,200}); // left cap
-                    DrawRect(screen, {ox + range, cy-4, 4, 8}, {0,255,255,200}); // right cap
-                } else {
-                    // Sine: symmetric around centre
-                    DrawRect(screen, {cx - range, cy-1, range*2, 2}, {0,255,255,100});
-                    DrawRect(screen, {cx - range - 4, cy-4, 4, 8}, {0,255,255,200});
-                    DrawRect(screen, {cx + range,     cy-4, 4, 8}, {0,255,255,200});
-                }
+                lineStartX = (int)((t.x              - mCamX) * mZoom);
+                lineEndX   = (int)((t.x + t.moveRange - mCamX) * mZoom);
+                DrawRect(screen, {lineStartX, cy-1, lineEndX - lineStartX, 2}, {0,255,255,100});
             } else {
-                DrawRect(screen, {cx-1, cy - range, 2, range*2}, {0,255,255,100});
-                DrawRect(screen, {cx-4, cy - range - 4, 8, 4}, {0,255,255,200});
-                DrawRect(screen, {cx-4, cy + range,     8, 4}, {0,255,255,200});
+                lineStartY = (int)((t.y              - mCamY) * mZoom);
+                lineEndY   = (int)((t.y + t.moveRange - mCamY) * mZoom);
+                DrawRect(screen, {cx-1, lineStartY, 2, lineEndY - lineStartY}, {0,255,255,100});
             }
 
             // ── Direction arrow ──────────────────────────────────────────────
@@ -2152,26 +2273,22 @@ void LevelEditorScene::Render(Window& window) {
                     int rx   = (dir > 0) ? tipX + row - 7 : tipX - row + 1;
                     DrawRect(screen, {rx, acy - half, 1, half * 2 + 1}, {255, 220, 0, 220});
                 }
-                // Start-position dot on the travel line
+                // Ghost tiles at start (green) and end (red) of travel line
                 if (t.moveRange > 0.0f) {
-                    int startPx;
-                    if (t.moveLoop) {
-                        int ox = (int)(t.x - mCamX);
-                        startPx = ox + (int)(t.movePhase * t.moveRange);
-                    } else {
-                        // Sine: phase 0..1 maps to -range..+range via sin
-                        // Show where in the sine cycle it starts
-                        float sinVal = std::sin(t.movePhase * 6.28318f); // -1..1
-                        startPx = cx + (int)(sinVal * t.moveRange);
-                    }
-                    // Bright yellow dot with dark outline
-                    DrawRect(screen, {startPx - 5, cy - 5, 10, 10}, {255, 255, 0, 255});
-                    DrawOutline(screen, {startPx - 5, cy - 5, 10, 10}, {0, 0, 0, 220}, 2);
-                    // Small tick line through the dot
-                    DrawRect(screen, {startPx - 1, cy - 10, 2, 20}, {255, 255, 0, 180});
-                    // Phase % badge just above the dot
+                    int gsy = (int)((t.y - mCamY) * mZoom);
+                    // Start ghost
+                    DrawRectAlpha(screen, {lineStartX, gsy, sw, sh}, {0, 200, 80, 60});
+                    DrawOutline(screen, {lineStartX, gsy, sw, sh}, {0, 255, 100, 200}, 2);
+                    blitBadge(GetBadge("S", {0,255,120,255}), lineStartX+2, gsy+2);
+                    // End ghost
+                    DrawRectAlpha(screen, {lineEndX, gsy, sw, sh}, {220, 60, 60, 60});
+                    DrawOutline(screen, {lineEndX, gsy, sw, sh}, {255, 80, 80, 200}, 2);
+                    blitBadge(GetBadge("E", {255,100,100,255}), lineEndX+2, gsy+2);
+                    // Phase tick on line
+                    int phasePx = lineStartX + (int)((lineEndX - lineStartX) * t.movePhase);
+                    DrawRect(screen, {phasePx - 1, cy - 12, 2, 24}, {255, 255, 0, 200});
                     std::string pctStr = std::to_string((int)(t.movePhase * 100)) + "%";
-                    blitBadge(GetBadge(pctStr, {255,255,180,255}), startPx - 8, cy - 22);
+                    blitBadge(GetBadge(pctStr, {255,255,180,255}), phasePx - 8, cy - 24);
                 }
             } else {
                 // Vertical arrow at horizontal centre
@@ -2183,20 +2300,22 @@ void LevelEditorScene::Render(Window& window) {
                     int ry   = (dir > 0) ? tipY + row - 7 : tipY - row + 1;
                     DrawRect(screen, {acx - half, ry, half * 2 + 1, 1}, {255, 220, 0, 220});
                 }
-                // Start-position dot on vertical travel line
+                // Ghost tiles at start (green) and end (red) of vertical travel line
                 if (t.moveRange > 0.0f) {
-                    int startPy;
-                    if (t.moveLoop) {
-                        startPy = cy - (int)(t.moveRange) + (int)(t.movePhase * t.moveRange);
-                    } else {
-                        float sinVal = std::sin(t.movePhase * 6.28318f);
-                        startPy = cy + (int)(sinVal * t.moveRange);
-                    }
-                    DrawRect(screen, {acx - 5, startPy - 5, 10, 10}, {255, 255, 0, 255});
-                    DrawOutline(screen, {acx - 5, startPy - 5, 10, 10}, {0, 0, 0, 220}, 2);
-                    DrawRect(screen, {acx - 10, startPy - 1, 20, 2}, {255, 255, 0, 180});
+                    int gsx = (int)((t.x - mCamX) * mZoom);
+                    // Start ghost
+                    DrawRectAlpha(screen, {gsx, lineStartY, sw, sh}, {0, 200, 80, 60});
+                    DrawOutline(screen, {gsx, lineStartY, sw, sh}, {0, 255, 100, 200}, 2);
+                    blitBadge(GetBadge("S", {0,255,120,255}), gsx+2, lineStartY+2);
+                    // End ghost
+                    DrawRectAlpha(screen, {gsx, lineEndY, sw, sh}, {220, 60, 60, 60});
+                    DrawOutline(screen, {gsx, lineEndY, sw, sh}, {255, 80, 80, 200}, 2);
+                    blitBadge(GetBadge("E", {255,100,100,255}), gsx+2, lineEndY+2);
+                    // Phase tick
+                    int phasePy = lineStartY + (int)((lineEndY - lineStartY) * t.movePhase);
+                    DrawRect(screen, {acx - 12, phasePy - 1, 24, 2}, {255, 255, 0, 200});
                     std::string pctStr = std::to_string((int)(t.movePhase * 100)) + "%";
-                    blitBadge(GetBadge(pctStr, {255,255,180,255}), acx + 8, startPy - 6);
+                    blitBadge(GetBadge(pctStr, {255,255,180,255}), acx + 8, phasePy - 6);
                 }
             }
 
@@ -2232,12 +2351,112 @@ void LevelEditorScene::Render(Window& window) {
             + "  range=" + std::to_string((int)mMovPlatRange)
             + "  spd=" + std::to_string((int)mMovPlatSpeed)
             + (mMovPlatLoop ? "  LOOP" : "")
-            + (mMovPlatTrigger ? "  TRIGGER" : "")
+            + (mMovPlatTrigger ? "  TOUCH" : "")
             + "  grp=" + std::to_string(mMovPlatCurGroupId)
             + "  tiles=" + std::to_string(mMovPlatIndices.size())
             + "  LClick=add  RClick=cycle preset";
         DrawRect(screen, {0, TOOLBAR_H+20, cw, 18}, {10,30,50,210});
         blitBadge(GetBadge(paramStr, {0,230,230,255}), 6, TOOLBAR_H+23);
+
+        // Config popup panel
+        if (mMovPlatPopupOpen) {
+            const int PW      = 280;
+            const int PAD     = 8;
+            const int ROW_H   = 26;
+            const int TITLE_H = 30;
+            const int ROWS    = 4; // speed, direction, loop, touch
+            const int PH      = TITLE_H + ROWS * (ROW_H + PAD) + PAD;
+            // Pin to top-right of canvas area
+            int px = cw - PW - 8;
+            int py = TOOLBAR_H + 42; // just below the param bar
+            mMovPlatPopupRect = {px, py, PW, PH};
+
+            // Panel background + border
+            DrawRect(screen, {px, py, PW, PH}, {14, 22, 40, 245});
+            DrawOutline(screen, {px, py, PW, PH}, {0, 200, 160, 255}, 2);
+            DrawRect(screen, {px+1, py+1, PW-2, 3}, {0, 200, 160, 255});
+
+            // Title
+            {
+                std::string title = "Platform Config  (grp " + std::to_string(mMovPlatCurGroupId) + ")";
+                auto [tx, ty] = Text::CenterInRect(title, 12, {px, py+4, PW, TITLE_H-4});
+                Text tt(title, SDL_Color{0,230,200,255}, tx, ty, 12);
+                tt.Render(screen);
+            }
+
+            int ry = py + TITLE_H;
+
+            // Row 0: Speed
+            {
+                DrawRect(screen, {px + PAD, ry, PW - PAD*2, ROW_H}, {20,32,55,200});
+                blitBadge(GetBadge("Speed (px/s)", {160,200,220,255}), px + PAD + 4, ry + (ROW_H-10)/2);
+                // Text input field
+                int fw = PW - PAD*2 - 90 - 44;
+                SDL_Rect field = {px + PAD + 90, ry + (ROW_H - 20)/2, fw, 20};
+                SDL_Color fieldBg = mMovPlatSpeedInput
+                    ? SDL_Color{40, 80, 160, 255} : SDL_Color{25, 40, 70, 255};
+                SDL_Color fieldBd = mMovPlatSpeedInput
+                    ? SDL_Color{100, 180, 255, 255} : SDL_Color{60, 100, 140, 255};
+                DrawRect(screen, field, fieldBg);
+                DrawOutline(screen, field, fieldBd, 1);
+                std::string disp = mMovPlatSpeedInput
+                    ? mMovPlatSpeedStr + "|"
+                    : std::to_string((int)mMovPlatSpeed);
+                blitBadge(GetBadge(disp, {220,240,255,255}), field.x + 4, field.y + (20-10)/2);
+                // Close button
+                SDL_Rect closeBtn = {px + PW - PAD - 36, ry + (ROW_H - 20)/2, 36, 20};
+                DrawRect(screen, closeBtn, {60,30,30,220});
+                DrawOutline(screen, closeBtn, {180,80,80,255});
+                blitBadge(GetBadge("close", {220,140,140,255}), closeBtn.x + 4, closeBtn.y + 4);
+            }
+            ry += ROW_H + PAD;
+
+            // Row 1: Direction H/V toggle
+            {
+                DrawRect(screen, {px + PAD, ry, PW - PAD*2, ROW_H}, {20,32,55,200});
+                blitBadge(GetBadge("Direction", {160,200,220,255}), px + PAD + 4, ry + (ROW_H-10)/2);
+                SDL_Rect btnH = {px + PAD + 90,      ry + 2, 48, ROW_H - 4};
+                SDL_Rect btnV = {px + PAD + 90 + 54, ry + 2, 48, ROW_H - 4};
+                DrawRect(screen, btnH, mMovPlatHoriz  ? SDL_Color{0,160,255,255} : SDL_Color{30,40,60,220});
+                DrawRect(screen, btnV, !mMovPlatHoriz ? SDL_Color{0,160,255,255} : SDL_Color{30,40,60,220});
+                DrawOutline(screen, btnH, {0,120,200,255});
+                DrawOutline(screen, btnV, {0,120,200,255});
+                {
+                    auto [hx,hy] = Text::CenterInRect("Horiz", 10, btnH);
+                    blitBadge(GetBadge("Horiz", mMovPlatHoriz?SDL_Color{255,255,255,255}:SDL_Color{120,160,200,255}), hx, hy);
+                    auto [vx,vy] = Text::CenterInRect("Vert",  10, btnV);
+                    blitBadge(GetBadge("Vert",  !mMovPlatHoriz?SDL_Color{255,255,255,255}:SDL_Color{120,160,200,255}), vx, vy);
+                }
+            }
+            ry += ROW_H + PAD;
+
+            // Row 2: Loop (ping-pong) checkbox
+            {
+                DrawRect(screen, {px + PAD, ry, PW - PAD*2, ROW_H}, {20,32,55,200});
+                blitBadge(GetBadge("Ping-pong loop", {160,200,220,255}), px + PAD + 4, ry + (ROW_H-10)/2);
+                SDL_Rect cb = {px + PAD + 90, ry + (ROW_H-16)/2, 16, 16};
+                DrawRect(screen, cb, mMovPlatLoop ? SDL_Color{0,180,120,255} : SDL_Color{30,40,60,255});
+                DrawOutline(screen, cb, {0,160,100,255});
+                if (mMovPlatLoop)
+                    blitBadge(GetBadge("x", {255,255,255,255}), cb.x+3, cb.y+2);
+            }
+            ry += ROW_H + PAD;
+
+            // Row 3: Move on Touch checkbox
+            {
+                DrawRect(screen, {px + PAD, ry, PW - PAD*2, ROW_H}, {20,32,55,200});
+                blitBadge(GetBadge("Move on touch", {160,200,220,255}), px + PAD + 4, ry + (ROW_H-10)/2);
+                SDL_Rect cb = {px + PAD + 90, ry + (ROW_H-16)/2, 16, 16};
+                DrawRect(screen, cb, mMovPlatTrigger ? SDL_Color{255,160,0,255} : SDL_Color{30,40,60,255});
+                DrawOutline(screen, cb, {200,140,0,255});
+                if (mMovPlatTrigger)
+                    blitBadge(GetBadge("x", {255,255,255,255}), cb.x+3, cb.y+2);
+                // Hint text
+                blitBadge(GetBadge("(waits for player to land)",
+                    mMovPlatTrigger?SDL_Color{255,200,80,255}:SDL_Color{80,100,120,255}),
+                    px + PAD + 112, ry + (ROW_H-10)/2);
+            }
+        }
     } else {
         // Outside MovingPlat tool: just draw a subtle M badge on moving tiles
         for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
@@ -2974,7 +3193,7 @@ void LevelEditorScene::Render(Window& window) {
     window.Update();
 }
 
-// ─── NextScene ────────────────────────────────────────────────────────────────
+// --- NextScene -------------------------------------------------------------
 std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     if (mLaunchGame) {
         mLaunchGame = false;
@@ -2986,7 +3205,7 @@ std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     return nullptr;
 }
 
-// ─── ImportPath ───────────────────────────────────────────────────────────────
+// --- ImportPath ------------------------------------------------------------
 bool LevelEditorScene::ImportPath(const std::string& srcPath) {
     fs::path src(srcPath);
 

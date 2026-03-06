@@ -19,6 +19,30 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <optional>
 #include <string>
+#include <unordered_map>
+
+// ── Global font cache ─────────────────────────────────────────────────────────
+// TTF_OpenFont is expensive (disk I/O + parsing). This cache ensures each
+// font size is opened exactly once for the lifetime of the process.
+namespace FontCache {
+    inline TTF_Font* Get(int fontSize) {
+        static std::unordered_map<int, TTF_Font*> cache;
+        auto it = cache.find(fontSize);
+        if (it != cache.end()) return it->second;
+        TTF_Font* f = TTF_OpenFont("fonts/Roboto-VariableFont_wdth,wght.ttf", fontSize);
+        cache[fontSize] = f;
+        return f;
+    }
+    // Call once at shutdown to free all cached fonts.
+    inline void Clear() {
+        static std::unordered_map<int, TTF_Font*>& cache = []() -> auto& {
+            static std::unordered_map<int, TTF_Font*> c;
+            return c;
+        }();
+        for (auto& [sz, f] : cache) if (f) TTF_CloseFont(f);
+        cache.clear();
+    }
+}
 
 /**
  * @class Text
@@ -139,12 +163,10 @@ class Text {
     /// @param fontSize Font size in points
     /// @return SDL_Point where x = width, y = height
     static SDL_Point Measure(const std::string& content, int fontSize) {
-        TTF_Font* font = TTF_OpenFont("fonts/Roboto-VariableFont_wdth,wght.ttf", fontSize);
-        if (!font)
-            return {0, 0};
+        TTF_Font* font = FontCache::Get(fontSize);
+        if (!font) return {0, 0};
         int w = 0, h = 0;
         TTF_GetStringSize(font, content.c_str(), 0, &w, &h);
-        TTF_CloseFont(font);
         return {w, h};
     }
 
