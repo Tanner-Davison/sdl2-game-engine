@@ -731,9 +731,10 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     const std::string& dir = mProfile.slots[slotIdx].folderPath;
     if (dir.empty()) return;
 
-    // Guard against stale absolute paths from other machines (e.g. Mac paths on WSL)
+    // Guard against stale/missing/non-directory paths (e.g. moved folders, cross-machine paths)
     std::error_code ec;
-    if (!fs::exists(dir, ec) || ec) {
+    bool isDir = fs::is_directory(dir, ec);
+    if (!isDir || ec) {
         mDropMsg = "Folder not found (path may be from another machine): " + fs::path(dir).filename().string();
         mProfile.slots[slotIdx].folderPath.clear(); // clear so it doesn't crash on next load
         return;
