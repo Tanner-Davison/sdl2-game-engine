@@ -177,8 +177,9 @@ struct FloatState {
     float driftVy    = 0.0f;   // vertical push velocity   (decays with drag)
     float spinAngle  = 0.0f;   // current visual rotation in degrees (render-only)
     float spinSpeed  = 0.0f;   // degrees/sec, decays to 0
-    bool  wasInContact = false; // true if player was in contact last frame (impulse edge-trigger)
-    float dyThisFrame  = 0.0f;  // Y movement applied this frame (used to carry player)
+    bool  wasInContact     = false; // true if player was in contact last frame (impulse edge-trigger)
+    bool  wasFloatContact  = false; // true if another floating obj was in contact last frame
+    float dyThisFrame      = 0.0f;  // Y movement applied this frame (used to carry player)
     static constexpr float DRAG = 1.8f; // drag coefficient applied each second
 };
 

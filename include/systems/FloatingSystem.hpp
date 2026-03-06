@@ -333,6 +333,84 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
             fs.wasInContact = false;
         }
 
+        // ── Floating-object vs floating-object push ────────────────────────────
+        // When two floating objects overlap, impart mutual impulses so they push
+        // each other apart — like billiard balls. We only fire on the first frame
+        // of overlap (wasFloatContact) to avoid double-accumulating every frame.
+        // Each object gets half the relative closing velocity so momentum is
+        // roughly conserved without a full rigid-body solver.
+        constexpr float FLOAT_PUSH_H   = 200.0f; // base horizontal impulse (px/s)
+        constexpr float FLOAT_PUSH_V   = 120.0f; // base vertical   impulse (px/s)
+        constexpr float FLOAT_SPIN_HIT =  90.0f; // spin imparted on collision
+
+        for (auto other : floatView) {
+            if (other == entity) continue;
+
+            auto& ofs = floatView.get<FloatState>(other);
+            auto& oft = floatView.get<Transform>(other);
+            const auto& ofc = floatView.get<Collider>(other);
+
+            // AABB overlap test
+            bool overlap =
+                ft.x          < oft.x + ofc.w &&
+                ft.x + fc.w   > oft.x          &&
+                ft.y          < oft.y + ofc.h  &&
+                ft.y + fc.h   > oft.y;
+
+            if (!overlap) {
+                fs.wasFloatContact = false;
+                continue;
+            }
+
+            // Push-out: resolve on the shallowest penetration axis
+            float oLeft   = (ft.x  + fc.w)  - oft.x;
+            float oRight  = (oft.x + ofc.w) - ft.x;
+            float oTop    = (ft.y  + fc.h)  - oft.y;
+            float oBottom = (oft.y + ofc.h) - ft.y;
+
+            float minH = oLeft  < oRight  ? oLeft  : oRight;
+            float minV = oTop   < oBottom ? oTop   : oBottom;
+
+            float dx = (ft.x + fc.w * 0.5f) - (oft.x + ofc.w * 0.5f);
+            float dy = (ft.y + fc.h * 0.5f) - (oft.y + ofc.h * 0.5f);
+
+            // Separate the two objects equally along the shallowest axis
+            if (minH < minV) {
+                float half = minH * 0.5f;
+                if (dx >= 0.0f) { ft.x  += half; oft.x -= half; }
+                else            { ft.x  -= half; oft.x += half; }
+            } else {
+                float half = minV * 0.5f;
+                if (dy >= 0.0f) { ft.y  += half; fs.baseY  += half;
+                                  oft.y -= half; ofs.baseY -= half; }
+                else            { ft.y  -= half; fs.baseY  -= half;
+                                  oft.y += half; ofs.baseY += half; }
+            }
+
+            // Impulse — only on first frame of contact to avoid per-frame pumping
+            if (!fs.wasFloatContact) {
+                float hDir = (dx >= 0.0f) ? 1.0f : -1.0f;
+                float vDir = (dy >= 0.0f) ? 1.0f : -1.0f;
+
+                // Scale impulse by incoming closing speed so a fast hit hits hard
+                float relVx = fs.driftVx - ofs.driftVx;
+                float relVy = fs.driftVy - ofs.driftVy;
+                float hImp  = std::max(FLOAT_PUSH_H, std::abs(relVx) * 0.8f);
+                float vImp  = std::max(FLOAT_PUSH_V, std::abs(relVy) * 0.8f);
+
+                // Apply to both objects (equal and opposite)
+                fs.driftVx  +=  hDir * hImp * 0.5f;
+                fs.driftVy  +=  vDir * vImp * 0.5f;
+                fs.spinSpeed += hDir * FLOAT_SPIN_HIT;
+
+                ofs.driftVx  -= hDir * hImp * 0.5f;
+                ofs.driftVy  -= vDir * vImp * 0.5f;
+                ofs.spinSpeed -= hDir * FLOAT_SPIN_HIT;
+            }
+
+            fs.wasFloatContact = true;
+        }
+
         // ── Sword slash push ──────────────────────────────────────────────────
         // SLASH_PUSH_FORCE: horizontal impulse in px/s — dominant force.
         //   The enemy is knocked in the direction the player is FACING (slashDir),
