@@ -2132,15 +2132,22 @@ void LevelEditorScene::Render(Window& window) {
     // Grid — each line's screen position is computed fresh from its world coordinate
     // so lines always land exactly where tile edges land. Stepping by an integer
     // pixel count (gridPx) accumulates truncation error; recomputing per-line avoids it.
+    //
+    // Alpha scales with zoom: at 100% zoom lines are fully visible (alpha=20);
+    // as you zoom out they fade so the canvas doesn't become a dense mesh.
+    // At ZOOM_MIN (0.25) alpha bottoms out at ~4 so lines are still faintly there.
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(screen->format);
-    Uint32 gridCol = SDL_MapRGBA(fmt,nullptr,255,255,255,20);
     {
-        // First grid line index visible on screen (can be negative world coords)
+        // Map zoom range [ZOOM_MIN..1.0] → alpha [4..20] linearly, clamped.
+        // Above 1.0 (zoomed in) alpha stays at 20 — lines are already very visible.
+        float zoomT    = std::clamp((mZoom - ZOOM_MIN) / (1.0f - ZOOM_MIN), 0.0f, 1.0f);
+        Uint8 gridAlpha = (Uint8)(4.0f + zoomT * 16.0f); // 4 at min zoom, 20 at 100%+
+        Uint32 gridCol  = SDL_MapRGBA(fmt, nullptr, 255, 255, 255, gridAlpha);
+
         int firstCol = (int)std::floor(mCamX / GRID);
         int firstRow = (int)std::floor(mCamY / GRID);
-        // How many lines fit across the canvas at this zoom
-        int numCols = (int)std::ceil(cw / (GRID * mZoom)) + 2;
-        int numRows = (int)std::ceil(window.GetHeight() / (GRID * mZoom)) + 2;
+        int numCols  = (int)std::ceil(cw / (GRID * mZoom)) + 2;
+        int numRows  = (int)std::ceil(window.GetHeight() / (GRID * mZoom)) + 2;
         for (int i = 0; i < numCols; i++) {
             float worldX = (firstCol + i) * (float)GRID;
             int sx = (int)std::round((worldX - mCamX) * mZoom);
