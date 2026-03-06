@@ -3,6 +3,8 @@
 #include <GameConfig.hpp>
 #include <GameEvents.hpp>
 #include <cmath>
+#include <set>
+#include <utility>
 #include <entt/entt.hpp>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -333,84 +335,6 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
             fs.wasInContact = false;
         }
 
-        // ── Floating-object vs floating-object push ────────────────────────────
-        // When two floating objects overlap, impart mutual impulses so they push
-        // each other apart — like billiard balls. We only fire on the first frame
-        // of overlap (wasFloatContact) to avoid double-accumulating every frame.
-        // Each object gets half the relative closing velocity so momentum is
-        // roughly conserved without a full rigid-body solver.
-        constexpr float FLOAT_PUSH_H   = 200.0f; // base horizontal impulse (px/s)
-        constexpr float FLOAT_PUSH_V   = 120.0f; // base vertical   impulse (px/s)
-        constexpr float FLOAT_SPIN_HIT =  90.0f; // spin imparted on collision
-
-        for (auto other : floatView) {
-            if (other == entity) continue;
-
-            auto& ofs = floatView.get<FloatState>(other);
-            auto& oft = floatView.get<Transform>(other);
-            const auto& ofc = floatView.get<Collider>(other);
-
-            // AABB overlap test
-            bool overlap =
-                ft.x          < oft.x + ofc.w &&
-                ft.x + fc.w   > oft.x          &&
-                ft.y          < oft.y + ofc.h  &&
-                ft.y + fc.h   > oft.y;
-
-            if (!overlap) {
-                fs.wasFloatContact = false;
-                continue;
-            }
-
-            // Push-out: resolve on the shallowest penetration axis
-            float oLeft   = (ft.x  + fc.w)  - oft.x;
-            float oRight  = (oft.x + ofc.w) - ft.x;
-            float oTop    = (ft.y  + fc.h)  - oft.y;
-            float oBottom = (oft.y + ofc.h) - ft.y;
-
-            float minH = oLeft  < oRight  ? oLeft  : oRight;
-            float minV = oTop   < oBottom ? oTop   : oBottom;
-
-            float dx = (ft.x + fc.w * 0.5f) - (oft.x + ofc.w * 0.5f);
-            float dy = (ft.y + fc.h * 0.5f) - (oft.y + ofc.h * 0.5f);
-
-            // Separate the two objects equally along the shallowest axis
-            if (minH < minV) {
-                float half = minH * 0.5f;
-                if (dx >= 0.0f) { ft.x  += half; oft.x -= half; }
-                else            { ft.x  -= half; oft.x += half; }
-            } else {
-                float half = minV * 0.5f;
-                if (dy >= 0.0f) { ft.y  += half; fs.baseY  += half;
-                                  oft.y -= half; ofs.baseY -= half; }
-                else            { ft.y  -= half; fs.baseY  -= half;
-                                  oft.y += half; ofs.baseY += half; }
-            }
-
-            // Impulse — only on first frame of contact to avoid per-frame pumping
-            if (!fs.wasFloatContact) {
-                float hDir = (dx >= 0.0f) ? 1.0f : -1.0f;
-                float vDir = (dy >= 0.0f) ? 1.0f : -1.0f;
-
-                // Scale impulse by incoming closing speed so a fast hit hits hard
-                float relVx = fs.driftVx - ofs.driftVx;
-                float relVy = fs.driftVy - ofs.driftVy;
-                float hImp  = std::max(FLOAT_PUSH_H, std::abs(relVx) * 0.8f);
-                float vImp  = std::max(FLOAT_PUSH_V, std::abs(relVy) * 0.8f);
-
-                // Apply to both objects (equal and opposite)
-                fs.driftVx  +=  hDir * hImp * 0.5f;
-                fs.driftVy  +=  vDir * vImp * 0.5f;
-                fs.spinSpeed += hDir * FLOAT_SPIN_HIT;
-
-                ofs.driftVx  -= hDir * hImp * 0.5f;
-                ofs.driftVy  -= vDir * vImp * 0.5f;
-                ofs.spinSpeed -= hDir * FLOAT_SPIN_HIT;
-            }
-
-            fs.wasFloatContact = true;
-        }
-
         // ── Sword slash push ──────────────────────────────────────────────────
         // SLASH_PUSH_FORCE: horizontal impulse in px/s — dominant force.
         //   The enemy is knocked in the direction the player is FACING (slashDir),
@@ -455,6 +379,112 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                 fs.driftVx   += slashDir * SLASH_PUSH_FORCE;
                 // No vertical component — slash is a purely horizontal push
                 fs.spinSpeed += slashDir * SLASH_SPIN;
+            }
+        }
+    }
+
+    // ── 4. Floating-object vs floating-object collisions ─────────────────────
+    // Run as a separate pass AFTER all per-entity updates so position/velocity
+    // mutations from the main loop are settled before we test pairs.
+    // We iterate every unique (A, B) pair exactly once using a processed-pair
+    // set, so each collision is resolved once with equal-and-opposite forces.
+    //
+    // Impulse is proportional to relative closing speed — two slow-bobbing
+    // objects that drift together get a gentle nudge; a slashed barrel
+    // slamming into a neighbour hits hard.
+    {
+        constexpr float FLOAT_PUSH_H   = 220.0f; // base H impulse (px/s)
+        constexpr float FLOAT_PUSH_V   = 140.0f; // base V impulse (px/s)
+        constexpr float FLOAT_SPIN_HIT =  80.0f; // spin imparted on hit
+        constexpr float MIN_CLOSING    =  20.0f; // px/s closing speed below which we skip impulse
+
+        // Canonical pair key: always store lower entity value first
+        using Pair = std::pair<entt::entity, entt::entity>;
+        std::set<Pair> processed;
+
+        for (auto A : floatView) {
+            auto& fsA = floatView.get<FloatState>(A);
+            auto& ftA = floatView.get<Transform>(A);
+            const auto& fcA = floatView.get<Collider>(A);
+
+            for (auto B : floatView) {
+                if (B == A) continue;
+
+                // Only process each (A,B) pair once
+                Pair key = (A < B) ? Pair{A, B} : Pair{B, A};
+                if (!processed.insert(key).second) continue;
+
+                auto& fsB = floatView.get<FloatState>(B);
+                auto& ftB = floatView.get<Transform>(B);
+                const auto& fcB = floatView.get<Collider>(B);
+
+                // AABB overlap test
+                if (ftA.x + fcA.w <= ftB.x || ftA.x >= ftB.x + fcB.w) continue;
+                if (ftA.y + fcA.h <= ftB.y || ftA.y >= ftB.y + fcB.h) continue;
+
+                // Overlap depths on each axis
+                float oLeft   = (ftA.x + fcA.w) - ftB.x;
+                float oRight  = (ftB.x + fcB.w) - ftA.x;
+                float oTop    = (ftA.y + fcA.h) - ftB.y;
+                float oBottom = (ftB.y + fcB.h) - ftA.y;
+
+                float minH = oLeft  < oRight  ? oLeft  : oRight;
+                float minV = oTop   < oBottom ? oTop   : oBottom;
+
+                // Centre-to-centre vector (A relative to B)
+                float dx = (ftA.x + fcA.w * 0.5f) - (ftB.x + fcB.w * 0.5f);
+                float dy = (ftA.y + fcA.h * 0.5f) - (ftB.y + fcB.h * 0.5f);
+
+                float hDir = (dx >= 0.0f) ? 1.0f : -1.0f; // +1 = A is to the right of B
+                float vDir = (dy >= 0.0f) ? 1.0f : -1.0f; // +1 = A is below B
+
+                // Relative closing velocity (positive = approaching on that axis)
+                float relVx = fsA.driftVx - fsB.driftVx;
+                float relVy = fsA.driftVy - fsB.driftVy;
+
+                // Push-out: separate equally along the minimum-penetration axis
+                if (minH < minV) {
+                    float half = minH * 0.5f + 0.5f; // +0.5 to ensure clean separation
+                    ftA.x += hDir * half;
+                    ftB.x -= hDir * half;
+                } else {
+                    float half = minV * 0.5f + 0.5f;
+                    ftA.y += vDir * half;  fsA.baseY += vDir * half;
+                    ftB.y -= vDir * half;  fsB.baseY -= vDir * half;
+                }
+
+                // Impulse: only when objects are actually closing (not already separating)
+                // This prevents re-triggering after push-out leaves them just touching.
+                bool closingH = (hDir * relVx) > -MIN_CLOSING; // A moving toward B on H axis
+                bool closingV = (vDir * relVy) > -MIN_CLOSING;
+
+                if (minH < minV) {
+                    // Horizontal collision
+                    if (closingH) {
+                        float imp = std::max(FLOAT_PUSH_H, std::abs(relVx) * 1.2f);
+                        fsA.driftVx  +=  hDir * imp * 0.5f;
+                        fsB.driftVx  -= hDir * imp * 0.5f;
+                        fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT;
+                        fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT;
+                        // Small vertical scatter so stacked objects don't stay perfectly locked
+                        float scatter = FLOAT_PUSH_V * 0.25f;
+                        fsA.driftVy  += vDir * scatter;
+                        fsB.driftVy  -= vDir * scatter;
+                    }
+                } else {
+                    // Vertical collision
+                    if (closingV) {
+                        float imp = std::max(FLOAT_PUSH_V, std::abs(relVy) * 1.2f);
+                        fsA.driftVy  +=  vDir * imp * 0.5f;
+                        fsB.driftVy  -= vDir * imp * 0.5f;
+                        // Small horizontal scatter
+                        float scatter = FLOAT_PUSH_H * 0.25f;
+                        fsA.driftVx  += hDir * scatter;
+                        fsB.driftVx  -= hDir * scatter;
+                        fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT * 0.5f;
+                        fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT * 0.5f;
+                    }
+                }
             }
         }
     }
