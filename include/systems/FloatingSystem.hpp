@@ -384,20 +384,25 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
     }
 
     // ── 4. Floating-object vs floating-object collisions ─────────────────────
-    // Run as a separate pass AFTER all per-entity updates so position/velocity
-    // mutations from the main loop are settled before we test pairs.
-    // We iterate every unique (A, B) pair exactly once using a processed-pair
-    // set, so each collision is resolved once with equal-and-opposite forces.
+    // Must run as a SEPARATE pass so that all entities have their final
+    // post-bounce positions from pass 3 before we test pairs.
     //
-    // Impulse is proportional to relative closing speed — two slow-bobbing
-    // objects that drift together get a gentle nudge; a slashed barrel
-    // slamming into a neighbour hits hard.
+    // Key insight: the tile bounce in pass 3 already reflected the moving
+    // object away from solid tiles — but it does NOT know about other float
+    // entities.  By the time we get here the moving object may have already
+    // been pushed past the stationary one.  So we use a CONTACT MARGIN (same
+    // trick as the player-body push) instead of requiring actual pixel
+    // penetration.  Any two float entities whose AABBs are within MARGIN px
+    // of each other are considered "touching" and we apply impulse + push-out.
+    //
+    // Pair deduplication via a processed set ensures each (A,B) is handled
+    // exactly once — equal-and-opposite forces, no double-counting.
     {
-        constexpr float FLOAT_PUSH_H   = 220.0f; // base H impulse (px/s)
-        constexpr float FLOAT_PUSH_V   = 140.0f; // base V impulse (px/s)
-        constexpr float FLOAT_SPIN_HIT =  80.0f; // spin imparted on hit
+        constexpr float FLOAT_PUSH_H   = 260.0f;
+        constexpr float FLOAT_PUSH_V   = 160.0f;
+        constexpr float FLOAT_SPIN_HIT =  90.0f;
+        constexpr float MARGIN         =   4.0f; // px proximity counts as contact
 
-        // Canonical pair key: always store lower entity value first
         using Pair = std::pair<entt::entity, entt::entity>;
         std::set<Pair> processed;
 
@@ -408,8 +413,6 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
 
             for (auto B : floatView) {
                 if (B == A) continue;
-
-                // Only process each (A,B) pair once
                 Pair key = (A < B) ? Pair{A, B} : Pair{B, A};
                 if (!processed.insert(key).second) continue;
 
@@ -417,64 +420,67 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                 auto& ftB = floatView.get<Transform>(B);
                 const auto& fcB = floatView.get<Collider>(B);
 
-                // AABB overlap test
-                if (ftA.x + fcA.w <= ftB.x || ftA.x >= ftB.x + fcB.w) continue;
-                if (ftA.y + fcA.h <= ftB.y || ftA.y >= ftB.y + fcB.h) continue;
+                // Expanded AABB test — fire within MARGIN px of actual contact
+                if (ftA.x + fcA.w + MARGIN <= ftB.x || ftA.x >= ftB.x + fcB.w + MARGIN) continue;
+                if (ftA.y + fcA.h + MARGIN <= ftB.y || ftA.y >= ftB.y + fcB.h + MARGIN) continue;
 
-                // Overlap depths on each axis
+                // Centre-to-centre separation vector  (A relative to B)
+                float dx = (ftA.x + fcA.w * 0.5f) - (ftB.x + fcB.w * 0.5f);
+                float dy = (ftA.y + fcA.h * 0.5f) - (ftB.y + fcB.h * 0.5f);
+                float hDir = (dx >= 0.0f) ? 1.0f : -1.0f;
+                float vDir = (dy >= 0.0f) ? 1.0f : -1.0f;
+
+                // Relative velocity of A w.r.t. B
+                float relVx = fsA.driftVx - fsB.driftVx;
+                float relVy = fsA.driftVy - fsB.driftVy;
+
+                // Only act when A is actually moving toward B on the dominant axis
+                // (hDir * relVx < 0  means A is moving in the -hDir direction,
+                //  i.e. toward B which is in the -hDir direction from A)
+                float approachH = -(hDir * relVx); // positive = closing horizontally
+                float approachV = -(vDir * relVy); // positive = closing vertically
+
+                // Use overlap depths to find the shallowest axis
                 float oLeft   = (ftA.x + fcA.w) - ftB.x;
                 float oRight  = (ftB.x + fcB.w) - ftA.x;
                 float oTop    = (ftA.y + fcA.h) - ftB.y;
                 float oBottom = (ftB.y + fcB.h) - ftA.y;
+                float minH = std::min(oLeft,  oRight);
+                float minV = std::min(oTop,   oBottom);
+                bool  horizAxis = (minH < minV); // collision is primarily horizontal
 
-                float minH = oLeft  < oRight  ? oLeft  : oRight;
-                float minV = oTop   < oBottom ? oTop   : oBottom;
+                // Skip if already separating on the contact axis
+                if ( horizAxis && approachH < -10.0f) continue;
+                if (!horizAxis && approachV < -10.0f) continue;
 
-                // Centre-to-centre vector (A relative to B)
-                float dx = (ftA.x + fcA.w * 0.5f) - (ftB.x + fcB.w * 0.5f);
-                float dy = (ftA.y + fcA.h * 0.5f) - (ftB.y + fcB.h * 0.5f);
-
-                float hDir = (dx >= 0.0f) ? 1.0f : -1.0f; // +1 = A is to the right of B
-                float vDir = (dy >= 0.0f) ? 1.0f : -1.0f; // +1 = A is below B
-
-                // Relative closing velocity (positive = approaching on that axis)
-                float relVx = fsA.driftVx - fsB.driftVx;
-                float relVy = fsA.driftVy - fsB.driftVy;
-
-                // Push-out: separate equally along the minimum-penetration axis
-                if (minH < minV) {
-                    float half = minH * 0.5f + 0.5f; // +0.5 to ensure clean separation
-                    ftA.x += hDir * half;
-                    ftB.x -= hDir * half;
-                } else {
-                    float half = minV * 0.5f + 0.5f;
-                    ftA.y += vDir * half;  fsA.baseY += vDir * half;
-                    ftB.y -= vDir * half;  fsB.baseY -= vDir * half;
+                // Push-out: only if actually overlapping (not just within margin)
+                if (minH > 0.0f && minV > 0.0f) {
+                    if (horizAxis) {
+                        float half = minH * 0.5f + 0.5f;
+                        ftA.x += hDir * half;
+                        ftB.x -= hDir * half;
+                    } else {
+                        float half = minV * 0.5f + 0.5f;
+                        ftA.y += vDir * half;  fsA.baseY += vDir * half;
+                        ftB.y -= vDir * half;  fsB.baseY -= vDir * half;
+                    }
                 }
 
-                // Impulse — scale by relative closing speed so a fast hit sends
-                // the target flying; two slow-drifting objects get a gentle nudge.
-                // We always apply the impulse here: the push-out above already
-                // separated the AABBs so they won't overlap next frame, preventing
-                // re-triggering without needing a closing-velocity gate.
-                if (minH < minV) {
-                    // Horizontal collision — exchange horizontal momentum
+                // Impulse — transfer momentum along the contact axis
+                if (horizAxis) {
                     float imp = std::max(FLOAT_PUSH_H, std::abs(relVx) * 1.2f);
                     fsA.driftVx   +=  hDir * imp * 0.5f;
                     fsB.driftVx   -= hDir * imp * 0.5f;
                     fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT;
                     fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT;
-                    // Small vertical scatter so stacked objects don't lock together
-                    fsA.driftVy  += vDir * FLOAT_PUSH_V * 0.2f;
-                    fsB.driftVy  -= vDir * FLOAT_PUSH_V * 0.2f;
+                    fsA.driftVy  += vDir * FLOAT_PUSH_V * 0.15f;
+                    fsB.driftVy  -= vDir * FLOAT_PUSH_V * 0.15f;
                 } else {
-                    // Vertical collision — exchange vertical momentum
                     float imp = std::max(FLOAT_PUSH_V, std::abs(relVy) * 1.2f);
                     fsA.driftVy   +=  vDir * imp * 0.5f;
                     fsB.driftVy   -= vDir * imp * 0.5f;
-                    // Small horizontal scatter
-                    fsA.driftVx  += hDir * FLOAT_PUSH_H * 0.2f;
-                    fsB.driftVx  -= hDir * FLOAT_PUSH_H * 0.2f;
+                    fsA.driftVx  += hDir * FLOAT_PUSH_H * 0.15f;
+                    fsB.driftVx  -= hDir * FLOAT_PUSH_H * 0.15f;
                     fsA.spinSpeed +=  hDir * FLOAT_SPIN_HIT * 0.5f;
                     fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT * 0.5f;
                 }
