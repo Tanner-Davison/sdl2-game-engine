@@ -124,6 +124,22 @@ inline bool LoadAnimatedTileDef(const std::string& path, AnimatedTileDef& out) {
         }
         out.framePaths.push_back(p);
     }
+    // Sort numerically by the trailing number in the filename so that
+    // "2.png" sorts before "10.png" regardless of filesystem or JSON order.
+    // Lexicographic order (1,10,2,3...) causes a visible flicker on WSL/Windows.
+    std::sort(out.framePaths.begin(), out.framePaths.end(),
+              [](const std::string& a, const std::string& b) {
+                  auto trailingNum = [](const std::string& s) -> int {
+                      fs::path p(s);
+                      std::string stem = p.stem().string();
+                      // scan backward for the numeric suffix
+                      int i = (int)stem.size() - 1;
+                      while (i >= 0 && std::isdigit((unsigned char)stem[i])) --i;
+                      std::string digits = stem.substr(i + 1);
+                      return digits.empty() ? 0 : std::stoi(digits);
+                  };
+                  return trailingNum(a) < trailingNum(b);
+              });
     // If all frames are missing, treat the def as invalid
     if (out.framePaths.empty()) {
         std::print("AnimatedTile: no valid frames found in {}\n", path);
