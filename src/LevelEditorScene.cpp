@@ -10,42 +10,13 @@
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Internal helpers
+// Internal helpers — delegate to EditorSurfaceCache static methods
 // ---------------------------------------------------------------------------
-
-// Build a PAL_ICON×PAL_ICON thumbnail from a full-res SDL_Surface.
-// Returns nullptr on failure. Caller owns the result.
 static SDL_Surface* MakeThumb(SDL_Surface* src, int w, int h) {
-    SDL_Surface* t = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ARGB8888);
-    if (!t)
-        return nullptr;
-    SDL_SetSurfaceBlendMode(t, SDL_BLENDMODE_NONE);
-    // Set source to BLENDMODE_NONE so raw RGBA (including alpha) is copied as-is.
-    // Without this SDL composites src onto dst and bakes alpha to 255, making
-    // transparent tiles render as opaque in the editor canvas.
-    SDL_BlendMode srcMode;
-    SDL_GetSurfaceBlendMode(src, &srcMode);
-    SDL_SetSurfaceBlendMode(src, SDL_BLENDMODE_NONE);
-    SDL_Rect sr = {0, 0, src->w, src->h};
-    SDL_Rect dr = {0, 0, w, h};
-    SDL_BlitSurfaceScaled(src, &sr, t, &dr, SDL_SCALEMODE_LINEAR);
-    SDL_SetSurfaceBlendMode(src, srcMode);
-    SDL_SetSurfaceBlendMode(t, SDL_BLENDMODE_BLEND);
-    return t;
+    return EditorSurfaceCache::MakeThumb(src, w, h);
 }
-
-// Load a PNG from disk, convert to ARGB8888, return it (caller owns).
-// Blend mode is set to BLEND so the surface composites correctly when
-// blitted to the canvas — transparent pixels show through to the background.
 static SDL_Surface* LoadPNG(const fs::path& p) {
-    SDL_Surface* raw = IMG_Load(p.string().c_str());
-    if (!raw)
-        return nullptr;
-    SDL_Surface* c = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
-    SDL_DestroySurface(raw);
-    if (c)
-        SDL_SetSurfaceBlendMode(c, SDL_BLENDMODE_BLEND);
-    return c;
+    return EditorSurfaceCache::LoadPNG(p);
 }
 
 // --- RebuildToolbarLayout --------------------------------------------------
@@ -191,76 +162,7 @@ void LevelEditorScene::RebuildToolbarLayout() {
         mGrp3Collapsed ? "+" : "-", SDL_Color{200, 220, 255, 200}, 0, 0, 9);
 }
 
-// --- GetRotated -----------------------------------------------------------
-// Returns a cached pre-rotated surface for the given path+degrees.
-// Builds lazily on first use; freed in Unload().
-// Only called for deg = 90, 180, 270.
-SDL_Surface* LevelEditorScene::GetRotated(const std::string& path,
-                                          SDL_Surface*       src,
-                                          int                deg) {
-    int   slot  = (deg / 90) - 1;  // 90->0, 180->1, 270->2
-    auto& entry = mRotCache[path]; // default-init: {nullptr,nullptr,nullptr}
-    if (!entry[slot])
-        entry[slot] = RotateSurfaceDeg(src, deg);
-    return entry[slot];
-}
 
-// --- GetBadge ---------------------------------------------------------------
-// Returns a cached SDL_Surface* for a badge string rendered at size 10.
-// Creates via Text on first call per unique (text, colour) pair.
-// Cache is permanent for the editor lifetime; cleared in Unload().
-SDL_Surface* LevelEditorScene::GetBadge(const std::string& text, SDL_Color col) {
-    char key[64];
-    SDL_snprintf(key, sizeof(key), "%s_%02x%02x%02x", text.c_str(), col.r, col.g, col.b);
-    auto it = mBadgeCache.find(key);
-    if (it != mBadgeCache.end())
-        return it->second;
-    Text         t(text, col, 0, 0, 10);
-    SDL_Surface* surf = t.GetSurface();
-    if (!surf) {
-        mBadgeCache[key] = nullptr;
-        return nullptr;
-    }
-    SDL_Surface* owned = SDL_DuplicateSurface(surf);
-    mBadgeCache[key]   = owned;
-    return owned;
-}
-
-// --- GetDestroyAnimThumb ---------------------------------------------------
-// Returns a 16x16 thumbnail for an animated tile JSON path, built from the
-// first frame. Cached permanently for the editor lifetime.
-SDL_Surface* LevelEditorScene::GetDestroyAnimThumb(const std::string& jsonPath) {
-    auto it = mDestroyAnimThumbCache.find(jsonPath);
-    if (it != mDestroyAnimThumbCache.end())
-        return it->second;
-
-    AnimatedTileDef def;
-    if (!LoadAnimatedTileDef(jsonPath, def) || def.framePaths.empty()) {
-        mDestroyAnimThumbCache[jsonPath] = nullptr;
-        return nullptr;
-    }
-    SDL_Surface* result = nullptr;
-    for (const auto& fp : def.framePaths) {
-        SDL_Surface* raw = IMG_Load(fp.c_str());
-        if (!raw)
-            continue;
-        SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
-        SDL_DestroySurface(raw);
-        if (!conv)
-            continue;
-        SDL_Surface* thumb = SDL_CreateSurface(48, 48, SDL_PIXELFORMAT_ARGB8888);
-        if (thumb) {
-            SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
-            SDL_BlitSurfaceScaled(conv, nullptr, thumb, nullptr, SDL_SCALEMODE_LINEAR);
-            SDL_SetSurfaceBlendMode(thumb, SDL_BLENDMODE_BLEND);
-        }
-        SDL_DestroySurface(conv);
-        result = thumb;
-        break;
-    }
-    mDestroyAnimThumbCache[jsonPath] = result;
-    return result;
-}
 
 // --- OpenAnimPicker / CloseAnimPicker --------------------------------------
 void LevelEditorScene::OpenAnimPicker(int tileIdx) {
@@ -276,7 +178,7 @@ void LevelEditorScene::OpenAnimPicker(int tileIdx) {
         AnimatedTileDef def;
         if (!LoadAnimatedTileDef(p.string(), def))
             continue;
-        SDL_Surface* thumb = GetDestroyAnimThumb(p.string()); // builds & caches 48x48
+        SDL_Surface* thumb = mSurfaceCache.GetDestroyAnimThumb(p.string()); // builds & caches 48x48
         mAnimPickerEntries.push_back({p.string(), def.name, thumb});
     }
 
@@ -450,11 +352,11 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         mPaletteItems.push_back(std::move(item));
     }
 
-    // Rebuild the path→surface cache so Render never does a linear search
-    mTileSurfaceCache.clear();
+    // Rebuild the path->surface cache so Render never does a linear search
+    mSurfaceCache.ClearTileSurfaceCache();
     for (const auto& item : mPaletteItems)
         if (!item.isFolder && item.full)
-            mTileSurfaceCache[item.path] = item.full;
+            mSurfaceCache.InsertTileSurface(item.path, item.full);
 
     // Seed the cache for tiles already in the level whose images live in
     // subdirectories not currently visible in the palette view.
@@ -472,7 +374,7 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         };
         std::unordered_map<std::string, TileLoad> needed;
         for (const auto& ts : mLevel.tiles) {
-            if (ts.imagePath.empty() || mTileSurfaceCache.count(ts.imagePath))
+            if (ts.imagePath.empty() || mSurfaceCache.HasTileSurface(ts.imagePath))
                 continue;
             // Store only the first size we see per path — all instances of the
             // same image in a level should share the same w/h.
@@ -511,8 +413,8 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
                 SDL_DestroySurface(firstFrame);
                 if (!scaled)
                     continue;
-                mTileSurfaceCache[info.path] = scaled;
-                mExtraTileSurfaces.push_back(scaled);
+                mSurfaceCache.InsertTileSurface(info.path, scaled);
+                mSurfaceCache.AddExtraTileSurface(scaled);
             } else {
                 // Normal PNG — load once and scale down to tile display size
                 // immediately so we store a small surface instead of a full-res one.
@@ -540,8 +442,8 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
                 } else {
                     SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
                 }
-                mTileSurfaceCache[info.path] = result;
-                mExtraTileSurfaces.push_back(result);
+                mSurfaceCache.InsertTileSurface(info.path, result);
+                mSurfaceCache.AddExtraTileSurface(result);
             }
         }
     }
@@ -784,31 +686,8 @@ void LevelEditorScene::Unload() {
         mFolderIcon = nullptr;
     }
 
-    // Free rotation cache
-    for (auto& [path, arr] : mRotCache)
-        for (auto* s : arr)
-            if (s)
-                SDL_DestroySurface(s);
-    mRotCache.clear();
-
-    // Free badge cache
-    for (auto& [key, s] : mBadgeCache)
-        if (s)
-            SDL_DestroySurface(s);
-    mBadgeCache.clear();
-
-    // Free destroy-anim thumbnail cache
-    for (auto& [path, s] : mDestroyAnimThumbCache)
-        if (s)
-            SDL_DestroySurface(s);
-    mDestroyAnimThumbCache.clear();
-
-    // Free extra tile surfaces (loaded for level tiles from subdirs)
-    for (auto* s : mExtraTileSurfaces)
-        if (s)
-            SDL_DestroySurface(s);
-    mExtraTileSurfaces.clear();
-    mTileSurfaceCache.clear();
+    // Free all cached surfaces (rotation, badge, destroy-anim, tile, extra)
+    mSurfaceCache.Clear();
 
     mWindow = nullptr;
 }
@@ -2785,8 +2664,7 @@ void LevelEditorScene::Render(Window& window) {
             tsy >= window.GetHeight())
             continue;
         // O(1) cache lookup — no linear search, no IMG_Load per frame
-        auto         cacheIt = mTileSurfaceCache.find(t.imagePath);
-        SDL_Surface* ts  = (cacheIt != mTileSurfaceCache.end()) ? cacheIt->second : nullptr;
+        SDL_Surface* ts = mSurfaceCache.FindTileSurface(t.imagePath);
         SDL_Rect     dst = {tsx, tsy, tsw, tsh};
         if (ts) {
             // Rotation: use the per-path rotation cache so we build each
@@ -3464,10 +3342,9 @@ void LevelEditorScene::Render(Window& window) {
             SDL_Rect ghostDst = {gsx, gsy, gsw, gsh};
             // Draw the actual selected tile image as a semi-transparent ghost
             const auto&  selItem   = mPaletteItems[mSelectedTile];
-            auto         cacheIt   = mTileSurfaceCache.find(selItem.path);
-            SDL_Surface* ghostSurf = (cacheIt != mTileSurfaceCache.end())
-                                         ? cacheIt->second
-                                         : (selItem.full ? selItem.full : nullptr);
+            SDL_Surface* ghostSurf = mSurfaceCache.FindTileSurface(selItem.path);
+            if (!ghostSurf)
+                ghostSurf = selItem.full;
             if (ghostSurf) {
                 // Apply ghost rotation using the same rotation cache as placed tiles
                 SDL_Surface* drawSurf =

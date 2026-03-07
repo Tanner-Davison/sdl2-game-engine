@@ -1,4 +1,5 @@
 #pragma once
+#include "EditorSurfaceCache.hpp"
 #include "Image.hpp"
 #include "Level.hpp"
 #include "LevelSerializer.hpp"
@@ -10,7 +11,6 @@
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
-#include <array>
 #include <climits>
 #include <cmath>
 #include <filesystem>
@@ -181,9 +181,8 @@ class LevelEditorScene : public Scene {
     int                  mResizeOrigH   = 0;
     static constexpr int RESIZE_HANDLE  = 10;
 
-    // Destroy-anim thumbnail cache: maps anim JSON path -> a small SDL_Surface* thumb
-    // (first frame of the anim, scaled to 48x48). Built lazily, freed in Unload.
-    std::unordered_map<std::string, SDL_Surface*> mDestroyAnimThumbCache;
+    // Surface cache — owns rotation, badge, destroy-anim thumb, and tile caches
+    EditorSurfaceCache mSurfaceCache;
     // Index of the action tile currently being hovered during a drag-drop of a .json file.
     // -1 when no drop is in flight or cursor is not over an action tile.
     int mActionAnimDropHover = -1;
@@ -202,25 +201,6 @@ class LevelEditorScene : public Scene {
 
     void OpenAnimPicker(int tileIdx);   // build mAnimPickerEntries and set mActionAnimPickerTile
     void CloseAnimPicker();             // reset picker state
-
-    SDL_Surface* GetDestroyAnimThumb(const std::string& jsonPath);
-
-    // Fast path→surface lookup for rendering tiles (rebuilt in LoadTileView)
-    std::unordered_map<std::string, SDL_Surface*> mTileSurfaceCache;
-    // Extra surfaces loaded for level tiles from subdirs not in current palette view.
-    // These are owned here and freed in Unload() separately from palette items.
-    std::vector<SDL_Surface*> mExtraTileSurfaces;
-
-    // Rotation cache: for each image path, pre-built surfaces for 90/180/270 deg.
-    // Index 0=90, 1=180, 2=270. Built lazily on first use, freed in Unload.
-    std::unordered_map<std::string, std::array<SDL_Surface*, 3>> mRotCache;
-
-    // Badge text surface cache: maps badge string -> pre-rendered SDL_Surface*.
-    // Avoids constructing a Text object every frame for P/L/A/F/H/slope badges.
-    std::unordered_map<std::string, SDL_Surface*> mBadgeCache;
-
-    SDL_Surface* GetBadge(const std::string& text, SDL_Color col);
-    SDL_Surface* GetRotated(const std::string& path, SDL_Surface* src, int deg);
 
     // Palette collapse
     bool mPaletteCollapsed = false; // true = panel hidden, tab visible
@@ -470,6 +450,19 @@ class LevelEditorScene : public Scene {
                                                   {r.x + r.w, r.y, t, r.h}};
         for (auto& rr : rects)
             SDL_FillSurfaceRect(s, &rr, col);
+    }
+
+    // ── Surface cache convenience wrappers ─────────────────────────────────
+    // These delegate to mSurfaceCache so existing call sites (GetBadge, GetRotated,
+    // GetDestroyAnimThumb, mTileSurfaceCache) compile without modification.
+    SDL_Surface* GetBadge(const std::string& text, SDL_Color col) {
+        return mSurfaceCache.GetBadge(text, col);
+    }
+    SDL_Surface* GetRotated(const std::string& path, SDL_Surface* src, int deg) {
+        return mSurfaceCache.GetRotated(path, src, deg);
+    }
+    SDL_Surface* GetDestroyAnimThumb(const std::string& jsonPath) {
+        return mSurfaceCache.GetDestroyAnimThumb(jsonPath);
     }
 
     // Palette loading
