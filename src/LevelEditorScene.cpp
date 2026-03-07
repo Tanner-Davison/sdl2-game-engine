@@ -464,7 +464,12 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
         // Deduplicate: build a set of (path, w, h) tuples we actually need.
         // Use the TILE display size (ts.w x ts.h) for the cached surface so
         // Render blits at 1:1 without extra scaling overhead.
-        struct TileLoad { std::string path; int w; int h; bool animated; };
+        struct TileLoad {
+            std::string path;
+            int         w;
+            int         h;
+            bool        animated;
+        };
         std::unordered_map<std::string, TileLoad> needed;
         for (const auto& ts : mLevel.tiles) {
             if (ts.imagePath.empty() || mTileSurfaceCache.count(ts.imagePath))
@@ -472,7 +477,8 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
             // Store only the first size we see per path — all instances of the
             // same image in a level should share the same w/h.
             if (!needed.count(ts.imagePath))
-                needed[ts.imagePath] = {ts.imagePath, ts.w, ts.h, IsAnimatedTile(ts.imagePath)};
+                needed[ts.imagePath] = {
+                    ts.imagePath, ts.w, ts.h, IsAnimatedTile(ts.imagePath)};
         }
 
         for (auto& [path, info] : needed) {
@@ -483,38 +489,50 @@ void LevelEditorScene::LoadTileView(const std::string& dir) {
                 SDL_Surface* firstFrame = nullptr;
                 for (const auto& fp : def.framePaths) {
                     SDL_Surface* raw = IMG_Load(fp.c_str());
-                    if (!raw) continue;
+                    if (!raw)
+                        continue;
                     firstFrame = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
                     SDL_DestroySurface(raw);
-                    if (firstFrame) { SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_BLEND); break; }
+                    if (firstFrame) {
+                        SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_BLEND);
+                        break;
+                    }
                 }
-                if (!firstFrame) continue;
-                SDL_Surface* scaled = SDL_CreateSurface(info.w, info.h, SDL_PIXELFORMAT_ARGB8888);
+                if (!firstFrame)
+                    continue;
+                SDL_Surface* scaled =
+                    SDL_CreateSurface(info.w, info.h, SDL_PIXELFORMAT_ARGB8888);
                 if (scaled) {
                     SDL_SetSurfaceBlendMode(firstFrame, SDL_BLENDMODE_NONE);
-                    SDL_BlitSurfaceScaled(firstFrame, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
+                    SDL_BlitSurfaceScaled(
+                        firstFrame, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
                     SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
                 }
                 SDL_DestroySurface(firstFrame);
-                if (!scaled) continue;
+                if (!scaled)
+                    continue;
                 mTileSurfaceCache[info.path] = scaled;
                 mExtraTileSurfaces.push_back(scaled);
             } else {
                 // Normal PNG — load once and scale down to tile display size
                 // immediately so we store a small surface instead of a full-res one.
                 SDL_Surface* raw = IMG_Load(info.path.c_str());
-                if (!raw) continue;
+                if (!raw)
+                    continue;
                 SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
                 SDL_DestroySurface(raw);
-                if (!conv) continue;
+                if (!conv)
+                    continue;
                 // Scale to tile size if the raw image differs (avoids storing
                 // 512x512 PNGs when the tile is placed as 48x48 in the editor).
                 SDL_Surface* result = conv;
                 if (conv->w != info.w || conv->h != info.h) {
-                    SDL_Surface* scaled = SDL_CreateSurface(info.w, info.h, SDL_PIXELFORMAT_ARGB8888);
+                    SDL_Surface* scaled =
+                        SDL_CreateSurface(info.w, info.h, SDL_PIXELFORMAT_ARGB8888);
                     if (scaled) {
                         SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
-                        SDL_BlitSurfaceScaled(conv, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
+                        SDL_BlitSurfaceScaled(
+                            conv, nullptr, scaled, nullptr, SDL_SCALEMODE_LINEAR);
                         SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
                         SDL_DestroySurface(conv);
                         result = scaled;
@@ -598,8 +616,8 @@ void LevelEditorScene::ApplyBackground(int idx) {
         return;
     mSelectedBg       = idx;
     mLevel.background = mBgItems[idx].path;
-    background = std::make_unique<Image>(mLevel.background,
-                                         FitModeFromString(mLevel.bgFitMode));
+    background =
+        std::make_unique<Image>(mLevel.background, FitModeFromString(mLevel.bgFitMode));
     SetStatus("Background: " + mBgItems[idx].label + "  [" + mLevel.bgFitMode + "]");
 }
 
@@ -1624,9 +1642,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
         if (HitTest(btnPowerUp, mx, my)) {
-            mActiveTool      = Tool::PowerUp;
+            mActiveTool       = Tool::PowerUp;
             mPowerUpPopupOpen = true;
-            mPowerUpTileIdx  = -1;
+            mPowerUpTileIdx   = -1;
             lblTool->CreateSurface("PowerUp");
             SetStatus("PowerUp: click a tile to assign a power-up pickup");
             return true;
@@ -1678,8 +1696,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (LoadLevel(path, mLevel)) {
                 SetStatus("Loaded: " + path);
                 if (!mLevel.background.empty())
-                    background = std::make_unique<Image>(mLevel.background,
-                                                         FitModeFromString(mLevel.bgFitMode));
+                    background = std::make_unique<Image>(
+                        mLevel.background, FitModeFromString(mLevel.bgFitMode));
                 LoadBgPalette();
                 mCamX = mCamY = 0.0f; // reset editor camera on load
             } else
@@ -1800,20 +1818,25 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 // Fit-mode cycle button in the header strip (same geometry as Render)
                 {
                     int bw = 54, bh = 16;
-                    int bx = CanvasW() + PALETTE_W - bw - 4;
+                    int bx  = CanvasW() + PALETTE_W - bw - 4;
                     int by2 = TOOLBAR_H + TAB_H + (24 - bh) / 2;
                     if (mx >= bx && mx < bx + bw && my >= by2 && my < by2 + bh) {
                         // Cycle: cover -> contain -> stretch -> tile -> scroll -> cover
                         auto& fm = mLevel.bgFitMode;
-                        if      (fm == "cover")   fm = "contain";
-                        else if (fm == "contain") fm = "stretch";
-                        else if (fm == "stretch") fm = "tile";
-                        else if (fm == "tile")    fm = "scroll";
-                        else                      fm = "cover";
+                        if (fm == "cover")
+                            fm = "contain";
+                        else if (fm == "contain")
+                            fm = "stretch";
+                        else if (fm == "stretch")
+                            fm = "tile";
+                        else if (fm == "tile")
+                            fm = "scroll";
+                        else
+                            fm = "cover";
                         // Rebuild background image with new fit mode
                         if (!mLevel.background.empty())
                             background = std::make_unique<Image>(mLevel.background,
-                                                                  FitModeFromString(fm));
+                                                                 FitModeFromString(fm));
                         // Force badge cache rebuild for the new label
                         lblBgHeader.reset();
                         SetStatus("Background fit: " + fm);
@@ -2175,11 +2198,13 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     HitTest(mPowerUpPopupRect, mx, my)) {
                     // Re-derive cell geometry matching Render
                     const auto& reg = GetPowerUpRegistry();
-                    const int PAD   = 8, ROW_H = 28, TITLE_H = 32;
-                    int        py   = mPowerUpPopupRect.y + TITLE_H;
+                    const int   PAD = 8, ROW_H = 28, TITLE_H = 32;
+                    int         py = mPowerUpPopupRect.y + TITLE_H;
                     for (int i = 0; i < (int)reg.size(); i++) {
-                        SDL_Rect row = {mPowerUpPopupRect.x + PAD, py + i * (ROW_H + 2),
-                                       mPowerUpPopupRect.w - PAD * 2, ROW_H};
+                        SDL_Rect row = {mPowerUpPopupRect.x + PAD,
+                                        py + i * (ROW_H + 2),
+                                        mPowerUpPopupRect.w - PAD * 2,
+                                        ROW_H};
                         if (HitTest(row, mx, my)) {
                             // Assign this power-up to the tile
                             auto& t           = mLevel.tiles[mPowerUpTileIdx];
@@ -2196,7 +2221,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     // 'None' row (clear)
                     SDL_Rect noneRow = {mPowerUpPopupRect.x + PAD,
                                         py + (int)reg.size() * (ROW_H + 2),
-                                        mPowerUpPopupRect.w - PAD * 2, ROW_H};
+                                        mPowerUpPopupRect.w - PAD * 2,
+                                        ROW_H};
                     if (HitTest(noneRow, mx, my)) {
                         mLevel.tiles[mPowerUpTileIdx].powerUp     = false;
                         mLevel.tiles[mPowerUpTileIdx].powerUpType = "";
@@ -2211,7 +2237,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 // Click outside popup or no popup open: open/reopen on tile
                 mPowerUpPopupOpen = false;
                 mPowerUpTileIdx   = -1;
-                int ti = HitTile(mx, my);
+                int ti            = HitTile(mx, my);
                 if (ti >= 0) {
                     mPowerUpTileIdx   = ti;
                     mPowerUpPopupOpen = true;
@@ -2220,9 +2246,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     const auto& reg = GetPowerUpRegistry();
                     int         ph  = 32 + (int)(reg.size() + 1) * 30 + 8;
                     int         pw  = 200;
-                    int         px2 = std::clamp(wsx, 0, (mWindow ? mWindow->GetWidth() : 800) - pw);
-                    int         py2 = std::clamp(wsy + mLevel.tiles[ti].h, TOOLBAR_H,
-                                                 (mWindow ? mWindow->GetHeight() : 600) - ph);
+                    int px2 = std::clamp(wsx, 0, (mWindow ? mWindow->GetWidth() : 800) - pw);
+                    int py2 = std::clamp(wsy + mLevel.tiles[ti].h,
+                                         TOOLBAR_H,
+                                         (mWindow ? mWindow->GetHeight() : 600) - ph);
                     mPowerUpPopupRect = {px2, py2, pw, ph};
                     SetStatus("Tile " + std::to_string(ti) + ": choose power-up type");
                 } else {
@@ -2790,29 +2817,35 @@ void LevelEditorScene::Render(Window& window) {
         // ── Stacked top-left badges — each one shifts right so all are visible ──
         // Order: P → L → A → H → F → M (moving platform handled separately below)
         {
-            int bx = tsx + 2; // cursor: advances right as badges are added
+            int           bx = tsx + 2; // cursor: advances right as badges are added
             constexpr int BH = 14, BW = 14, GAP = 2;
-            auto drawBadge = [&](const char* label, SDL_Color bg, SDL_Color fg) {
+            auto          drawBadge = [&](const char* label, SDL_Color bg, SDL_Color fg) {
                 DrawRect(screen, {bx, tsy + 2, BW, BH}, bg);
                 blitBadge(GetBadge(label, fg), bx + 2, tsy + 2);
                 bx += BW + GAP;
             };
-            if (t.prop)        drawBadge("P", {0, 180, 0, 210},    {255, 255, 255, 255});
-            if (t.ladder)      drawBadge("L", {0, 160, 180, 210},  {255, 255, 255, 255});
+            if (t.prop)
+                drawBadge("P", {0, 180, 0, 210}, {255, 255, 255, 255});
+            if (t.ladder)
+                drawBadge("L", {0, 160, 180, 210}, {255, 255, 255, 255});
             if (t.action) {
                 std::string ab = "A";
-                if (t.actionGroup > 0) ab += std::to_string(t.actionGroup);
-                if (t.actionHits > 1)  ab += "x" + std::to_string(t.actionHits);
+                if (t.actionGroup > 0)
+                    ab += std::to_string(t.actionGroup);
+                if (t.actionHits > 1)
+                    ab += "x" + std::to_string(t.actionHits);
                 int abw = (int)ab.size() * 6 + 4;
                 DrawRect(screen, {bx, tsy + 2, abw, BH}, {200, 100, 0, 200});
                 blitBadge(GetBadge(ab, {255, 255, 255, 255}), bx + 2, tsy + 2);
                 bx += abw + GAP;
             }
-            if (t.hazard)      drawBadge("H", {200, 0, 0, 220},    {255, 255, 255, 255});
-            if (t.antiGravity) drawBadge("F", {0, 180, 200, 220},  {255, 255, 255, 255});
+            if (t.hazard)
+                drawBadge("H", {200, 0, 0, 220}, {255, 255, 255, 255});
+            if (t.antiGravity)
+                drawBadge("F", {0, 180, 200, 220}, {255, 255, 255, 255});
             if (t.powerUp) {
-                std::string pb = t.powerUpType.empty() ? "PU" : t.powerUpType.substr(0, 2);
-                int          pw2 = (int)pb.size() * 6 + 4;
+                std::string pb  = t.powerUpType.empty() ? "PU" : t.powerUpType.substr(0, 2);
+                int         pw2 = (int)pb.size() * 6 + 4;
                 DrawRect(screen, {bx, tsy + 2, pw2, BH}, {180, 0, 220, 220});
                 DrawOutline(screen, {bx, tsy + 2, pw2, BH}, {255, 80, 255, 255});
                 blitBadge(GetBadge(pb, {255, 255, 255, 255}), bx + 2, tsy + 2);
@@ -2838,7 +2871,7 @@ void LevelEditorScene::Render(Window& window) {
             constexpr int ANIM_BADGE_SZ = 16;
             int           abx           = tsx + tsw - ANIM_BADGE_SZ - 2;
             int           aby           = tsy + tsh - ANIM_BADGE_SZ - 2;
-            if (abx > tsx + bw + 2 && aby > tsy + 14) { // only draw if tile is large enough
+            if (abx > tsx + 14 + 2 && aby > tsy + 14) { // only draw if tile is large enough
                 if (!t.actionDestroyAnim.empty()) {
                     // Purple tinted box + thumbnail of the first anim frame
                     DrawRect(screen,
@@ -2898,9 +2931,15 @@ void LevelEditorScene::Render(Window& window) {
             int lowY  = tsy + riseH; // low corner descends by riseH
             int lx0, ly0, lx1, ly1;
             if (t.slope == SlopeType::DiagUpLeft) {
-                lx0 = tsx; ly0 = lowY; lx1 = tsx + t.w; ly1 = highY;
+                lx0 = tsx;
+                ly0 = lowY;
+                lx1 = tsx + t.w;
+                ly1 = highY;
             } else {
-                lx0 = tsx; ly0 = highY; lx1 = tsx + t.w; ly1 = lowY;
+                lx0 = tsx;
+                ly0 = highY;
+                lx1 = tsx + t.w;
+                ly1 = lowY;
             }
             int ddx = lx1 - lx0, ddy = ly1 - ly0;
             int steps = std::abs(ddx) > std::abs(ddy) ? std::abs(ddx) : std::abs(ddy);
@@ -2909,7 +2948,8 @@ void LevelEditorScene::Render(Window& window) {
                 float ccx = (float)lx0, ccy = (float)ly0;
                 for (int s = 0; s <= steps; ++s) {
                     DrawRect(screen, {(int)ccx, (int)ccy, 2, 2}, {255, 220, 50, 220});
-                    ccx += ssx; ccy += ssy;
+                    ccx += ssx;
+                    ccy += ssy;
                 }
             }
             // Slope badge is now drawn in the stacked top-left badge block above
@@ -3918,9 +3958,9 @@ void LevelEditorScene::Render(Window& window) {
             // Fit-mode cycle button — right-aligned in the header strip
             {
                 const char* fitLabel = mLevel.bgFitMode.c_str();
-                int         bw       = 54, bh = 16;
-                int         bx       = cw + PALETTE_W - bw - 4;
-                int         by2      = palY + (24 - bh) / 2;
+                int         bw = 54, bh = 16;
+                int         bx  = cw + PALETTE_W - bw - 4;
+                int         by2 = palY + (24 - bh) / 2;
                 DrawRect(screen, {bx, by2, bw, bh}, {50, 60, 100, 230});
                 DrawOutline(screen, {bx, by2, bw, bh}, {100, 140, 220, 255});
                 blitBadge(GetBadge(fitLabel, {180, 210, 255, 255}), bx + 3, by2 + 3);
@@ -4167,14 +4207,14 @@ void LevelEditorScene::Render(Window& window) {
     // ── PowerUp picker popup ────────────────────────────────────────────────────
     if (mPowerUpPopupOpen && mPowerUpTileIdx >= 0 &&
         mPowerUpTileIdx < (int)mLevel.tiles.size()) {
-        const auto& reg    = GetPowerUpRegistry();
-        const int   PAD    = 8;
-        const int   ROW_H  = 28;
+        const auto& reg     = GetPowerUpRegistry();
+        const int   PAD     = 8;
+        const int   ROW_H   = 28;
         const int   TITLE_H = 32;
-        const int   PW     = mPowerUpPopupRect.w;
-        const int   PH     = mPowerUpPopupRect.h;
-        const int   px     = mPowerUpPopupRect.x;
-        const int   py     = mPowerUpPopupRect.y;
+        const int   PW      = mPowerUpPopupRect.w;
+        const int   PH      = mPowerUpPopupRect.h;
+        const int   px      = mPowerUpPopupRect.x;
+        const int   py      = mPowerUpPopupRect.y;
 
         DrawRectAlpha(screen, {px, py, PW, PH}, {15, 20, 40, 240});
         DrawOutline(screen, {px, py, PW, PH}, {80, 220, 255, 255}, 2);
@@ -4188,19 +4228,24 @@ void LevelEditorScene::Render(Window& window) {
             lbl.RenderToSurface(screen);
         }
 
-        int ry = py + TITLE_H;
+        int               ry      = py + TITLE_H;
         const std::string curType = mLevel.tiles[mPowerUpTileIdx].powerUpType;
 
         // Power-up entries
         for (int i = 0; i < (int)reg.size(); i++) {
-            bool     isCur   = (mLevel.tiles[mPowerUpTileIdx].powerUp && curType == reg[i].id);
-            SDL_Rect row     = {px + PAD, ry + i * (ROW_H + 2), PW - PAD * 2, ROW_H};
-            DrawRect(screen, row, isCur ? SDL_Color{20, 80, 160, 220} : SDL_Color{30, 35, 55, 200});
-            DrawOutline(screen, row, isCur ? SDL_Color{80, 180, 255, 255} : SDL_Color{50, 60, 90, 200});
+            bool     isCur = (mLevel.tiles[mPowerUpTileIdx].powerUp && curType == reg[i].id);
+            SDL_Rect row   = {px + PAD, ry + i * (ROW_H + 2), PW - PAD * 2, ROW_H};
+            DrawRect(screen,
+                     row,
+                     isCur ? SDL_Color{20, 80, 160, 220} : SDL_Color{30, 35, 55, 200});
+            DrawOutline(screen,
+                        row,
+                        isCur ? SDL_Color{80, 180, 255, 255} : SDL_Color{50, 60, 90, 200});
             Text lbl(reg[i].label, SDL_Color{200, 240, 255, 255}, row.x + 6, row.y + 7, 11);
             lbl.RenderToSurface(screen);
             if (isCur) {
-                blitBadge(GetBadge("ON", {80, 255, 150, 255}), row.x + row.w - 28, row.y + 8);
+                blitBadge(
+                    GetBadge("ON", {80, 255, 150, 255}), row.x + row.w - 28, row.y + 8);
             }
         }
         // None row
@@ -4208,9 +4253,17 @@ void LevelEditorScene::Render(Window& window) {
             int      noneY = ry + (int)reg.size() * (ROW_H + 2);
             bool     isCur = !mLevel.tiles[mPowerUpTileIdx].powerUp;
             SDL_Rect row   = {px + PAD, noneY, PW - PAD * 2, ROW_H};
-            DrawRect(screen, row, isCur ? SDL_Color{60, 20, 20, 220} : SDL_Color{30, 35, 55, 200});
-            DrawOutline(screen, row, isCur ? SDL_Color{200, 80, 80, 255} : SDL_Color{50, 60, 90, 200});
-            Text lbl("None (remove power-up)", SDL_Color{200, 180, 180, 255}, row.x + 6, row.y + 7, 11);
+            DrawRect(screen,
+                     row,
+                     isCur ? SDL_Color{60, 20, 20, 220} : SDL_Color{30, 35, 55, 200});
+            DrawOutline(screen,
+                        row,
+                        isCur ? SDL_Color{200, 80, 80, 255} : SDL_Color{50, 60, 90, 200});
+            Text lbl("None (remove power-up)",
+                     SDL_Color{200, 180, 180, 255},
+                     row.x + 6,
+                     row.y + 7,
+                     11);
             lbl.RenderToSurface(screen);
         }
     }
