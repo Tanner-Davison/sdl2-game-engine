@@ -10,7 +10,9 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 // Destructor — frees all owned surfaces
 // ---------------------------------------------------------------------------
-EditorSurfaceCache::~EditorSurfaceCache() { Clear(); }
+EditorSurfaceCache::~EditorSurfaceCache() {
+    Clear();
+}
 
 // ---------------------------------------------------------------------------
 // Static utilities
@@ -63,7 +65,9 @@ bool EditorSurfaceCache::HasTileSurface(const std::string& path) const {
     return mTileSurfaceCache.count(path) > 0;
 }
 
-void EditorSurfaceCache::ClearTileSurfaceCache() { mTileSurfaceCache.clear(); }
+void EditorSurfaceCache::ClearTileSurfaceCache() {
+    mTileSurfaceCache.clear();
+}
 
 // ---------------------------------------------------------------------------
 // Extra tile surfaces
@@ -87,7 +91,7 @@ void EditorSurfaceCache::ClearExtraTileSurfaces() {
 SDL_Surface* EditorSurfaceCache::GetRotated(const std::string& path,
                                             SDL_Surface*       src,
                                             int                deg) {
-    int   slot  = (deg / 90) - 1; // 90->0, 180->1, 270->2
+    int   slot  = (deg / 90) - 1;  // 90->0, 180->1, 270->2
     auto& entry = mRotCache[path]; // default-init: {nullptr,nullptr,nullptr}
     if (!entry[slot])
         entry[slot] = RotateSurfaceDeg(src, deg);
