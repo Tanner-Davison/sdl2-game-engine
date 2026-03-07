@@ -95,7 +95,13 @@ void GameScene::Load(Window& window) {
                 if (e.path().extension() == ".png") pngs.push_back(e.path());
             if (!pngs.empty()) {
                 std::sort(pngs.begin(), pngs.end());
-                // Derive prefix from the first file
+                // Derive pad width and start index from the first file alphabetically,
+                // but load ALL PNGs in the folder regardless of filename prefix.
+                // This intentionally supports reuse: you can point the Walk slot and
+                // the Run slot at the same folder, then use fps to differentiate speed.
+                // Mixed-prefix folders (e.g. Run_000..005 + Walk_000..007) will play
+                // all frames in alphabetical order — keep folders single-purpose if
+                // you want clean animation boundaries.
                 std::string stem = pngs[0].stem().string();
                 int pad = 0;
                 { int k = (int)stem.size()-1; while(k>=0&&std::isdigit((unsigned char)stem[k])){++pad;--k;} }
@@ -103,15 +109,7 @@ void GameScene::Load(Window& window) {
                 while (!pfx.empty() && std::isdigit((unsigned char)pfx.back())) pfx.pop_back();
                 std::string numPart = stem.substr(pfx.size());
                 int startIdx = numPart.empty() ? 0 : std::stoi(numPart);
-                // Only count PNGs that share this prefix — the folder may contain
-                // multiple animation sets (e.g. Idle_*.png and Walk_*.png together).
-                // Using the total pngs.size() would tell SpriteSheet to load
-                // frames that don't exist, silently failing the whole slot.
-                int matchCount = 0;
-                for (const auto& p : pngs)
-                    if (p.stem().string().rfind(pfx, 0) == 0) ++matchCount;
-                if (matchCount == 0) matchCount = (int)pngs.size(); // safety fallback
-                return std::make_unique<SpriteSheet>(dir + "/", pfx, matchCount, KW, KH, pad, startIdx);
+                return std::make_unique<SpriteSheet>(dir + "/", pfx, (int)pngs.size(), KW, KH, pad, startIdx);
             }
         }
         // No custom sprites for this slot — fall back to frost knight at its
