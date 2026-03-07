@@ -1,13 +1,9 @@
 #pragma once
 // EditorCamera.hpp
-// ---------------------------------------------------------------------------
+//
 // Encapsulates editor camera state: position, zoom, pan/drag mechanics,
 // and coordinate-space conversions (screen <-> world, snap-to-grid).
 //
-// Extracted from LevelEditorScene as part of the modular refactor (Prompt #2).
-// The orchestrator (LevelEditorScene) owns an EditorCamera instance and
-// delegates all camera queries and pan/zoom input to it.
-// ---------------------------------------------------------------------------
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -18,18 +14,26 @@ class EditorCamera {
   public:
     EditorCamera() = default;
 
-    // ── Zoom constants ────────────────────────────────────────────────────────
+    // ── Zoom constants
     static constexpr float ZOOM_MIN  = 0.25f;
     static constexpr float ZOOM_MAX  = 4.0f;
     static constexpr float ZOOM_STEP = 0.1f;
 
-    // ── Read-only accessors ───────────────────────────────────────────────────
-    float X() const { return mCamX; }
-    float Y() const { return mCamY; }
-    float Zoom() const { return mZoom; }
-    bool  IsPanning() const { return mIsPanning; }
+    // ── Read-only accessors
+    float X() const {
+        return mCamX;
+    }
+    float Y() const {
+        return mCamY;
+    }
+    float Zoom() const {
+        return mZoom;
+    }
+    bool IsPanning() const {
+        return mIsPanning;
+    }
 
-    // ── Direct setters (used by Load on level-load reset, etc.) ───────────────
+    // ── Direct setters (used by Load on level-load reset, etc.)
     void SetPosition(float x, float y) {
         mCamX = x;
         mCamY = y;
@@ -40,9 +44,8 @@ class EditorCamera {
         mIsPanning    = false;
     }
 
-    // ── Coordinate conversions ────────────────────────────────────────────────
+    // ── Coordinate conversions
 
-    // Convert a screen-space canvas point to world space (accounts for zoom).
     SDL_Point ScreenToWorld(int sx, int sy) const {
         return {(int)(sx / mZoom + mCamX), (int)(sy / mZoom + mCamY)};
     }
@@ -124,7 +127,9 @@ class EditorCamera {
     }
 
     // Current zoom as a percentage integer (e.g. 100, 150, 50).
-    int ZoomPercent() const { return (int)(mZoom * 100); }
+    int ZoomPercent() const {
+        return (int)(mZoom * 100);
+    }
 
   private:
     // World-space camera offset.

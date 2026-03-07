@@ -29,7 +29,9 @@ set(SOURCES
     src/GameScene.cpp
     src/LevelTwo.cpp
     src/LevelEditorScene.cpp
+    src/EditorPalette.cpp
     src/EditorSurfaceCache.cpp
+    src/EditorToolbar.cpp
     src/Window.cpp
     src/Rectangle.cpp
     src/UI.cpp

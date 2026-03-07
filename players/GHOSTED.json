@@ -1,0 +1,95 @@
+{
+    "name": "GHOSTED",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Idle",
+            "fps": 39.0,
+            "hitbox": {
+                "h": 65,
+                "w": 44,
+                "x": 63,
+                "y": 68
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Walk",
+            "fps": 26.0,
+            "hitbox": {
+                "h": 79,
+                "w": 47,
+                "x": 73,
+                "y": 67
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 79,
+                "w": 55,
+                "x": 70,
+                "y": 63
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Jump",
+            "fps": 36.0,
+            "hitbox": {
+                "h": 104,
+                "w": 84,
+                "x": 48,
+                "y": 37
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Fall",
+            "fps": 13.0,
+            "hitbox": {
+                "h": 84,
+                "w": 66,
+                "x": 38,
+                "y": 43
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Slash",
+            "fps": 93.0,
+            "hitbox": {
+                "h": 114,
+                "w": 84,
+                "x": 48,
+                "y": 37
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Hurt",
+            "fps": 102.0,
+            "hitbox": {
+                "h": 69,
+                "w": 55,
+                "x": 61,
+                "y": 62
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/GHOSTED/Death",
+            "fps": 100.0,
+            "hitbox": {
+                "h": 64,
+                "w": 91,
+                "x": 20,
+                "y": 84
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 180,
+    "spriteW": 180
+}
