@@ -7,6 +7,7 @@
 #include "TitleScene.hpp"
 #include "SurfaceUtils.hpp"
 #include <SDL3_image/SDL_image.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -76,6 +77,7 @@ void GameScene::Load(Window& window) {
 
     PlayerProfile profile;
     bool useProfile = !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, profile);
+    mHasProfile = useProfile;
 
     const int KW = (useProfile && profile.spriteW > 0) ? profile.spriteW : PLAYER_SPRITE_WIDTH;
     const int KH = (useProfile && profile.spriteH > 0) ? profile.spriteH : PLAYER_SPRITE_HEIGHT;
@@ -93,6 +95,7 @@ void GameScene::Load(Window& window) {
                 if (e.path().extension() == ".png") pngs.push_back(e.path());
             if (!pngs.empty()) {
                 std::sort(pngs.begin(), pngs.end());
+                // Derive prefix from the first file
                 std::string stem = pngs[0].stem().string();
                 int pad = 0;
                 { int k = (int)stem.size()-1; while(k>=0&&std::isdigit((unsigned char)stem[k])){++pad;--k;} }
@@ -100,7 +103,15 @@ void GameScene::Load(Window& window) {
                 while (!pfx.empty() && std::isdigit((unsigned char)pfx.back())) pfx.pop_back();
                 std::string numPart = stem.substr(pfx.size());
                 int startIdx = numPart.empty() ? 0 : std::stoi(numPart);
-                return std::make_unique<SpriteSheet>(dir + "/", pfx, (int)pngs.size(), KW, KH, pad, startIdx);
+                // Only count PNGs that share this prefix — the folder may contain
+                // multiple animation sets (e.g. Idle_*.png and Walk_*.png together).
+                // Using the total pngs.size() would tell SpriteSheet to load
+                // frames that don't exist, silently failing the whole slot.
+                int matchCount = 0;
+                for (const auto& p : pngs)
+                    if (p.stem().string().rfind(pfx, 0) == 0) ++matchCount;
+                if (matchCount == 0) matchCount = (int)pngs.size(); // safety fallback
+                return std::make_unique<SpriteSheet>(dir + "/", pfx, matchCount, KW, KH, pad, startIdx);
             }
         }
         // No custom sprites for this slot — fall back to frost knight at its
@@ -152,7 +163,11 @@ void GameScene::Load(Window& window) {
         // must use the named key — GetAnimation("") would match every frame.
         if (useProfile && profile.HasSlot(slot)) {
             auto all = sheet->GetAnimation("");
-            if (!all.empty()) return all;
+            // Never fall through to the knight key on a custom sheet — the custom
+            // SpriteSheet has no knight-named frames so it would silently return
+            // empty, causing the engine to flash the frost-knight visuals.
+            // Return what we got (may be empty if load failed, handled downstream).
+            return all;
         }
         return sheet->GetAnimation(knightKey);
     };
@@ -165,6 +180,19 @@ void GameScene::Load(Window& window) {
     frontFrames = getFrames(knightFallSheet,  PlayerAnimSlot::Fall,  "0_Knight_Falling Down_");
     slashFrames = getFrames(knightSlashSheet, PlayerAnimSlot::Slash, "0_Knight_Slashing_");
 
+    // When a custom profile is active, redirect any unfilled slot (empty frames)
+    // to idle frames so the character holds its idle pose instead of flashing
+    // to the frost-knight sprite set whenever an unassigned action triggers.
+    // The sheet texture is fixed up in resolveSheet() below when building AnimationSet.
+    if (useProfile && !idleFrames.empty()) {
+        if (!profile.HasSlot(PlayerAnimSlot::Walk)   && walkFrames.empty())  walkFrames  = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Jump)   && jumpFrames.empty())  jumpFrames  = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Hurt)   && hurtFrames.empty())  hurtFrames  = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Crouch) && duckFrames.empty())  duckFrames  = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Fall)   && frontFrames.empty()) frontFrames = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Slash)  && slashFrames.empty()) slashFrames = idleFrames;
+    }
+
     enemySheet = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
@@ -174,7 +202,7 @@ void GameScene::Load(Window& window) {
     std::string bgPath = (!mLevelPath.empty() && !mLevel.background.empty())
                            ? mLevel.background
                            : "game_assets/backgrounds/deepspace_scene.png";
-    background   = std::make_unique<Image>(bgPath, FitMode::PRESCALED);
+    background = std::make_unique<Image>(bgPath, FitModeFromString(mLevel.bgFitMode));
     locationText = std::make_unique<Text>("You are in space!!", 20, 20);
     actionText   = std::make_unique<Text>(
         "Level 1: Collect ALL the coins!", SDL_Color{255, 255, 255, 0}, 20, 80, 20);
@@ -352,6 +380,84 @@ void GameScene::Update(float dt) {
     for (auto e : floatResult.actionTilesTriggered)
         collision.actionTilesTriggered.push_back(e);
     MovingPlatformCarry(reg);
+
+    // ── Power-up pickup detection ──────────────────────────────────────────
+    // AABB overlap test: player vs any tile with PowerUpTag.
+    // On overlap, apply the power-up to the player and destroy the tile.
+    {
+        entt::entity playerEnt = entt::null;
+        SDL_Rect     playerRect{};
+        {
+            auto pv = reg.view<PlayerTag, Transform, Collider>();
+            pv.each([&](entt::entity e, const Transform& t, const Collider& c) {
+                playerEnt = e;
+                playerRect = {(int)t.x, (int)t.y, c.w, c.h};
+            });
+        }
+        if (playerEnt != entt::null) {
+            std::vector<entt::entity> toConsume;
+            auto puv = reg.view<PowerUpTag, Transform, Collider>();
+            puv.each([&](entt::entity e, const PowerUpTag& pu, const Transform& t, const Collider& c) {
+                SDL_Rect pr = {(int)t.x, (int)t.y, c.w, c.h};
+                bool overlap = (playerRect.x < pr.x + pr.w && playerRect.x + playerRect.w > pr.x &&
+                                playerRect.y < pr.y + pr.h && playerRect.y + playerRect.h > pr.y);
+                if (overlap) toConsume.push_back(e);
+            });
+            for (entt::entity e : toConsume) {
+                if (!reg.valid(e)) continue;
+                const PowerUpTag& pu = reg.get<PowerUpTag>(e);
+                // Apply or refresh the power-up on the player
+                if (reg.all_of<ActivePowerUp>(playerEnt)) {
+                    auto& active = reg.get<ActivePowerUp>(playerEnt);
+                    // Refresh/stack: take whichever duration is longer
+                    if (active.type == pu.type) {
+                        active.remaining = std::max(active.remaining, pu.duration);
+                        active.duration  = active.remaining;
+                    } else {
+                        active.type      = pu.type;
+                        active.remaining = pu.duration;
+                        active.duration  = pu.duration;
+                    }
+                } else {
+                    reg.emplace<ActivePowerUp>(playerEnt, pu.type, pu.duration, pu.duration);
+                }
+                // Consume the tile — remove from render list, destroy entity
+                auto it2 = std::find(mSortedTileRenderList.begin(), mSortedTileRenderList.end(), e);
+                if (it2 != mSortedTileRenderList.end()) mSortedTileRenderList.erase(it2);
+                reg.destroy(e);
+            }
+        }
+    }
+
+    // ── Active power-up tick ────────────────────────────────────────────────
+    // Counts down remaining time; removes component when expired.
+    // Also applies per-frame effects (e.g. zero gravity).
+    {
+        auto apv = reg.view<PlayerTag, ActivePowerUp, GravityState>();
+        apv.each([&](entt::entity e, ActivePowerUp& ap, GravityState& g) {
+            ap.remaining -= dt;
+            if (ap.remaining <= 0.0f) {
+                // Power-up expired: restore gravity
+                if (ap.type == PowerUpType::AntiGravity) {
+                    g.active    = true;
+                    g.velocity  = 0.0f;
+                }
+                reg.remove<ActivePowerUp>(e);
+                return;
+            }
+            // Apply per-frame effect
+            switch (ap.type) {
+                case PowerUpType::AntiGravity:
+                    // Suspend gravity: freeze Y velocity accumulation
+                    g.active   = false; // MovementSystem free-float path handles movement
+                    g.velocity = 0.0f;  // zero out any accumulated fall speed
+                    break;
+                default:
+                    break;
+            }
+        });
+    }
+
     coinCount  += collision.coinsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
     if (collision.playerDied) gameOver = true;
@@ -417,15 +523,26 @@ void GameScene::Update(float dt) {
                 hp.current -= HAZARD_DAMAGE_PER_SEC * dt;
                 if (hp.current <= 0.0f) { hp.current = 0.0f; gameOver = true; }
                 hz.flashTimer += dt;
-                if (anim.currentAnim != AnimationID::HURT) {
-                    if (auto* atk = reg.try_get<AttackState>(playerEnt)) {
-                        atk->isAttacking = false; atk->attackPressed = false;
+                // Attack always takes priority — never stomp it while in lava.
+                bool isAttacking = false;
+                if (auto* atk = reg.try_get<AttackState>(playerEnt))
+                    isAttacking = atk->isAttacking;
+                if (!isAttacking && !set.hurt.empty()) {
+                    // Restart hurt from frame 0 whenever:
+                    //   - we just entered lava (currentAnim != HURT), OR
+                    //   - the previous hurt cycle finished (last frame reached)
+                    bool justEntered  = (anim.currentAnim != AnimationID::HURT);
+                    bool cycleFinished = (anim.currentAnim == AnimationID::HURT
+                                          && !anim.looping
+                                          && anim.currentFrame >= anim.totalFrames - 1);
+                    if (justEntered || cycleFinished) {
+                        r.sheet = set.hurtSheet; r.frames = set.hurt;
+                        anim.currentFrame = 0; anim.timer = 0.0f;
+                        anim.fps = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
+                        anim.looping = false;  // play once; re-triggers next frame if still in lava
+                        anim.totalFrames = (int)set.hurt.size();
+                        anim.currentAnim = AnimationID::HURT;
                     }
-                    r.sheet = set.hurtSheet; r.frames = set.hurt;
-                    anim.currentFrame = 0; anim.timer = 0.0f;
-                    anim.fps = 12.0f; anim.looping = true;
-                    anim.totalFrames = (int)set.hurt.size();
-                    anim.currentAnim = AnimationID::HURT;
                 }
             } else {
                 hz.flashTimer = 0.0f;
@@ -461,7 +578,10 @@ void GameScene::Update(float dt) {
 void GameScene::Render(Window& window) {
     SDL_Renderer* ren = window.GetRenderer();
     window.Render(); // clear
-    background->Render(ren);
+    if (background->GetFitMode() == FitMode::SCROLL)
+        background->RenderScrolling(ren, mCamera.x, (float)mLevelW);
+    else
+        background->Render(ren);
 
     const int W = window.GetWidth();
     const int H = window.GetHeight();
@@ -704,7 +824,17 @@ void GameScene::Spawn() {
     auto player = reg.create();
     reg.emplace<Transform>(player, playerX, playerY);
     reg.emplace<Velocity>(player);
-    reg.emplace<AnimationState>(player, 0, (int)idleFrames.size(), 0.0f, 10.0f, true);
+    {
+        AnimationState as;
+        as.currentFrame = 0;
+        as.totalFrames  = (int)idleFrames.size();
+        as.timer        = 0.0f;
+        as.fps          = 10.0f;
+        as.looping      = true;
+        as.currentAnim  = AnimationID::IDLE; // pre-set so PlayerStateSystem never
+                                             // sees NONE and triggers a spurious swap
+        reg.emplace<AnimationState>(player, as);
+    }
     reg.emplace<Renderable>(player, knightIdleSheet->GetTexture(), idleFrames, false);
     reg.emplace<PlayerTag>(player);
     reg.emplace<Health>(player);
@@ -731,14 +861,32 @@ void GameScene::Spawn() {
     auto slotFps = [&](PlayerAnimSlot slot) -> float {
         return mSlotFps[static_cast<int>(slot)];
     };
+    // For custom profiles, any slot that ended up with idleFrames (because it
+    // was unfilled) must also use the idle sheet texture, not the frost-knight
+    // sheet that was loaded as a fallback. Otherwise sheet and frames mismatch.
+    SDL_Texture* idleT  = knightIdleSheet->GetTexture();
+    auto resolveSheet = [&](SDL_Texture* slotTex,
+                            const std::vector<SDL_Rect>& slotFrames) -> SDL_Texture* {
+        // If frames were patched to idleFrames, the slot texture must also be
+        // the idle texture so sheet+frames always refer to the same atlas.
+        if (mHasProfile && &slotFrames == &idleFrames) return idleT;
+        return slotTex;
+    };
     reg.emplace<AnimationSet>(player, AnimationSet{
-        .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetTexture(),  .idleFps  = slotFps(PlayerAnimSlot::Idle),
-        .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetTexture(),  .walkFps  = slotFps(PlayerAnimSlot::Walk),
-        .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetTexture(),  .jumpFps  = slotFps(PlayerAnimSlot::Jump),
-        .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetTexture(),  .hurtFps  = slotFps(PlayerAnimSlot::Hurt),
-        .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetTexture(), .duckFps  = slotFps(PlayerAnimSlot::Crouch),
-        .front      = frontFrames, .frontSheet = knightFallSheet->GetTexture(),  .frontFps = slotFps(PlayerAnimSlot::Fall),
-        .slash      = slashFrames, .slashSheet = knightSlashSheet->GetTexture(), .slashFps = slotFps(PlayerAnimSlot::Slash),
+        .idle       = idleFrames,  .idleSheet  = idleT,
+                                   .idleFps    = slotFps(PlayerAnimSlot::Idle),
+        .walk       = walkFrames,  .walkSheet  = resolveSheet(knightWalkSheet->GetTexture(),  walkFrames),
+                                   .walkFps    = slotFps(PlayerAnimSlot::Walk),
+        .jump       = jumpFrames,  .jumpSheet  = resolveSheet(knightJumpSheet->GetTexture(),  jumpFrames),
+                                   .jumpFps    = slotFps(PlayerAnimSlot::Jump),
+        .hurt       = hurtFrames,  .hurtSheet  = resolveSheet(knightHurtSheet->GetTexture(),  hurtFrames),
+                                   .hurtFps    = slotFps(PlayerAnimSlot::Hurt),
+        .duck       = duckFrames,  .duckSheet  = resolveSheet(knightSlideSheet->GetTexture(), duckFrames),
+                                   .duckFps    = slotFps(PlayerAnimSlot::Crouch),
+        .front      = frontFrames, .frontSheet = resolveSheet(knightFallSheet->GetTexture(),  frontFrames),
+                                   .frontFps   = slotFps(PlayerAnimSlot::Fall),
+        .slash      = slashFrames, .slashSheet = resolveSheet(knightSlashSheet->GetTexture(), slashFrames),
+                                   .slashFps   = slotFps(PlayerAnimSlot::Slash),
     });
 
     // Cache-aware tile texture helper.
@@ -847,6 +995,13 @@ void GameScene::Spawn() {
             reg.emplace<MovingPlatformState>(tile, mps);
         }
         if (hasCustomHitbox) reg.emplace<ColliderOffset>(tile, ts.hitboxOffX, ts.hitboxOffY);
+        if (ts.powerUp && !ts.powerUpType.empty()) {
+            PowerUpType puType = PowerUpType::None;
+            if (ts.powerUpType == "antigravity") puType = PowerUpType::AntiGravity;
+            // Future: else if (ts.powerUpType == "speedboost") puType = PowerUpType::SpeedBoost;
+            if (puType != PowerUpType::None)
+                reg.emplace<PowerUpTag>(tile, puType, ts.powerUpDuration);
+        }
 
         std::vector<SDL_Rect> tileFrame = {{0, 0, ts.w, ts.h}};
         reg.emplace<Renderable>(tile, tex, tileFrame, false);

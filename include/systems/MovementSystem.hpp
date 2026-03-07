@@ -15,19 +15,20 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW) {
             // While climbing or parked at top, LadderSystem owns v.dy entirely.
             // Only apply horizontal movement here — never touch v.dy.
             if (climb.climbing || climb.atTop) {
-                // Horizontal movement is allowed but capped to CLIMB_STRAFE_SPEED
-                // so the player shuffles slowly left/right instead of running at
-                // full speed while on the ladder.
-                bool movingH = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D]
-                             || keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
-                if (!movingH) {
+                // Drive horizontal velocity directly from keyboard state each
+                // frame so strafe feels as responsive as normal movement.
+                // CLIMB_STRAFE_SPEED is the max speed while on the ladder.
+                bool leftHeld  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
+                bool rightHeld = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+                if (leftHeld && !rightHeld) {
+                    v.dx = -CLIMB_STRAFE_SPEED;
+                } else if (rightHeld && !leftHeld) {
+                    v.dx =  CLIMB_STRAFE_SPEED;
+                } else {
+                    // No horizontal input — apply friction to glide to a stop
                     v.dx -= v.dx * friction * dt;
                     if (std::abs(v.dx) < 0.5f) v.dx = 0.0f;
                 }
-                // Clamp — InputSystem/event path may have set a full-speed v.dx
-                // before the player grabbed the ladder.
-                if (v.dx >  CLIMB_STRAFE_SPEED) v.dx =  CLIMB_STRAFE_SPEED;
-                if (v.dx < -CLIMB_STRAFE_SPEED) v.dx = -CLIMB_STRAFE_SPEED;
                 t.x += v.dx * dt;
                 // t.y intentionally NOT touched here — LadderSystem owns it.
                 return;

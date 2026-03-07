@@ -57,7 +57,7 @@ inline constexpr float JUMP_FORCE         = 450.0f;
 inline constexpr float MAX_FALL_SPEED     = 1500.0f;
 inline constexpr float PLAYER_SPEED       = 250.0f;
 inline constexpr float CLIMB_SPEED        = 350.0f;
-inline constexpr float CLIMB_STRAFE_SPEED = 150.0f;
+inline constexpr float CLIMB_STRAFE_SPEED = 220.0f;
 
 // -- Tile step-up -------------------------------------------------------------
 // Matches the editor grid size so the player can walk onto a single tile

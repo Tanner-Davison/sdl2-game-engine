@@ -1,0 +1,13 @@
+{
+    "background": "game_assets/backgrounds/Background_02.png",
+    "bgFitMode": "cover",
+    "coins": [],
+    "enemies": [],
+    "gravityMode": "platformer",
+    "name": "wraith",
+    "player": {
+        "x": 638.0,
+        "y": 740.0
+    },
+    "tiles": []
+}

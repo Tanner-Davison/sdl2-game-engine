@@ -1,0 +1,95 @@
+{
+    "name": "elemental_ice",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 97,
+                "w": 58,
+                "x": 37,
+                "y": 43
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Walk",
+            "fps": 20.0,
+            "hitbox": {
+                "h": 114,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 76,
+                "w": 89,
+                "x": 0,
+                "y": 77
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 114,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 114,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Slash",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 116,
+                "w": 97,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 114,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_ice/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 114,
+                "w": 91,
+                "x": 11,
+                "y": 37
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 180,
+    "spriteW": 140
+}

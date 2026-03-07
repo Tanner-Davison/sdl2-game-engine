@@ -1,0 +1,95 @@
+{
+    "name": "peasant_mask",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 86,
+                "w": 50,
+                "x": 32,
+                "y": 45
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Walk",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 100,
+                "w": 51,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 70,
+                "w": 60,
+                "x": 7,
+                "y": 66
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 101,
+                "w": 56,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 93,
+                "w": 55,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Slash",
+            "fps": 43.0,
+            "hitbox": {
+                "h": 100,
+                "w": 80,
+                "x": 35,
+                "y": 33
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 101,
+                "w": 56,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant_mask/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 102,
+                "w": 77,
+                "x": 9,
+                "y": 34
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 160,
+    "spriteW": 120
+}

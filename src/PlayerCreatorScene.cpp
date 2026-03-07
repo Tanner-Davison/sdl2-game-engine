@@ -762,7 +762,6 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     int fw = first->w, fh = first->h;
     SDL_DestroySurface(first);
 
-    int frameCount = (int)pngs.size();
     // Determine prefix and pad digits from first filename
     std::string stem = pngs[0].stem().string();
     int padDigits = 0;
@@ -781,6 +780,14 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
         std::string numPart = stem.substr(prefix.size());
         startIndex = numPart.empty() ? 0 : std::stoi(numPart);
     }
+
+    // Only count PNGs matching this prefix — the folder may contain frames for
+    // multiple animations (e.g. Idle_*.png + Walk_*.png in the same directory).
+    // Using pngs.size() would request frames that don't exist and silently fail.
+    int frameCount = 0;
+    for (const auto& p : pngs)
+        if (p.stem().string().rfind(prefix, 0) == 0) ++frameCount;
+    if (frameCount == 0) frameCount = (int)pngs.size(); // safety fallback
 
     // Auto-fill spriteW/H from the raw frame size if not yet set by the user.
     // This sizes the preview cell correctly on first drop so the hitbox editor

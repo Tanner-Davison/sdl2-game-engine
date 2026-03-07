@@ -60,7 +60,8 @@ class LevelEditorScene : public Scene {
         AntiGrav,
         MovingPlat,
         Select,
-        MoveCam   // left-drag pans the camera; no tile interaction
+        MoveCam,  // left-drag pans the camera; no tile interaction
+        PowerUp   // mark a tile as a power-up pickup
     };
     enum class PaletteTab { Tiles, Backgrounds };
 
@@ -316,7 +317,7 @@ class LevelEditorScene : public Scene {
     SDL_Rect btnCoin{}, btnEnemy{}, btnTile{}, btnErase{}, btnPlayerStart{}, btnSelect{}, btnMoveCam{};
     // Group 2 — Tile modifier tools (no Destructible button — merged into Action)
     SDL_Rect btnProp{}, btnLadder{}, btnAction{}, btnSlope{}, btnResize{}, btnHitbox{},
-        btnHazard{}, btnAntiGrav{}, btnMovingPlat{};
+        btnHazard{}, btnAntiGrav{}, btnMovingPlat{}, btnPowerUp{};
     // Group 3 — Level actions
     SDL_Rect btnGravity{}, btnSave{}, btnLoad{}, btnClear{}, btnPlay{}, btnBack{};
 
@@ -327,7 +328,23 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Text> hintSelect, hintMoveCam;
     // Group 2
     std::unique_ptr<Text> lblProp, lblLadder, lblAction, lblSlope, lblResize, lblHitbox,
-        lblHazard, lblAntiGrav, lblMovingPlat;
+        lblHazard, lblAntiGrav, lblMovingPlat, lblPowerUp;
+
+    // ── Power-up tool popup state ──────────────────────────────────────────
+    // Shown when the user clicks a tile with the PowerUp tool active.
+    // Lets them choose which power-up type to assign (extensible list).
+    bool        mPowerUpPopupOpen  = false;
+    int         mPowerUpTileIdx    = -1;  // tile being configured
+    SDL_Rect    mPowerUpPopupRect{};
+    struct PowerUpEntry {
+        std::string id;    // e.g. "antigravity"
+        std::string label; // e.g. "Anti-Gravity (15s)"
+        float       defaultDuration = 15.0f;
+    };
+    // The canonical list of power-up types — add new entries here to expose
+    // them in the editor without touching any other UI code.
+    static const std::vector<PowerUpEntry>& GetPowerUpRegistry();
+    int  mPowerUpSelectedEntry = 0; // which entry is highlighted in the popup
 
     // Moving-platform tool state
     std::vector<int> mMovPlatIndices; // tile indices currently in this platform group

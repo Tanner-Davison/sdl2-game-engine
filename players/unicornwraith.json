@@ -1,0 +1,95 @@
+{
+    "name": "unicornwraith",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 98,
+                "w": 42,
+                "x": 38,
+                "y": 24
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Walk",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 86,
+                "w": 36,
+                "x": 39,
+                "y": 31
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 81,
+                "w": 40,
+                "x": 39,
+                "y": 28
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 91,
+                "w": 40,
+                "x": 38,
+                "y": 29
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 73,
+                "w": 40,
+                "x": 39,
+                "y": 35
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Slash",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 73,
+                "w": 35,
+                "x": 42,
+                "y": 37
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 78,
+                "w": 40,
+                "x": 36,
+                "y": 36
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/unicornwraith/Death",
+            "fps": 20.0,
+            "hitbox": {
+                "h": 62,
+                "w": 56,
+                "x": 26,
+                "y": 56
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 160,
+    "spriteW": 120
+}

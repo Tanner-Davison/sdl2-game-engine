@@ -135,7 +135,35 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         if (g && g->active && col) {
             switch (g->direction) {
                 case GravityDir::DOWN:
-                    if (roff) { rx += roff->x; ry += roff->y; }
+                    if (roff) {
+                        if (r.flipH) {
+                            // When the sprite is flipped horizontally, SDL mirrors
+                            // the pixels but the dst rect origin stays top-left.
+                            // The collider must still appear over the visual body.
+                            //
+                            // NOT flipped:  body left edge = sprite_x + hb.x
+                            //               hb.x = -roff->x  (roff->x is negative)
+                            //               rx = t.x + roff->x
+                            //               body at: rx + (-roff->x) = t.x  ✓
+                            //
+                            // FLIPPED:      body appears mirrored — its left edge
+                            //               is now src.w - hb.x - col->w from
+                            //               the sprite's LEFT edge.
+                            //               We need:  rx + (src.w - hb.x - col->w) = t.x
+                            //               => rx = t.x - src.w + hb.x + col->w
+                            //                     = t.x - (src.w - col->w) + hb.x
+                            //                     = t.x - (src.w - col->w) - roff->x
+                            //
+                            // Verified for all sprite sizes:
+                            //   frost knight: t.x - (120-56) - (-32) = t.x - 32  ✓
+                            //   bones(160x140): t.x - (160-75) - (-43) = t.x - 42  ✓
+                            //   angryorange(200x200): t.x - (200-61) - (-53) = t.x - 86  ✓
+                            rx = (t.x - camX) - (src.w - col->w) - roff->x;
+                        } else {
+                            rx += roff->x;
+                        }
+                        ry += roff->y;
+                    }
                     break;
                 case GravityDir::UP:
                     rx += roff ? roff->x : -(src.w - col->w) / 2;
@@ -151,7 +179,20 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                     break;
             }
         } else {
-            if (roff) { rx += roff->x; ry += roff->y; }
+            // g->active is false (e.g. on a ladder, or open-world mode).
+            // Must still apply the correct flip-aware offset — the same
+            // formula used in the GravityDir::DOWN branch above.
+            if (roff && col) {
+                if (r.flipH) {
+                    rx = (t.x - camX) - (src.w - col->w) - roff->x;
+                } else {
+                    rx += roff->x;
+                }
+                ry += roff->y;
+            } else if (roff) {
+                rx += roff->x;
+                ry += roff->y;
+            }
         }
 
         SDL_FRect srcF = {(float)src.x, (float)src.y, (float)src.w, (float)src.h};

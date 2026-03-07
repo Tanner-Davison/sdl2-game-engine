@@ -194,6 +194,32 @@ struct DestructibleTag {
     DestructibleTag& operator=(DestructibleTag&&)      = default;
 };
 struct OpenWorldTag {}; // marks the player as running in open-world (top-down) mode
+
+// ── Power-up system ───────────────────────────────────────────────────────────
+// Extensible: add new enum values + handling in GameScene and MovementSystem.
+// Each PowerUpType maps to a specific gameplay effect applied to the player
+// for the duration defined by the power-up tile (default 15 seconds).
+enum class PowerUpType {
+    None,
+    AntiGravity,   // player has zero gravity for `duration` seconds
+    // Future: SpeedBoost, Invincibility, DoubleJump, ...
+};
+
+// Attached to a tile entity that functions as a power-up pickup.
+// When the player overlaps this tile it is consumed (entity destroyed),
+// and ActivePowerUp is emplaced on the player.
+struct PowerUpTag {
+    PowerUpType type     = PowerUpType::None;
+    float       duration = 15.0f; // seconds the effect lasts (configurable per tile)
+};
+
+// Attached to the player while a power-up is active.
+// Removed automatically once timer reaches 0.
+struct ActivePowerUp {
+    PowerUpType type      = PowerUpType::None;
+    float       remaining = 0.0f; // seconds left
+    float       duration  = 0.0f; // total duration (for progress bar)
+};
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
                      // slashes it enough times, then Renderable and Collider are removed.
     int         group           = 0; // 0 = standalone; matching non-zero groups trigger together

@@ -260,6 +260,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
 
                 if (pFeet < surface - SLOPE_SNAP_LOOKAHEAD) return;
                 if (pt.y  > tt.y + tc.h + SLOPE_SNAP_LOOKAHEAD) return;
+                // Reject slopes that are ABOVE the player (walking underneath a
+                // sloped roof/overhang).  The surface is only reachable from
+                // below if the surface Y is at or below the player's feet — if
+                // it is above pt.y (player's head) the slope is an overhead
+                // surface and should not snap the player upward.
+                if (surface < pt.y) return;
 
                 if (surface < bestSurface) {
                     bestSurface = surface;

@@ -130,6 +130,41 @@ void Image::SetFitMode(FitMode mode)     { mFitMode = mode; }
 FitMode Image::GetFitMode() const        { return mFitMode; }
 void Image::SetFlipHorizontal(bool flip) { mFlipH = flip; }
 
+void Image::RenderScrolling(SDL_Renderer* renderer, float cameraX, float levelW) {
+    if (!renderer) return;
+    if (!mTexture) UploadSurface(renderer);
+    if (!mTexture) return;
+
+    int rendW, rendH;
+    SDL_GetRenderOutputSize(renderer, &rendW, &rendH);
+
+    // Scale image so its height exactly fills the viewport.
+    // The displayed width scales proportionally.
+    float scale   = (float)rendH / (float)mOrigH;
+    float imgDispW = (float)mOrigW * scale; // how wide the image appears on screen
+
+    // Scroll: map cameraX across the scrollable range of the image.
+    // scrollable image pixels = imgDispW - rendW  (how far we can pan)
+    // scrollable world pixels = levelW - rendW    (how far the camera can move)
+    // If levelW is 0 or image is narrower than viewport, just centre it.
+    float offsetX = 0.0f;
+    float scrollableImg   = imgDispW - (float)rendW;
+    float scrollableWorld = (levelW > 0.0f ? levelW : imgDispW) - (float)rendW;
+    if (scrollableImg > 0.0f && scrollableWorld > 0.0f) {
+        float t = cameraX / scrollableWorld; // 0..1
+        if (t < 0.0f) t = 0.0f;
+        if (t > 1.0f) t = 1.0f;
+        offsetX = -t * scrollableImg;
+    } else {
+        // Image fits entirely (or world is tiny): centre it
+        offsetX = ((float)rendW - imgDispW) * 0.5f;
+    }
+
+    SDL_FRect dst = {offsetX, 0.0f, imgDispW, (float)rendH};
+    SDL_FlipMode flip = mFlipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
+    SDL_RenderTextureRotated(renderer, mTexture, nullptr, &dst, 0.0, nullptr, flip);
+}
+
 void Image::SaveToFile(std::string Location) {
     if (mPendingSurface)
         IMG_SavePNG(mPendingSurface, Location.c_str());

@@ -38,14 +38,21 @@ inline void PlayerStateSystem(entt::registry& reg) {
         const int duckRoffX  = base ? base->duckRoffX  : PLAYER_DUCK_ROFF_X;
         const int duckRoffY  = base ? base->duckRoffY  : PLAYER_DUCK_ROFF_Y;
         // ── Attack state: start or continue slash ──────────────────────────
-        // Slashing is always allowed, even during the invincibility/hurt window
-        // after taking a hit. The hurt flash is visual-only and should never
-        // prevent the player from attacking.
+        // Attack ALWAYS takes priority over hurt/invincibility visuals.
+        // Rules:
+        //   - attackPressed while idle/hurt/anything: start a fresh slash.
+        //   - attackPressed while already slashing (spam): restart from frame 0
+        //     so rapid taps each play a full swing.
+        //   - isAttacking + currentAnim==SLASH: hold the slash to completion,
+        //     then drop back to hurt if still invincible, else to NONE.
+        //   - isAttacking + currentAnim!=SLASH: something external (hurt) stomped
+        //     the anim — re-assert slash immediately so it visually takes over.
         if (auto* atk = reg.try_get<AttackState>(entity)) {
             if (atk->attackPressed) {
+                // Start a new swing (or restart mid-swing for rapid-fire F spam).
                 atk->attackPressed = false;
                 atk->isAttacking   = true;
-                atk->hitEntities.clear(); // new swing — reset per-swing hit registry
+                atk->hitEntities.clear();
                 r.sheet            = set.slashSheet;
                 r.frames           = set.slash;
                 anim.currentFrame  = 0;
@@ -57,16 +64,23 @@ inline void PlayerStateSystem(entt::registry& reg) {
                 return;
             }
             if (atk->isAttacking) {
-                // Safety: if something else stomped the anim out from under us,
-                // isAttacking would be stuck true forever — clear it.
                 if (anim.currentAnim != AnimationID::SLASH) {
-                    atk->isAttacking   = false;
-                    atk->attackPressed = false;
-                } else if (anim.currentFrame >= anim.totalFrames - 1) {
+                    // Hurt (or anything else) stomped our anim — re-assert slash.
+                    // This is the key fix: instead of surrendering, we take it back.
+                    r.sheet           = set.slashSheet;
+                    r.frames          = set.slash;
+                    anim.currentFrame = 0;
+                    anim.timer        = 0.0f;
+                    anim.fps          = (set.slashFps > 0.0f) ? set.slashFps : 18.0f;
+                    anim.looping      = false;
+                    anim.totalFrames  = (int)set.slash.size();
+                    anim.currentAnim  = AnimationID::SLASH;
+                    return;
+                }
+                if (anim.currentFrame >= anim.totalFrames - 1) {
+                    // Slash finished — return to hurt if still invincible, else idle.
                     atk->isAttacking = false;
-                    // If still in invincibility window, resume hurt immediately
-                    // so it overlaps naturally rather than replaying from frame 0.
-                    if (inv.isInvincible) {
+                    if (inv.isInvincible && !set.hurt.empty()) {
                         r.sheet           = set.hurtSheet;
                         r.frames          = set.hurt;
                         anim.currentFrame = 0;
@@ -79,7 +93,7 @@ inline void PlayerStateSystem(entt::registry& reg) {
                     }
                     anim.currentAnim = AnimationID::NONE;
                 } else {
-                    return; // hold slash anim until last frame
+                    return; // mid-slash — hold until last frame
                 }
             }
         }
@@ -126,9 +140,18 @@ inline void PlayerStateSystem(entt::registry& reg) {
             frames  = &set.idle;
             fps     = resolveFps(set.idleFps, 12.0f);
             id      = AnimationID::IDLE;
-        } else if (canHurt && inv.isInvincible && !(reg.try_get<AttackState>(entity) &&
-                                                     reg.get<AttackState>(entity).isAttacking)) {
-            // Show hurt anim during invincibility, but only if not mid-slash.
+        } else if (canHurt && inv.isInvincible
+                   && !(reg.try_get<AttackState>(entity) && reg.get<AttackState>(entity).isAttacking)
+                   && !(anim.currentAnim == AnimationID::HURT
+                        && !anim.looping
+                        && anim.currentFrame >= anim.totalFrames - 1)) {
+            // Show hurt anim during invincibility, but only if:
+            //   - not mid-slash (attack takes priority), AND
+            //   - the hurt anim hasn't already finished playing.
+            // Once the hurt anim reaches its last frame it is done — let normal
+            // animation (idle/walk/jump) resume even while still invincible.
+            // This prevents the player from being frozen on the last hurt frame
+            // for the entire 1.5s invincibility window between hits.
             frames  = &set.hurt;
             fps     = resolveFps(set.hurtFps, 12.0f);
             looping = false;
@@ -185,6 +208,16 @@ inline void PlayerStateSystem(entt::registry& reg) {
         }
 
         // ── Animation swap — only when animation actually changes ─────────────
+        // Special case: if we're re-entering HURT (new hit just landed, resetting
+        // invincibility) but the anim is already on the last hurt frame, restart
+        // from frame 0 so the full hurt animation plays again.
+        if (id == AnimationID::HURT && anim.currentAnim == AnimationID::HURT
+            && anim.currentFrame >= anim.totalFrames - 1) {
+            anim.currentFrame = 0;
+            anim.timer        = 0.0f;
+            anim.looping      = false;
+            return;
+        }
         if (!frames || anim.currentAnim == id)
             return;
 
@@ -199,10 +232,9 @@ inline void PlayerStateSystem(entt::registry& reg) {
             case AnimationID::SLASH: sheet = set.slashSheet; break;
             default: break;
         }
-        if (sheet && sheet != r.sheet) {
-            r.sheet = sheet;
-        }
-
+        // Always set sheet and frames together atomically — a mismatched
+        // sheet/frames pair is what causes two-character flickering.
+        if (sheet) r.sheet = sheet;
         r.frames          = *frames;
         anim.currentFrame = 0;
         anim.timer        = 0.0f;

@@ -1,0 +1,95 @@
+{
+    "name": "angryorange",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 71,
+                "w": 61,
+                "x": 53,
+                "y": 85
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Walk",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 75,
+                "w": 67,
+                "x": 53,
+                "y": 77
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 94,
+                "w": 73,
+                "x": 47,
+                "y": 70
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 96,
+                "w": 69,
+                "x": 53,
+                "y": 85
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Fall",
+            "fps": 4.0,
+            "hitbox": {
+                "h": 81,
+                "w": 66,
+                "x": 53,
+                "y": 77
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Slash",
+            "fps": 62.0,
+            "hitbox": {
+                "h": 90,
+                "w": 67,
+                "x": 53,
+                "y": 83
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/angryorange/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 68,
+                "w": 70,
+                "x": 53,
+                "y": 84
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 59,
+                "w": 64,
+                "x": 53,
+                "y": 86
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 200,
+    "spriteW": 200
+}

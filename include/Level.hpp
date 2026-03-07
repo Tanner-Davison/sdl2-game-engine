@@ -55,6 +55,13 @@ struct TileSpawn {
     bool  moveTrigger = false;   // true = only starts moving after player first lands on it
     float movePhase   = 0.0f;   // starting position: 0.0=origin, 1.0=far end (fraction of range)
     int   moveLoopDir = 1;      // starting direction: +1=right/down, -1=left/up
+
+    // Power-up pickup tile. When powerUp=true this tile is a pickup: the player
+    // walks into it, it is consumed, and the named power-up effect activates.
+    // powerUpType: "antigravity" (and future names). powerUpDuration: seconds.
+    bool        powerUp         = false;
+    std::string powerUpType;
+    float       powerUpDuration = 15.0f;
 };
 
 enum class GravityMode { Platformer, WallRun, OpenWorld };
@@ -62,6 +69,7 @@ enum class GravityMode { Platformer, WallRun, OpenWorld };
 struct Level {
     std::string             name        = "Untitled";
     std::string             background  = "game_assets/backgrounds/deepspace_scene.png";
+    std::string             bgFitMode   = "cover"; // "cover", "contain", "stretch", "tile"
     GravityMode             gravityMode = GravityMode::Platformer;
     PlayerSpawn             player      = {0.0f, 0.0f};
     std::vector<CoinSpawn>  coins;

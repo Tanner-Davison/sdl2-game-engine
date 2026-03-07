@@ -1,0 +1,95 @@
+{
+    "name": "elemental_fire",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 87,
+                "w": 59,
+                "x": 37,
+                "y": 53
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Walk",
+            "fps": 17.0,
+            "hitbox": {
+                "h": 114,
+                "w": 60,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 116,
+                "w": 84,
+                "x": 0,
+                "y": 37
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Jump",
+            "fps": 13.0,
+            "hitbox": {
+                "h": 111,
+                "w": 56,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 108,
+                "w": 63,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Slash",
+            "fps": 43.0,
+            "hitbox": {
+                "h": 117,
+                "w": 102,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 114,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_fire/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 74,
+                "w": 113,
+                "x": 0,
+                "y": 83
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 180,
+    "spriteW": 140
+}

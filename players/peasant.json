@@ -1,0 +1,95 @@
+{
+    "name": "peasant",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 78,
+                "w": 49,
+                "x": 32,
+                "y": 47
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Walk",
+            "fps": 32.0,
+            "hitbox": {
+                "h": 101,
+                "w": 51,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 85,
+                "w": 85,
+                "x": 3,
+                "y": 49
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 94,
+                "w": 51,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 52,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Slash",
+            "fps": 20.0,
+            "hitbox": {
+                "h": 98,
+                "w": 54,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 96,
+                "w": 44,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/peasant/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 102,
+                "w": 75,
+                "x": 12,
+                "y": 33
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 160,
+    "spriteW": 120
+}

@@ -61,6 +61,7 @@ class GameScene : public Scene {
     int            mPlayerSpriteW = 0;         // resolved sprite width  (set in Load, used in Spawn)
     int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
     std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};  // per-slot fps from profile (0 = engine default)
+    bool           mHasProfile        = false;  // true = a valid PlayerProfile was loaded
     bool           mFromEditor        = false;  // true = launched via editor Play button
     bool           mPaused            = false;  // true = pause overlay active, simulation frozen
     bool           mGoBackFromPause   = false;  // set by pause overlay "Back" button

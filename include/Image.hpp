@@ -1,14 +1,36 @@
 #pragma once
 #include <SDL3/SDL.h>
 #include <string>
+#include <string_view>
 
 enum class FitMode {
     CONTAIN,
     COVER,
     STRETCH,
     SRCSIZE,
-    PRESCALED // scales the texture dst rect to fill the viewport each frame
+    PRESCALED, // scales the texture dst rect to fill the viewport each frame
+    SCROLL     // image height fills viewport; scrolls horizontally with the camera
 };
+
+// Convert a level JSON string to the matching FitMode.
+// Defaults to COVER so existing levels without the field look correct.
+inline FitMode FitModeFromString(const std::string& s) {
+    if (s == "contain") return FitMode::CONTAIN;
+    if (s == "stretch") return FitMode::STRETCH;
+    if (s == "tile")    return FitMode::PRESCALED;
+    if (s == "scroll")  return FitMode::SCROLL;
+    return FitMode::COVER; // default
+}
+
+inline const char* FitModeToString(FitMode m) {
+    switch (m) {
+        case FitMode::CONTAIN:   return "contain";
+        case FitMode::STRETCH:   return "stretch";
+        case FitMode::PRESCALED: return "tile";
+        case FitMode::SCROLL:    return "scroll";
+        default:                 return "cover";
+    }
+}
 
 class Image {
   public:
@@ -30,6 +52,11 @@ class Image {
 
     // Render to renderer. For PRESCALED/COVER/CONTAIN the dst fills rendererW x rendererH.
     void Render(SDL_Renderer* renderer);
+
+    // SCROLL mode render: image fills viewport height, scrolls horizontally.
+    // cameraX: current camera world-space X offset.
+    // levelW:  total world width in pixels (0 = unbounded, clamps to image width).
+    void RenderScrolling(SDL_Renderer* renderer, float cameraX, float levelW = 0.0f);
 
     // Set an explicit destination rect (used by scenes that place images at fixed positions)
     void SetDestinationRectangle(SDL_FRect dest);

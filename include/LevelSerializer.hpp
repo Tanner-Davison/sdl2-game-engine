@@ -11,6 +11,7 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
     json j;
     j["name"]        = level.name;
     j["background"]  = level.background;
+    j["bgFitMode"]   = level.bgFitMode;
     j["gravityMode"] = (level.gravityMode == GravityMode::WallRun)  ? "wallrun"
                       : (level.gravityMode == GravityMode::OpenWorld) ? "openworld"
                                                                        : "platformer";
@@ -58,7 +59,10 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                               {"moveLoop",     t.moveLoop},
                               {"moveTrigger",  t.moveTrigger},
                               {"movePhase",    t.movePhase},
-                              {"moveLoopDir",  t.moveLoopDir}});
+                              {"moveLoopDir",  t.moveLoopDir},
+                              {"powerUp",         t.powerUp},
+                              {"powerUpType",     t.powerUpType},
+                              {"powerUpDuration", t.powerUpDuration}});
     }
 
     std::ofstream file(path);
@@ -88,6 +92,7 @@ inline bool LoadLevel(const std::string& path, Level& out) {
 
     out.name        = j.value("name", "Untitled");
     out.background  = j.value("background", "game_assets/backgrounds/deepspace_scene.png");
+    out.bgFitMode   = j.value("bgFitMode", "cover");
     {
         std::string gm = j.value("gravityMode", "platformer");
         out.gravityMode = (gm == "wallrun")   ? GravityMode::WallRun
@@ -144,7 +149,10 @@ inline bool LoadLevel(const std::string& path, Level& out) {
                              t.value("moveLoop",    false),
                              t.value("moveTrigger", false),
                              t.value("movePhase",   0.0f),
-                             t.value("moveLoopDir", 1)});
+                             t.value("moveLoopDir", 1),
+                             t.value("powerUp",         false),
+                             t.value("powerUpType",     std::string{}),
+                             t.value("powerUpDuration", 15.0f)});
     }
 
     std::print("Level loaded: {} ({} coins, {} enemies)\n",

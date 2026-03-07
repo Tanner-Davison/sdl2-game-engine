@@ -1,0 +1,95 @@
+{
+    "name": "real_guy_tall_man",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 128,
+                "w": 80,
+                "x": 16,
+                "y": 0
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Walk",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 127,
+                "w": 81,
+                "x": 26,
+                "y": 4
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 130,
+                "w": 105,
+                "x": 0,
+                "y": 9
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 130,
+                "w": 61,
+                "x": 35,
+                "y": 10
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 110,
+                "w": 107,
+                "x": 13,
+                "y": 24
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Slash",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 135,
+                "w": 75,
+                "x": 0,
+                "y": 0
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Hurt",
+            "fps": 7.0,
+            "hitbox": {
+                "h": 128,
+                "w": 68,
+                "x": 32,
+                "y": 6
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/real_guy_tall_man/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 120,
+                "w": 69,
+                "x": 32,
+                "y": 14
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 140,
+    "spriteW": 120
+}

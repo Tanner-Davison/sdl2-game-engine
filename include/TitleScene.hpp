@@ -3,10 +3,10 @@
 #include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
-#include "SurfaceUtils.hpp"
 #include "Text.hpp"
 #include "Window.hpp"
 #include <SDL3/SDL.h>
+#include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <filesystem>
 #include <memory>
@@ -23,7 +23,7 @@ class TitleScene : public Scene {
   public:
     void Load(Window& window) override {
         mSDLWindow = window.GetRaw();
-        // Use SDL directly to get the logical window size in points.
+        mRenderer  = window.GetRenderer();
         SDL_GetWindowSize(mSDLWindow, &mWindowW, &mWindowH);
 
         background = std::make_unique<Image>("game_assets/backgrounds/bg_castle.png",
@@ -102,6 +102,12 @@ class TitleScene : public Scene {
     void Unload() override {
         if (mNamingActive)
             SDL_StopTextInput(mSDLWindow);
+        for (auto& c : mCharCards) {
+            if (c.previewTex) { SDL_DestroyTexture(c.previewTex); c.previewTex = nullptr; }
+            for (auto* t : c.walkFrames) if (t) SDL_DestroyTexture(t);
+            c.walkFrames.clear();
+        }
+        mCharCards.clear();
     }
 
     bool HandleEvent(SDL_Event& e) override {
@@ -141,6 +147,28 @@ class TitleScene : public Scene {
             return true;
         }
 
+        // Delete confirmation dialog intercepts all input when open
+        if (mDelConfirmOpen) {
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+                mDelConfirmOpen = false; return true;
+            }
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+                int mx = (int)e.button.x, my = (int)e.button.y;
+                if (hit(mDelConfirmYes, mx, my)) {
+                    std::error_code ec;
+                    fs::remove(mDelConfirmPath, ec);
+                    mDelConfirmOpen = false;
+                    mDelConfirmPath.clear();
+                    scanLevels(); // refresh list
+                    return true;
+                }
+                if (hit(mDelConfirmNo, mx, my)) {
+                    mDelConfirmOpen = false; return true;
+                }
+            }
+            return true;
+        }
+
         if (mLevelBrowserOpen) {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
                 mLevelBrowserOpen = false; return true;
@@ -155,8 +183,14 @@ class TitleScene : public Scene {
                 int rowH = 52, g = 8;
                 int listY = mBrowserListY - mLevelBrowserScroll * (rowH + g);
                 for (auto& lb : mLevelButtons) {
-                    SDL_Rect pr = lb.rect; pr.y = listY;
-                    SDL_Rect er = lb.editRect; er.y = listY;
+                    SDL_Rect pr = lb.rect;     pr.y  = listY;
+                    SDL_Rect er = lb.editRect; er.y  = listY;
+                    SDL_Rect dr = lb.delRect;  dr.y  = listY;
+                    if (hit(dr, mx, my)) {
+                        mDelConfirmPath = lb.path;
+                        mDelConfirmOpen = true;
+                        return true;
+                    }
                     if (hit(pr, mx, my)) { mChosenLevel = lb.path; startGame = true; mLevelBrowserOpen = false; return true; }
                     if (hit(er, mx, my)) { mEditorPath = lb.path; mEditorForce = false; mEditorName = ""; openEditor = true; mLevelBrowserOpen = false; return true; }
                     listY += rowH + g;
@@ -169,6 +203,41 @@ class TitleScene : public Scene {
             mChosenLevel = ""; startGame = true;
         }
 
+        // Character picker intercepts all input when open
+        if (mCharPickerOpen) {
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+                mCharPickerOpen = false; return true;
+            }
+            if (e.type == SDL_EVENT_MOUSE_WHEEL) {
+                float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
+                if (hit(mCharPickerPanel, (int)fmx, (int)fmy)) {
+                    mCharPickerScroll = std::clamp(mCharPickerScroll - (int)e.wheel.y * 40,
+                                                   0, std::max(0, mCharPickerMaxScroll));
+                    return true;
+                }
+            }
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+                int mx = (int)e.button.x, my = (int)e.button.y;
+                if (hit(mCharPickerCloseRect, mx, my)) { mCharPickerOpen = false; return true; }
+                // Hit-test each card
+                for (int i = 0; i < (int)mCharCards.size(); ++i) {
+                    SDL_Rect cardRect = mCharCards[i].rect;
+                    cardRect.y -= mCharPickerScroll;
+                    if (hit(cardRect, mx, my)) {
+                        mProfileIdx    = i;
+                        mChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
+                        // Reset walk anim so it starts from frame 0 when re-opened
+                        mCharCards[i].walkAnimFrame = 0;
+                        mCharCards[i].walkAnimTimer = 0.f;
+                        rebuildProfileSelector();
+                        mCharPickerOpen = false;
+                        return true;
+                    }
+                }
+            }
+            return true;
+        }
+
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
             if (hit(playBtnRect, mx, my))         { mChosenLevel = ""; startGame = true; }
@@ -176,16 +245,7 @@ class TitleScene : public Scene {
             if (hit(createPlayerBtnRect, mx, my))  { openPlayerCreator  = true; return true; }
             if (hit(tileAnimBtnRect, mx, my))       { openTileAnimCreator = true; return true; }
             if (hit(viewLevelsBtnRect, mx, my))     { mLevelBrowserOpen = true; mLevelBrowserScroll = 0; return true; }
-            if (!mProfiles.empty()) {
-                if (hit(mProfilePrevRect, mx, my)) {
-                    mProfileIdx = (mProfileIdx - 1 + (int)mProfiles.size()) % (int)mProfiles.size();
-                    mChosenProfile = mProfiles[mProfileIdx]; rebuildProfileSelector(); return true;
-                }
-                if (hit(mProfileNextRect, mx, my)) {
-                    mProfileIdx = (mProfileIdx + 1) % (int)mProfiles.size();
-                    mChosenProfile = mProfiles[mProfileIdx]; rebuildProfileSelector(); return true;
-                }
-            }
+            if (hit(mChooseCharBtnRect, mx, my))    { openCharPicker(); return true; }
         }
 
         playButton->HandleEvent(e);
@@ -196,7 +256,39 @@ class TitleScene : public Scene {
         return true;
     }
 
-    void Update(float dt) override {}
+    void Update(float dt) override {
+        if (!mCharPickerOpen || mCharCards.empty()) return;
+
+        // Lazy-load one walk frame per card per tick (spread cost across frames)
+        for (auto& c : mCharCards) {
+            if (c.walkLoadIdx < (int)c.walkPaths.size()) {
+                SDL_Surface* raw = IMG_Load(c.walkPaths[c.walkLoadIdx].string().c_str());
+                if (raw) {
+                    SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+                    SDL_DestroySurface(raw);
+                    if (conv) {
+                        SDL_Texture* t = SDL_CreateTextureFromSurface(mRenderer, conv);
+                        SDL_DestroySurface(conv);
+                        if (t) c.walkFrames.push_back(t);
+                    }
+                }
+                ++c.walkLoadIdx;
+            }
+        }
+
+        // Advance walk animation on the active (selected) card
+        if (mProfileIdx >= 0 && mProfileIdx < (int)mCharCards.size()) {
+            auto& active = mCharCards[mProfileIdx];
+            if (!active.walkFrames.empty()) {
+                active.walkAnimTimer += dt;
+                float interval = 1.f / active.walkFps;
+                while (active.walkAnimTimer >= interval) {
+                    active.walkAnimTimer -= interval;
+                    active.walkAnimFrame = (active.walkAnimFrame + 1) % (int)active.walkFrames.size();
+                }
+            }
+        }
+    }
 
     void Render(Window& window) override {
         window.Render();
@@ -212,25 +304,67 @@ class TitleScene : public Scene {
         if (createPlayerButton) { createPlayerButton->Render(ren); createPlayerBtnText->Render(ren); }
         if (tileAnimButton)     { tileAnimButton->Render(ren);     tileAnimBtnText->Render(ren); }
 
-        // Character selector
+        // Character selector — single "Choose Character" button
         if (mProfileSelectorBg.w > 0) {
             fillRect(ren, mProfileSelectorBg, {28, 32, 52, 255});
             outlineRect(ren, mProfileSelectorBg, {80, 100, 180, 255});
         }
         if (mProfileLabel)    mProfileLabel->Render(ren);
         if (mProfileNameText) mProfileNameText->Render(ren);
-        if (!mProfiles.empty()) {
-            fillRect(ren, mProfilePrevRect, {45, 55, 100, 255});
-            outlineRect(ren, mProfilePrevRect, {80, 100, 200, 255});
-            Text arr1("<", {220,220,255,255}, mProfilePrevRect.x+8, mProfilePrevRect.y+4, 16);
-            arr1.Render(ren);
-            fillRect(ren, mProfileNextRect, {45, 55, 100, 255});
-            outlineRect(ren, mProfileNextRect, {80, 100, 200, 255});
-            Text arr2(">", {220,220,255,255}, mProfileNextRect.x+8, mProfileNextRect.y+4, 16);
-            arr2.Render(ren);
+        // Replace arrow buttons with a single "Choose..." button
+        if (mProfileSelectorBg.w > 0) {
+            fillRect(ren, mChooseCharBtnRect, {55, 40, 110, 255});
+            outlineRect(ren, mChooseCharBtnRect, {120, 80, 220, 255});
+            auto [cx2, cy2] = Text::CenterInRect("Choose...", 13, mChooseCharBtnRect);
+            Text chTxt("Choose...", {200, 180, 255, 255}, cx2, cy2, 13);
+            chTxt.Render(ren);
         }
 
         if (viewLevelsButton) { viewLevelsButton->Render(ren); viewLevelsBtnText->Render(ren); }
+
+        // ── Character picker popup ─────────────────────────────────────────────
+        if (mCharPickerOpen) {
+            renderCharPicker(ren);
+        }
+
+        // ── Delete confirmation modal ─────────────────────────────────────────
+        if (mDelConfirmOpen) {
+            int W = window.GetWidth(), H = window.GetHeight();
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
+            SDL_FRect full = {0,0,(float)W,(float)H};
+            SDL_RenderFillRect(ren, &full);
+
+            int mw = 400, mh = 170;
+            int mx = (W - mw) / 2, my = (H - mh) / 2;
+            SDL_Rect box = {mx, my, mw, mh};
+            fillRect(ren, box, {28, 18, 18, 255});
+            outlineRect(ren, box, {200, 60, 60, 255}, 2);
+
+            std::string name = fs::path(mDelConfirmPath).stem().string();
+            Text t1("Delete level?", {255, 100, 100, 255}, mx + 20, my + 16, 22);
+            t1.Render(ren);
+            Text t2("\"" + name + "\"", {220, 200, 200, 255}, mx + 20, my + 48, 18);
+            t2.Render(ren);
+            Text t3("This cannot be undone.", {180, 140, 140, 255}, mx + 20, my + 76, 13);
+            t3.Render(ren);
+
+            mDelConfirmYes = {mx + 24,        my + mh - 50, 140, 36};
+            mDelConfirmNo  = {mx + mw - 164,  my + mh - 50, 140, 36};
+            fillRect(ren, mDelConfirmYes, {160, 30, 30, 255});
+            outlineRect(ren, mDelConfirmYes, {220, 70, 70, 255});
+            auto [yx, yy] = Text::CenterInRect("Delete", 16, mDelConfirmYes);
+            Text yLbl("Delete", {255, 200, 200, 255}, yx, yy, 16);
+            yLbl.Render(ren);
+
+            fillRect(ren, mDelConfirmNo, {40, 40, 60, 255});
+            outlineRect(ren, mDelConfirmNo, {80, 80, 120, 255});
+            auto [nx, ny] = Text::CenterInRect("Cancel", 16, mDelConfirmNo);
+            Text nLbl("Cancel", {180, 180, 220, 255}, nx, ny, 16);
+            nLbl.Render(ren);
+
+            Text hint("Esc to cancel", {80, 80, 100, 255}, mx + mw/2 - 36, my + mh - 14, 11);
+            hint.Render(ren);
+        }
 
         // ── Name prompt modal overlay ─────────────────────────────────────────
         if (mNamingActive) {
@@ -288,7 +422,8 @@ class TitleScene : public Scene {
 
             int listTop = py + 100, listBottom = py + ph - 10;
             mBrowserListY = listTop;
-            int rowH = 52, rowGap = 8, playW = 290, editW = 90, btnGap = 8, rowX = px + 16;
+            int rowH = 52, rowGap = 8, delW = 60, editW = 76, btnGap = 8, rowX = px + 16;
+            int playW = pw - 32 - editW - delW - btnGap * 2; // remaining width
             int listY = listTop - mLevelBrowserScroll * (rowH + rowGap);
             for (int i = 0; i < (int)mLevelButtons.size(); i++) {
                 int ry = listY + i * (rowH + rowGap);
@@ -309,8 +444,16 @@ class TitleScene : public Scene {
                 Text elbl("Edit", {200,220,255,255}, ex, ey, 18);
                 elbl.Render(ren);
 
+                SDL_Rect dr = {rowX + playW + btnGap + editW + btnGap, ry, delW, rowH};
+                fillRect(ren, dr, {140, 35, 35, 255});
+                outlineRect(ren, dr, {220, 70, 70, 255});
+                auto [dx, dy] = Text::CenterInRect("Del", 16, dr);
+                Text dlbl("Del", {255,200,200,255}, dx, dy, 16);
+                dlbl.Render(ren);
+
                 mLevelButtons[i].rect     = pr;
                 mLevelButtons[i].editRect = er;
+                mLevelButtons[i].delRect  = dr;
             }
             if ((int)mLevelButtons.size() * (rowH + rowGap) > listBottom - listTop) {
                 Text sh("scroll to see more", {80,90,120,255}, px + pw/2 - 60, py + ph - 18, 11);
@@ -377,6 +520,7 @@ class TitleScene : public Scene {
         std::string path;
         SDL_Rect    rect     = {};
         SDL_Rect    editRect = {};
+        SDL_Rect    delRect  = {};
     };
     void scanLevels() {
         mLevelButtons.clear();
@@ -405,34 +549,61 @@ class TitleScene : public Scene {
     }
     void rebuildProfileSelector() {
         int cx = mWindowW / 2, selY = mProfileSelectorBaseY + 10;
-        int selW = 340, selH = 32, arrW = 28;
-        mProfileSelectorBg = {cx - selW/2, selY, selW, selH};
-        mProfilePrevRect   = {cx - selW/2,        selY+2, arrW, selH-4};
-        mProfileNextRect   = {cx + selW/2 - arrW, selY+2, arrW, selH-4};
+        int selW = 340, selH = 32;
+        int btnW2 = 80;
+        mProfileSelectorBg  = {cx - selW/2, selY, selW, selH};
+        mChooseCharBtnRect  = {cx + selW/2 - btnW2 - 2, selY + 2, btnW2, selH - 4};
         mProfileLabel = std::make_unique<Text>("Character:", SDL_Color{160, 170, 220, 255},
-                                               cx - selW/2 + arrW + 6, selY + 7, 13);
+                                               cx - selW/2 + 8, selY + 7, 13);
         std::string name = "Frost Knight (default)";
         if (mProfileIdx > 0 && mProfileIdx < (int)mProfiles.size())
             name = fs::path(mProfiles[mProfileIdx]).stem().string();
         mProfileNameText = std::make_unique<Text>(name, SDL_Color{255, 255, 255, 255},
-                                                  cx - selW/2 + arrW + 80, selY + 7, 14);
+                                                  cx - selW/2 + 90, selY + 7, 14);
     }
 
+    // ── Character picker popup ────────────────────────────────────────────────
+    struct CharCard {
+        std::string  name;
+        std::string  profilePath;            // empty = default frost knight
+        SDL_Texture* previewTex = nullptr;   // first idle frame, pre-uploaded to GPU
+        SDL_Rect     rect{};                 // card rect (before scroll offset)
+
+        // Walk animation (active card only) ─ lazily loaded after open
+        std::vector<SDL_Texture*> walkFrames;   // uploaded walk textures
+        std::vector<fs::path>     walkPaths;    // all walk PNGs (sorted)
+        int  walkLoadIdx  = 0;    // next walkPaths index to upload
+        int  walkAnimFrame = 0;   // current display frame
+        float walkAnimTimer = 0.f;
+        float walkFps       = 8.f;
+    };
+    std::vector<CharCard> mCharCards;
+    bool                  mCharPickerOpen      = false;
+    int                   mCharPickerScroll    = 0;
+    int                   mCharPickerMaxScroll = 0;
+    SDL_Rect              mCharPickerPanel{};
+    SDL_Rect              mCharPickerCloseRect{};
+    SDL_Rect              mChooseCharBtnRect{};
+    SDL_Renderer*         mRenderer = nullptr;
+
+    void openCharPicker();
+    void renderCharPicker(SDL_Renderer* ren);
+
     // ── State ─────────────────────────────────────────────────────────────────
-    SDL_Window* mSDLWindow           = nullptr;
-    bool        startGame            = false;
-    bool        openEditor           = false;
-    bool        openPlayerCreator    = false;
-    bool        openTileAnimCreator  = false;
-    int         mRow2BottomY         = 0;
-    int         mProfileSelectorBaseY = 0;
-    std::string mChosenLevel;
-    std::string mChosenProfile;
-    std::string mEditorPath;
-    std::string mEditorName;
-    bool        mEditorForce         = false;
-    int         mWindowW             = 0;
-    int         mWindowH             = 0;
+    SDL_Window*   mSDLWindow           = nullptr;
+    bool          startGame            = false;
+    bool          openEditor           = false;
+    bool          openPlayerCreator    = false;
+    bool          openTileAnimCreator  = false;
+    int           mRow2BottomY         = 0;
+    int           mProfileSelectorBaseY = 0;
+    std::string   mChosenLevel;
+    std::string   mChosenProfile;
+    std::string   mEditorPath;
+    std::string   mEditorName;
+    bool          mEditorForce         = false;
+    int           mWindowW             = 0;
+    int           mWindowH             = 0;
 
     bool                   mNamingActive    = false;
     std::string            mNewLevelName;
@@ -447,6 +618,12 @@ class TitleScene : public Scene {
     int      mBrowserListY       = 0;
     SDL_Rect mBrowserCloseRect   = {};
     SDL_Rect mBrowserNewRect     = {};
+
+    // Delete confirmation
+    bool        mDelConfirmOpen  = false;
+    std::string mDelConfirmPath;
+    SDL_Rect    mDelConfirmYes   = {};
+    SDL_Rect    mDelConfirmNo    = {};
 
     std::unique_ptr<Image>     background;
     std::unique_ptr<Text>      titleText;
@@ -471,8 +648,6 @@ class TitleScene : public Scene {
     std::vector<std::string>   mProfiles;
     int                        mProfileIdx = 0;
     SDL_Rect                   mProfileSelectorBg{};
-    SDL_Rect                   mProfilePrevRect{};
-    SDL_Rect                   mProfileNextRect{};
     std::unique_ptr<Text>      mProfileLabel;
     std::unique_ptr<Text>      mProfileNameText;
 };

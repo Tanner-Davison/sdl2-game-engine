@@ -1,0 +1,95 @@
+{
+    "name": "elemental_devil",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 90,
+                "w": 58,
+                "x": 37,
+                "y": 48
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Walk",
+            "fps": 21.0,
+            "hitbox": {
+                "h": 112,
+                "w": 65,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 94,
+                "w": 99,
+                "x": 3,
+                "y": 61
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 111,
+                "w": 63,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 107,
+                "w": 62,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Slash",
+            "fps": 33.0,
+            "hitbox": {
+                "h": 115,
+                "w": 94,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Hurt",
+            "fps": 19.0,
+            "hitbox": {
+                "h": 113,
+                "w": 55,
+                "x": 37,
+                "y": 37
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/elemental_devil/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 115,
+                "w": 102,
+                "x": 0,
+                "y": 37
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 180,
+    "spriteW": 140
+}

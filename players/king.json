@@ -1,0 +1,95 @@
+{
+    "name": "king",
+    "slots": [
+        {
+            "folderPath": "game_assets/char_sprites/king/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 99,
+                "w": 52,
+                "x": 36,
+                "y": 33
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Walk",
+            "fps": 32.0,
+            "hitbox": {
+                "h": 97,
+                "w": 45,
+                "x": 43,
+                "y": 33
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Crouch",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 89,
+                "w": 64,
+                "x": 13,
+                "y": 46
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Jump",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 95,
+                "w": 45,
+                "x": 39,
+                "y": 33
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Fall",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 93,
+                "w": 55,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 4
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Slash",
+            "fps": 40.0,
+            "hitbox": {
+                "h": 97,
+                "w": 77,
+                "x": 39,
+                "y": 33
+            },
+            "slot": 5
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 97,
+                "w": 56,
+                "x": 32,
+                "y": 33
+            },
+            "slot": 6
+        },
+        {
+            "folderPath": "game_assets/char_sprites/king/Death",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 100,
+                "w": 80,
+                "x": 8,
+                "y": 33
+            },
+            "slot": 7
+        }
+    ],
+    "spriteH": 160,
+    "spriteW": 120
+}
