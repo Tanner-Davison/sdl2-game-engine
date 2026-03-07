@@ -2787,26 +2787,50 @@ void LevelEditorScene::Render(Window& window) {
                                : t.hazard ? SDL_Color{255, 60, 60, 255}
                                           : SDL_Color{100, 180, 255, 255};
         DrawOutline(screen, dst, outlineCol);
-        // Badges via pre-rendered cached surfaces (blitBadge defined at top of Render)
-        if (t.prop) {
-            DrawRect(screen, {tsx + 2, tsy + 2, 14, 14}, {0, 180, 0, 200});
-            blitBadge(GetBadge("P", {255, 255, 255, 255}), tsx + 4, tsy + 2);
-        }
-        if (t.ladder) {
-            DrawRect(screen, {tsx + 2, tsy + 2, 14, 14}, {0, 160, 180, 200});
-            blitBadge(GetBadge("L", {255, 255, 255, 255}), tsx + 4, tsy + 2);
+        // ── Stacked top-left badges — each one shifts right so all are visible ──
+        // Order: P → L → A → H → F → M (moving platform handled separately below)
+        {
+            int bx = tsx + 2; // cursor: advances right as badges are added
+            constexpr int BH = 14, BW = 14, GAP = 2;
+            auto drawBadge = [&](const char* label, SDL_Color bg, SDL_Color fg) {
+                DrawRect(screen, {bx, tsy + 2, BW, BH}, bg);
+                blitBadge(GetBadge(label, fg), bx + 2, tsy + 2);
+                bx += BW + GAP;
+            };
+            if (t.prop)        drawBadge("P", {0, 180, 0, 210},    {255, 255, 255, 255});
+            if (t.ladder)      drawBadge("L", {0, 160, 180, 210},  {255, 255, 255, 255});
+            if (t.action) {
+                std::string ab = "A";
+                if (t.actionGroup > 0) ab += std::to_string(t.actionGroup);
+                if (t.actionHits > 1)  ab += "x" + std::to_string(t.actionHits);
+                int abw = (int)ab.size() * 6 + 4;
+                DrawRect(screen, {bx, tsy + 2, abw, BH}, {200, 100, 0, 200});
+                blitBadge(GetBadge(ab, {255, 255, 255, 255}), bx + 2, tsy + 2);
+                bx += abw + GAP;
+            }
+            if (t.hazard)      drawBadge("H", {200, 0, 0, 220},    {255, 255, 255, 255});
+            if (t.antiGravity) drawBadge("F", {0, 180, 200, 220},  {255, 255, 255, 255});
+            if (t.powerUp) {
+                std::string pb = t.powerUpType.empty() ? "PU" : t.powerUpType.substr(0, 2);
+                int          pw2 = (int)pb.size() * 6 + 4;
+                DrawRect(screen, {bx, tsy + 2, pw2, BH}, {180, 0, 220, 220});
+                DrawOutline(screen, {bx, tsy + 2, pw2, BH}, {255, 80, 255, 255});
+                blitBadge(GetBadge(pb, {255, 255, 255, 255}), bx + 2, tsy + 2);
+                bx += pw2 + GAP;
+            }
+            // slope badge — slightly different shape so keep its own block
+            if (t.slope != SlopeType::None) {
+                std::string badge = (t.slope == SlopeType::DiagUpRight) ? "/" : "\\";
+                if (t.slopeHeightFrac < 0.99f)
+                    badge += std::to_string((int)std::round(t.slopeHeightFrac * 100)) + "%";
+                int bw2 = (int)badge.size() * 6 + 4;
+                DrawRect(screen, {bx, tsy + 2, bw2, BH}, {160, 120, 0, 200});
+                blitBadge(GetBadge(badge, {255, 255, 255, 255}), bx + 2, tsy + 2);
+                bx += bw2 + GAP;
+            }
+            (void)bx; // suppress unused-variable warning if all are off
         }
         if (t.action) {
-            // Badge: A[group][xHits] e.g. "A2x4" = group 2, needs 4 hits
-            std::string abadge = "A";
-            if (t.actionGroup > 0)
-                abadge += std::to_string(t.actionGroup);
-            if (t.actionHits > 1)
-                abadge += "x" + std::to_string(t.actionHits);
-            int bw = (int)abadge.size() * 6 + 4;
-            DrawRect(screen, {tsx + 2, tsy + 2, bw, 14}, {200, 100, 0, 200});
-            blitBadge(GetBadge(abadge, {255, 255, 255, 255}), tsx + 4, tsy + 2);
-
             // Bottom-right corner: death-anim indicator + group number label.
             // Shows a thumbnail of the assigned death anim, or a "+" hint when empty.
             // The group number is shown below the thumbnail so right-click cycling
@@ -2866,25 +2890,6 @@ void LevelEditorScene::Render(Window& window) {
                           tsy + tsh / 2 - 5);
             }
         }
-        if (t.antiGravity) {
-            DrawRect(screen, {tsx + 2, tsy + 2, 14, 14}, {0, 180, 200, 220});
-            blitBadge(GetBadge("F", {255, 255, 255, 255}), tsx + 4, tsy + 2);
-        }
-        if (t.powerUp) {
-            // Magenta star badge with power-up type abbreviation
-            std::string pBadge = "PU";
-            if (!t.powerUpType.empty())
-                pBadge = t.powerUpType.substr(0, 2); // e.g. "an" for antigravity
-            int bw = (int)pBadge.size() * 6 + 4;
-            // Draw in bottom-left corner to avoid colliding with top-left badges
-            DrawRect(screen, {tsx + 2, tsy + tsh - 16, bw, 14}, {180, 0, 220, 220});
-            DrawOutline(screen, {tsx + 2, tsy + tsh - 16, bw, 14}, {255, 80, 255, 255});
-            blitBadge(GetBadge(pBadge, {255, 255, 255, 255}), tsx + 4, tsy + tsh - 15);
-        }
-        if (t.hazard) {
-            DrawRect(screen, {tsx + 2, tsy + 2, 14, 14}, {200, 0, 0, 220});
-            blitBadge(GetBadge("H", {255, 255, 255, 255}), tsx + 4, tsy + 2);
-        }
         if (t.slope != SlopeType::None) {
             // Draw the actual slope surface line respecting slopeHeightFrac.
             // High corner is always at tile top (tsy); low corner at tsy+riseH.
@@ -2893,17 +2898,9 @@ void LevelEditorScene::Render(Window& window) {
             int lowY  = tsy + riseH; // low corner descends by riseH
             int lx0, ly0, lx1, ly1;
             if (t.slope == SlopeType::DiagUpLeft) {
-                // High on right, low on left
-                lx0 = tsx;
-                ly0 = lowY;
-                lx1 = tsx + t.w;
-                ly1 = highY;
+                lx0 = tsx; ly0 = lowY; lx1 = tsx + t.w; ly1 = highY;
             } else {
-                // DiagUpRight: high on left, low on right
-                lx0 = tsx;
-                ly0 = highY;
-                lx1 = tsx + t.w;
-                ly1 = lowY;
+                lx0 = tsx; ly0 = highY; lx1 = tsx + t.w; ly1 = lowY;
             }
             int ddx = lx1 - lx0, ddy = ly1 - ly0;
             int steps = std::abs(ddx) > std::abs(ddy) ? std::abs(ddx) : std::abs(ddy);
@@ -2912,17 +2909,10 @@ void LevelEditorScene::Render(Window& window) {
                 float ccx = (float)lx0, ccy = (float)ly0;
                 for (int s = 0; s <= steps; ++s) {
                     DrawRect(screen, {(int)ccx, (int)ccy, 2, 2}, {255, 220, 50, 220});
-                    ccx += ssx;
-                    ccy += ssy;
+                    ccx += ssx; ccy += ssy;
                 }
             }
-            // Badge: direction + height% if not fully diagonal
-            std::string badge = (t.slope == SlopeType::DiagUpRight) ? "/" : "\\";
-            if (t.slopeHeightFrac < 0.99f)
-                badge += std::to_string((int)std::round(t.slopeHeightFrac * 100)) + "%";
-            int bw = (int)badge.size() * 6 + 4;
-            DrawRect(screen, {tsx + 2, tsy + 2, bw, 14}, {160, 120, 0, 200});
-            blitBadge(GetBadge(badge, {255, 255, 255, 255}), tsx + 4, tsy + 2);
+            // Slope badge is now drawn in the stacked top-left badge block above
         }
         if (t.rotation != 0) {
             std::string rbadge = std::to_string(t.rotation);

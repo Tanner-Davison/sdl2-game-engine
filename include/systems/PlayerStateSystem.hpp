@@ -156,6 +156,27 @@ inline void PlayerStateSystem(entt::registry& reg) {
             fps     = resolveFps(set.hurtFps, 12.0f);
             looping = false;
             id      = AnimationID::HURT;
+        } else if (!openWorld && !g.active) {
+            // Gravity is suspended — check if it's due to an anti-gravity power-up.
+            // If so, play the fall (FRONT) animation so the player looks like they're
+            // floating, not standing still.  Fall back to idle if no front frames exist.
+            const ActivePowerUps* aps = reg.try_get<ActivePowerUps>(entity);
+            if (aps && aps->has(PowerUpType::AntiGravity)) {
+                if (!set.front.empty()) {
+                    frames = &set.front;
+                    fps    = resolveFps(set.frontFps, 6.0f);
+                    id     = AnimationID::FRONT;
+                } else {
+                    frames = &set.idle;
+                    fps    = resolveFps(set.idleFps, 12.0f);
+                    id     = AnimationID::IDLE;
+                }
+            } else {
+                // Gravity disabled for another reason — default to idle
+                frames = &set.idle;
+                fps    = resolveFps(set.idleFps, 12.0f);
+                id     = AnimationID::IDLE;
+            }
         } else if (canJump && !openWorld && g.active && !g.isGrounded) {
             frames = &set.jump;
             fps    = resolveFps(set.jumpFps, 4.0f);
