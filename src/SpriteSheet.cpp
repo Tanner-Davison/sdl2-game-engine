@@ -96,6 +96,56 @@ SpriteSheet::SpriteSheet(const std::string& directory, const std::string& prefix
     std::print("Loaded {} frames from directory: {}\n", frameCount, dir);
 }
 
+SpriteSheet::SpriteSheet(const std::vector<std::string>& paths, int targetW, int targetH)
+    : surface(nullptr) {
+    if (paths.empty()) return;
+
+    std::vector<SDL_Surface*> frameSurfaces;
+    int frameW = 0, frameH = 0;
+
+    for (const auto& path : paths) {
+        SDL_Surface* s = IMG_Load(path.c_str());
+        if (!s) {
+            std::print("Failed to load frame: {}\n{}\n", path, SDL_GetError());
+            for (auto* f : frameSurfaces) SDL_DestroySurface(f);
+            return;
+        }
+        if (targetW > 0 && targetH > 0) {
+            SDL_Surface* scaled = SDL_CreateSurface(targetW, targetH, s->format);
+            SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
+            SDL_Rect src  = {0, 0, s->w, s->h};
+            SDL_Rect dest = {0, 0, targetW, targetH};
+            SDL_BlitSurfaceScaled(s, &src, scaled, &dest, SDL_SCALEMODE_LINEAR);
+            SDL_DestroySurface(s);
+            s = scaled;
+        }
+        if (frameSurfaces.empty()) { frameW = s->w; frameH = s->h; }
+        frameSurfaces.push_back(s);
+    }
+
+    if (frameSurfaces.empty()) return;
+    int frameCount = (int)frameSurfaces.size();
+
+    surface = SDL_CreateSurface(frameW * frameCount, frameH, frameSurfaces[0]->format);
+    if (!surface) {
+        std::print("Failed to create stitched surface\n");
+        for (auto* f : frameSurfaces) SDL_DestroySurface(f);
+        return;
+    }
+    SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_BLEND);
+
+    for (int i = 0; i < frameCount; ++i) {
+        SDL_Rect dest = {i * frameW, 0, frameW, frameH};
+        SDL_SetSurfaceBlendMode(frameSurfaces[i], SDL_BLENDMODE_NONE);
+        SDL_BlitSurface(frameSurfaces[i], nullptr, surface, &dest);
+        // Key frames by index string so GetAnimation("") returns all in order
+        frames[std::to_string(i)] = {i * frameW, 0, frameW, frameH};
+        SDL_DestroySurface(frameSurfaces[i]);
+    }
+
+    std::print("Loaded {} frames from explicit path list\n", frameCount);
+}
+
 SpriteSheet::~SpriteSheet() {
     if (texture) SDL_DestroyTexture(texture);
     if (surface) SDL_DestroySurface(surface);

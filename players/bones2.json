@@ -3,21 +3,21 @@
     "slots": [
         {
             "folderPath": "game_assets/char_sprites/bones2/Idle",
-            "fps": 0.0,
+            "fps": 20.0,
             "hitbox": {
-                "h": 105,
-                "w": 49,
+                "h": 93,
+                "w": 48,
                 "x": 52,
-                "y": 50
+                "y": 35
             },
             "slot": 0
         },
         {
             "folderPath": "game_assets/char_sprites/bones2/Walk",
-            "fps": 0.0,
+            "fps": 29.0,
             "hitbox": {
-                "h": 125,
-                "w": 56,
+                "h": 91,
+                "w": 46,
                 "x": 54,
                 "y": 38
             },
@@ -27,10 +27,10 @@
             "folderPath": "game_assets/char_sprites/bones2/Crouch",
             "fps": 0.0,
             "hitbox": {
-                "h": 114,
-                "w": 56,
+                "h": 55,
+                "w": 57,
                 "x": 47,
-                "y": 42
+                "y": 67
             },
             "slot": 2
         },
@@ -38,10 +38,10 @@
             "folderPath": "game_assets/char_sprites/bones2/Jump",
             "fps": 0.0,
             "hitbox": {
-                "h": 114,
-                "w": 56,
+                "h": 92,
+                "w": 41,
                 "x": 52,
-                "y": 44
+                "y": 34
             },
             "slot": 3
         },
@@ -49,8 +49,8 @@
             "folderPath": "game_assets/char_sprites/bones2/Fall",
             "fps": 0.0,
             "hitbox": {
-                "h": 124,
-                "w": 56,
+                "h": 90,
+                "w": 46,
                 "x": 49,
                 "y": 37
             },
@@ -60,10 +60,10 @@
             "folderPath": "game_assets/char_sprites/bones2/Slash",
             "fps": 43.0,
             "hitbox": {
-                "h": 124,
-                "w": 74,
+                "h": 117,
+                "w": 77,
                 "x": 52,
-                "y": 37
+                "y": 14
             },
             "slot": 5
         },
@@ -71,10 +71,10 @@
             "folderPath": "game_assets/char_sprites/bones2/Hurt",
             "fps": 0.0,
             "hitbox": {
-                "h": 125,
-                "w": 56,
+                "h": 110,
+                "w": 53,
                 "x": 48,
-                "y": 35
+                "y": 20
             },
             "slot": 6
         },
@@ -82,14 +82,14 @@
             "folderPath": "game_assets/char_sprites/bones2/Death",
             "fps": 0.0,
             "hitbox": {
-                "h": 127,
-                "w": 68,
-                "x": 36,
+                "h": 94,
+                "w": 81,
+                "x": 22,
                 "y": 37
             },
             "slot": 7
         }
     ],
-    "spriteH": 180,
-    "spriteW": 150
+    "spriteH": 140,
+    "spriteW": 140
 }

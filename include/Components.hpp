@@ -4,6 +4,7 @@
 #include "GameConfig.hpp"
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -213,12 +214,43 @@ struct PowerUpTag {
     float       duration = 15.0f; // seconds the effect lasts (configurable per tile)
 };
 
-// Attached to the player while a power-up is active.
-// Removed automatically once timer reaches 0.
+// One active power-up slot — tracks remaining time for a single effect.
 struct ActivePowerUp {
     PowerUpType type      = PowerUpType::None;
     float       remaining = 0.0f; // seconds left
     float       duration  = 0.0f; // total duration (for progress bar)
+};
+
+// Attached to the player while ANY power-ups are active.
+// Each type gets its own independent timer so multiple power-ups
+// can run simultaneously without overwriting each other.
+struct ActivePowerUps {
+    // Maps PowerUpType -> {remaining, duration}.
+    // Insert/update with add(), query with has(), remove on expiry in tick().
+    struct Slot { float remaining = 0.f; float duration = 0.f; };
+    std::unordered_map<int, Slot> slots; // keyed by (int)PowerUpType
+
+    void add(PowerUpType t, float dur) {
+        int k = (int)t;
+        auto it = slots.find(k);
+        if (it != slots.end()) {
+            // Accumulate: add the new duration on top of whatever is left
+            it->second.remaining += dur;
+            // Track the new total as the duration so the HUD bar scales correctly
+            it->second.duration = it->second.remaining;
+        } else {
+            slots[k] = {dur, dur};
+        }
+    }
+    bool has(PowerUpType t) const { return slots.count((int)t) > 0; }
+    float remaining(PowerUpType t) const {
+        auto it = slots.find((int)t);
+        return it != slots.end() ? it->second.remaining : 0.f;
+    }
+    float duration(PowerUpType t) const {
+        auto it = slots.find((int)t);
+        return it != slots.end() ? it->second.duration : 0.f;
+    }
 };
 struct ActionTag {   // marks an action tile — rendered + collidable until the player
                      // slashes it enough times, then Renderable and Collider are removed.

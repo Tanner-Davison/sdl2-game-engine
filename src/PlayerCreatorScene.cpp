@@ -762,33 +762,6 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     int fw = first->w, fh = first->h;
     SDL_DestroySurface(first);
 
-    // Determine prefix and pad digits from first filename
-    std::string stem = pngs[0].stem().string();
-    int padDigits = 0;
-    {
-        int k = (int)stem.size() - 1;
-        while (k >= 0 && std::isdigit((unsigned char)stem[k])) { ++padDigits; --k; }
-    }
-    std::string prefix = stem;
-    while (!prefix.empty() && std::isdigit((unsigned char)prefix.back()))
-        prefix.pop_back();
-
-    // Extract the actual start index from the first filename so SpriteSheet
-    // loads the right range regardless of padding or zero-vs-one origin.
-    int startIndex = 0;
-    {
-        std::string numPart = stem.substr(prefix.size());
-        startIndex = numPart.empty() ? 0 : std::stoi(numPart);
-    }
-
-    // Only count PNGs matching this prefix — the folder may contain frames for
-    // multiple animations (e.g. Idle_*.png + Walk_*.png in the same directory).
-    // Using pngs.size() would request frames that don't exist and silently fail.
-    int frameCount = 0;
-    for (const auto& p : pngs)
-        if (p.stem().string().rfind(prefix, 0) == 0) ++frameCount;
-    if (frameCount == 0) frameCount = (int)pngs.size(); // safety fallback
-
     // Auto-fill spriteW/H from the raw frame size if not yet set by the user.
     // This sizes the preview cell correctly on first drop so the hitbox editor
     // is immediately accurate without requiring a manual size entry.
@@ -804,8 +777,15 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     try {
         const int tW = (mProfile.spriteW > 0) ? mProfile.spriteW : 0;
         const int tH = (mProfile.spriteH > 0) ? mProfile.spriteH : 0;
-        auto ss = std::make_unique<SpriteSheet>(dir + "/", prefix, frameCount, tW, tH, padDigits, startIndex);
-        auto frames = ss->GetAnimation(prefix);
+        // Use the explicit path-list constructor so every PNG in the folder is
+        // loaded in alphabetical order regardless of filename prefix. This matches
+        // GameScene's loadSlot behaviour: reusing the same folder for two slots
+        // (e.g. Walk reused as Crouch at a different fps) previews correctly.
+        std::vector<std::string> pathStrs;
+        pathStrs.reserve(pngs.size());
+        for (const auto& p : pngs) pathStrs.push_back(p.string());
+        auto ss = std::make_unique<SpriteSheet>(pathStrs, tW, tH);
+        auto frames = ss->GetAnimation("");
         if (!frames.empty()) {
             SlotPreview p;
             p.frameW = fw;

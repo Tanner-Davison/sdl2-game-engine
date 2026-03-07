@@ -59,6 +59,19 @@ class SpriteSheet {
     // startIndex:  override the first frame number (-1 = auto: 0 if padded, 1 if not)
     SpriteSheet(const std::string& directory, const std::string& prefix, int frameCount, int targetW = 0, int targetH = 0, int padDigits = 0, int startIndex = -1);
 
+    /**
+     * @brief Builds a sprite sheet from an explicit sorted list of PNG paths.
+     *
+     * Unlike the prefix+count constructor, this loads exactly the files given —
+     * no filename generation, no prefix matching. Use this when a slot folder
+     * contains files with mixed prefixes (e.g. Walk frames reused as Run).
+     *
+     * @param paths    Sorted list of absolute/relative PNG paths to load.
+     * @param targetW  Scale each frame to this width  (0 = use source width).
+     * @param targetH  Scale each frame to this height (0 = use source height).
+     */
+    SpriteSheet(const std::vector<std::string>& paths, int targetW = 0, int targetH = 0);
+
     /// Frees the loaded SDL_Surface.
     ~SpriteSheet();
 

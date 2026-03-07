@@ -35,8 +35,9 @@ void TitleScene::openCharPicker() {
     for (auto& c : mCharCards)
         if (c.previewTex) { SDL_DestroyTexture(c.previewTex); c.previewTex = nullptr; }
     mCharCards.clear();
-    mCharPickerOpen   = true;
-    mCharPickerScroll = 0;
+    mCharPickerOpen      = true;
+    mCharPickerScroll    = 0;
+    mCharPickerHighlight = mProfileIdx; // pre-highlight the currently active character
 
     // Helper: collect all sorted PNGs in a folder
     auto collectPngs = [&](const std::string& dir) -> std::vector<fs::path> {
@@ -120,6 +121,7 @@ void TitleScene::openCharPicker() {
     mCharPickerPanel     = {PX, PY, PW, PH};
     mCharPickerCloseRect = {PX + PW - 36, PY + 6, 30, 30};
 
+    const int FOOTER_H = 52; // height reserved for the Select button at the bottom
     const int CARD_W = 160, CARD_H = 200, COLS = (PW - 32) / (CARD_W + 12), GAP = 12;
     const int startX = PX + (PW - (COLS * (CARD_W + GAP) - GAP)) / 2;
     int cardY = PY + 54;
@@ -128,7 +130,11 @@ void TitleScene::openCharPicker() {
         mCharCards[i].rect = {startX + col*(CARD_W+GAP), cardY + row*(CARD_H+GAP), CARD_W, CARD_H};
     }
     int totalRows = ((int)mCharCards.size() + COLS - 1) / COLS;
-    mCharPickerMaxScroll = std::max(0, totalRows*(CARD_H+GAP) + 54 + 12 - PH);
+    mCharPickerMaxScroll = std::max(0, totalRows*(CARD_H+GAP) + 54 + 12 - (PH - FOOTER_H));
+
+    // Select button — bottom-right of the panel
+    const int SEL_W = 160, SEL_H = 36;
+    mCharPickerSelectRect = {PX + PW - SEL_W - 12, PY + PH - SEL_H - 8, SEL_W, SEL_H};
 }
 
 // ── renderCharPicker ─────────────────────────────────────────────────────────
@@ -158,17 +164,24 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
         r.y -= mCharPickerScroll;
         if (r.y + r.h < clipRect.y || r.y > clipRect.y + clipRect.h) continue;
 
-        bool sel = (i == mProfileIdx);
-        fillRect(ren, r, sel ? SDL_Color{50,70,150,255} : SDL_Color{28,32,54,255});
-        outlineRect(ren, r, sel ? SDL_Color{120,160,255,255} : SDL_Color{60,70,110,255}, sel?2:1);
+        bool highlighted = (i == mCharPickerHighlight); // currently previewing
+        bool committed   = (i == mProfileIdx);          // already selected/active
+        // Visual states: highlighted = bright blue, committed-only = subtle teal, default = dark
+        SDL_Color bgCol  = highlighted ? SDL_Color{50,70,150,255}
+                         : committed   ? SDL_Color{30,60,80,255}
+                                       : SDL_Color{28,32,54,255};
+        SDL_Color outCol = highlighted ? SDL_Color{120,160,255,255}
+                         : committed   ? SDL_Color{60,140,160,255}
+                                       : SDL_Color{60,70,110,255};
+        fillRect(ren, r, bgCol);
+        outlineRect(ren, r, outCol, highlighted ? 2 : 1);
 
         const int previewH = r.h - 36;
         SDL_Rect previewArea = {r.x+4, r.y+4, r.w-8, previewH};
 
-        // Active card: walk animation (if frames loaded), else idle frame
-        // Inactive card: idle still frame
+        // Highlighted card: walk animation. All others: idle still frame.
         SDL_Texture* displayTex = nullptr;
-        if (sel && !card.walkFrames.empty()) {
+        if (highlighted && !card.walkFrames.empty()) {
             int fi = card.walkAnimFrame % (int)card.walkFrames.size();
             displayTex = card.walkFrames[fi];
         } else {
@@ -196,17 +209,43 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
         }
 
         SDL_Rect nameArea = {r.x+2, r.y+r.h-30, r.w-4, 28};
-        fillRect(ren, nameArea, sel ? SDL_Color{40,60,130,255} : SDL_Color{20,22,40,255});
-        auto [nx,ny] = Text::CenterInRect(card.name, 13, nameArea);
-        Text nameTxt(card.name, sel ? SDL_Color{255,255,180,255} : SDL_Color{200,210,240,255}, nx, ny, 13);
+        SDL_Color nameBg  = highlighted ? SDL_Color{40,60,130,255}
+                          : committed   ? SDL_Color{20,55,60,255}
+                                        : SDL_Color{20,22,40,255};
+        fillRect(ren, nameArea, nameBg);
+        std::string displayName = card.name + (committed && !highlighted ? " ✓" : "");
+        auto [nx,ny] = Text::CenterInRect(displayName, 13, nameArea);
+        SDL_Color nameFg = highlighted ? SDL_Color{255,255,180,255}
+                        : committed    ? SDL_Color{120,230,210,255}
+                                       : SDL_Color{200,210,240,255};
+        Text nameTxt(displayName, nameFg, nx, ny, 13);
         nameTxt.Render(ren);
     }
 
     SDL_SetRenderClipRect(ren, nullptr);
+
+    // Footer bar
+    SDL_Rect footer = {p.x, p.y + p.h - 52, p.w, 52};
+    fillRect(ren, footer, {20, 22, 38, 255});
+    outlineRect(ren, {p.x, p.y + p.h - 52, p.w, 1}, {60, 70, 110, 255});
+
+    // Hint texts in footer
+    Text esc("Esc to cancel", {60,70,100,255}, p.x + 10, p.y + p.h - 36, 11);
+    esc.Render(ren);
     if (mCharPickerMaxScroll > 0) {
-        Text sh("scroll for more", {80,90,120,255}, p.x+p.w/2-44, p.y+p.h-16, 11);
+        Text sh("scroll for more", {80,90,120,255}, p.x + 10, p.y + p.h - 20, 11);
         sh.Render(ren);
     }
-    Text esc("Esc to close", {60,70,100,255}, p.x+8, p.y+p.h-16, 11);
-    esc.Render(ren);
+
+    // Select Player button — bottom-right of footer
+    bool selIsHighlighted = (mCharPickerHighlight == mProfileIdx);
+    SDL_Color selBg  = selIsHighlighted ? SDL_Color{40, 90, 60, 255} : SDL_Color{50, 130, 80, 255};
+    SDL_Color selOut = selIsHighlighted ? SDL_Color{60, 140, 90, 255} : SDL_Color{80, 200, 120, 255};
+    fillRect(ren, mCharPickerSelectRect, selBg);
+    outlineRect(ren, mCharPickerSelectRect, selOut, 2);
+    std::string selLabel = selIsHighlighted ? "Already Selected" : "Select Player";
+    auto [slx, sly] = Text::CenterInRect(selLabel, 14, mCharPickerSelectRect);
+    SDL_Color selTxt = selIsHighlighted ? SDL_Color{120,160,120,255} : SDL_Color{180,255,180,255};
+    Text selTxtObj(selLabel, selTxt, slx, sly, 14);
+    selTxtObj.Render(ren);
 }

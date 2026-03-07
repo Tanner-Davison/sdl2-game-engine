@@ -219,18 +219,23 @@ class TitleScene : public Scene {
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
                 int mx = (int)e.button.x, my = (int)e.button.y;
                 if (hit(mCharPickerCloseRect, mx, my)) { mCharPickerOpen = false; return true; }
-                // Hit-test each card
+                // Select button — commit the highlighted card and close
+                if (hit(mCharPickerSelectRect, mx, my)) {
+                    mProfileIdx    = mCharPickerHighlight;
+                    mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                    rebuildProfileSelector();
+                    mCharPickerOpen = false;
+                    return true;
+                }
+                // Hit-test each card — highlight only, don't close
                 for (int i = 0; i < (int)mCharCards.size(); ++i) {
                     SDL_Rect cardRect = mCharCards[i].rect;
                     cardRect.y -= mCharPickerScroll;
                     if (hit(cardRect, mx, my)) {
-                        mProfileIdx    = i;
-                        mChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
-                        // Reset walk anim so it starts from frame 0 when re-opened
+                        mCharPickerHighlight = i;
+                        // Reset walk anim so animation starts fresh
                         mCharCards[i].walkAnimFrame = 0;
                         mCharCards[i].walkAnimTimer = 0.f;
-                        rebuildProfileSelector();
-                        mCharPickerOpen = false;
                         return true;
                     }
                 }
@@ -276,9 +281,9 @@ class TitleScene : public Scene {
             }
         }
 
-        // Advance walk animation on the active (selected) card
-        if (mProfileIdx >= 0 && mProfileIdx < (int)mCharCards.size()) {
-            auto& active = mCharCards[mProfileIdx];
+        // Advance walk animation on the highlighted card
+        if (mCharPickerHighlight >= 0 && mCharPickerHighlight < (int)mCharCards.size()) {
+            auto& active = mCharCards[mCharPickerHighlight];
             if (!active.walkFrames.empty()) {
                 active.walkAnimTimer += dt;
                 float interval = 1.f / active.walkFps;
@@ -578,11 +583,13 @@ class TitleScene : public Scene {
         float walkFps       = 8.f;
     };
     std::vector<CharCard> mCharCards;
-    bool                  mCharPickerOpen      = false;
-    int                   mCharPickerScroll    = 0;
-    int                   mCharPickerMaxScroll = 0;
+    bool                  mCharPickerOpen        = false;
+    int                   mCharPickerScroll      = 0;
+    int                   mCharPickerMaxScroll   = 0;
+    int                   mCharPickerHighlight   = 0;  // card being previewed (not yet committed)
     SDL_Rect              mCharPickerPanel{};
     SDL_Rect              mCharPickerCloseRect{};
+    SDL_Rect              mCharPickerSelectRect{};     // "Select Player" button
     SDL_Rect              mChooseCharBtnRect{};
     SDL_Renderer*         mRenderer = nullptr;
 

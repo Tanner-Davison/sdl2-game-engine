@@ -86,47 +86,44 @@ inline void HUDSystem(entt::registry& reg,
     });
 
     // ── Active power-up HUD ─────────────────────────────────────────────────
-    // Shows a progress bar + label at the top-centre when a power-up is active.
-    static float prevPuRemaining = -1.0f;
-    static std::unique_ptr<Text> puLabel;
+    // Shows one progress bar per active power-up type, stacked vertically.
     {
-        auto puv = reg.view<PlayerTag, ActivePowerUp>();
-        bool hasPU = false;
-        puv.each([&](const ActivePowerUp& ap) {
-            hasPU = true;
-            constexpr int BAR_W = 200, BAR_H = 14;
-            int bx = windowW / 2 - BAR_W / 2;
-            int by = 50;
+        constexpr int BAR_W = 200, BAR_H = 14, BAR_GAP = 22;
+        int bx = windowW / 2 - BAR_W / 2;
+        int by = 50;
 
-            // Background bar
-            SDL_SetRenderDrawColor(renderer, 30, 30, 50, 220);
-            SDL_FRect bg = {(float)bx, (float)by, (float)BAR_W, (float)BAR_H};
-            SDL_RenderFillRect(renderer, &bg);
+        auto puv = reg.view<PlayerTag, ActivePowerUps>();
+        puv.each([&](const ActivePowerUps& aps) {
+            for (auto& [key, slot] : aps.slots) {
+                auto type = (PowerUpType)key;
 
-            // Fill bar (purple for anti-gravity)
-            float pct   = ap.duration > 0.0f ? (ap.remaining / ap.duration) : 0.0f;
-            int   fillW = (int)(BAR_W * pct);
-            SDL_SetRenderDrawColor(renderer, 160, 40, 255, 240);
-            SDL_FRect fg = {(float)bx, (float)by, (float)fillW, (float)BAR_H};
-            SDL_RenderFillRect(renderer, &fg);
+                // Background
+                SDL_SetRenderDrawColor(renderer, 30, 30, 50, 220);
+                SDL_FRect bg = {(float)bx, (float)by, (float)BAR_W, (float)BAR_H};
+                SDL_RenderFillRect(renderer, &bg);
 
-            // Border
-            SDL_SetRenderDrawColor(renderer, 200, 100, 255, 255);
-            SDL_FRect br = {(float)bx, (float)by, (float)BAR_W, (float)BAR_H};
-            SDL_RenderRect(renderer, &br);
+                // Fill
+                float pct   = slot.duration > 0.f ? (slot.remaining / slot.duration) : 0.f;
+                int   fillW = (int)(BAR_W * pct);
+                SDL_SetRenderDrawColor(renderer, 160, 40, 255, 240);
+                SDL_FRect fg = {(float)bx, (float)by, (float)fillW, (float)BAR_H};
+                SDL_RenderFillRect(renderer, &fg);
 
-            // Label (rebuild only when seconds change)
-            int secs = (int)std::ceil(ap.remaining);
-            if (std::fabs(ap.remaining - prevPuRemaining) > 0.1f || !puLabel) {
-                prevPuRemaining = ap.remaining;
-                std::string name = (ap.type == PowerUpType::AntiGravity) ? "Anti-Gravity" : "Power-Up";
-                puLabel = std::make_unique<Text>(
-                    name + "  " + std::to_string(secs) + "s",
-                    SDL_Color{230, 180, 255, 255}, bx, by - 18, 13);
+                // Border
+                SDL_SetRenderDrawColor(renderer, 200, 100, 255, 255);
+                SDL_FRect br = {(float)bx, (float)by, (float)BAR_W, (float)BAR_H};
+                SDL_RenderRect(renderer, &br);
+
+                // Label
+                int secs = (int)std::ceil(slot.remaining);
+                std::string name = (type == PowerUpType::AntiGravity) ? "Anti-Gravity" : "Power-Up";
+                Text lbl(name + "  " + std::to_string(secs) + "s",
+                         SDL_Color{230, 180, 255, 255}, bx, by - 18, 13);
+                lbl.Render(renderer);
+
+                by += BAR_H + BAR_GAP;
             }
-            if (puLabel) puLabel->Render(renderer);
         });
-        if (!hasPU) { prevPuRemaining = -1.0f; puLabel.reset(); }
     }
 
 }

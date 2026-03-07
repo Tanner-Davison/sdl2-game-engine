@@ -3,21 +3,21 @@
     "slots": [
         {
             "folderPath": "game_assets/char_sprites/bones/Idle",
-            "fps": 0.0,
+            "fps": 20.0,
             "hitbox": {
-                "h": 95,
-                "w": 75,
-                "x": 43,
-                "y": 29
+                "h": 106,
+                "w": 60,
+                "x": 38,
+                "y": 21
             },
             "slot": 0
         },
         {
             "folderPath": "game_assets/char_sprites/bones/Walk",
-            "fps": 0.0,
+            "fps": 28.0,
             "hitbox": {
-                "h": 95,
-                "w": 75,
+                "h": 96,
+                "w": 58,
                 "x": 43,
                 "y": 29
             },
@@ -27,10 +27,10 @@
             "folderPath": "",
             "fps": 0.0,
             "hitbox": {
-                "h": 0,
-                "w": 0,
-                "x": 0,
-                "y": 0
+                "h": 76,
+                "w": 56,
+                "x": 32,
+                "y": 25
             },
             "slot": 2
         },
@@ -39,7 +39,7 @@
             "fps": 21.0,
             "hitbox": {
                 "h": 95,
-                "w": 75,
+                "w": 53,
                 "x": 43,
                 "y": 29
             },
@@ -60,9 +60,9 @@
             "folderPath": "game_assets/char_sprites/bones/Slash",
             "fps": 48.0,
             "hitbox": {
-                "h": 95,
-                "w": 75,
-                "x": 43,
+                "h": 97,
+                "w": 86,
+                "x": 48,
                 "y": 29
             },
             "slot": 5
@@ -71,8 +71,8 @@
             "folderPath": "game_assets/char_sprites/bones/Hurt",
             "fps": 0.0,
             "hitbox": {
-                "h": 88,
-                "w": 75,
+                "h": 94,
+                "w": 61,
                 "x": 43,
                 "y": 29
             },
@@ -82,14 +82,14 @@
             "folderPath": "game_assets/char_sprites/bones/Death",
             "fps": 0.0,
             "hitbox": {
-                "h": 98,
-                "w": 100,
-                "x": 18,
+                "h": 101,
+                "w": 91,
+                "x": 10,
                 "y": 26
             },
             "slot": 7
         }
     ],
     "spriteH": 140,
-    "spriteW": 160
+    "spriteW": 140
 }

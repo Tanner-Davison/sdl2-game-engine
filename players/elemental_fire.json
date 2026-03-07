@@ -5,10 +5,10 @@
             "folderPath": "game_assets/char_sprites/elemental_fire/Idle",
             "fps": 0.0,
             "hitbox": {
-                "h": 87,
-                "w": 59,
-                "x": 37,
-                "y": 53
+                "h": 113,
+                "w": 61,
+                "x": 56,
+                "y": 40
             },
             "slot": 0
         },
@@ -18,8 +18,8 @@
             "hitbox": {
                 "h": 114,
                 "w": 60,
-                "x": 37,
-                "y": 37
+                "x": 57,
+                "y": 38
             },
             "slot": 1
         },
@@ -29,18 +29,18 @@
             "hitbox": {
                 "h": 116,
                 "w": 84,
-                "x": 0,
-                "y": 37
+                "x": 26,
+                "y": 41
             },
             "slot": 2
         },
         {
             "folderPath": "game_assets/char_sprites/elemental_fire/Jump",
-            "fps": 13.0,
+            "fps": 11.0,
             "hitbox": {
                 "h": 111,
                 "w": 56,
-                "x": 37,
+                "x": 56,
                 "y": 37
             },
             "slot": 3
@@ -51,8 +51,8 @@
             "hitbox": {
                 "h": 108,
                 "w": 63,
-                "x": 37,
-                "y": 37
+                "x": 60,
+                "y": 33
             },
             "slot": 4
         },
@@ -62,7 +62,7 @@
             "hitbox": {
                 "h": 117,
                 "w": 102,
-                "x": 37,
+                "x": 63,
                 "y": 37
             },
             "slot": 5
@@ -73,8 +73,8 @@
             "hitbox": {
                 "h": 114,
                 "w": 65,
-                "x": 37,
-                "y": 37
+                "x": 49,
+                "y": 38
             },
             "slot": 6
         },
@@ -91,5 +91,5 @@
         }
     ],
     "spriteH": 180,
-    "spriteW": 140
+    "spriteW": 180
 }

@@ -5,10 +5,10 @@
             "folderPath": "game_assets/char_sprites/elemental_devil/Idle",
             "fps": 0.0,
             "hitbox": {
-                "h": 90,
-                "w": 58,
-                "x": 37,
-                "y": 48
+                "h": 116,
+                "w": 50,
+                "x": 64,
+                "y": 36
             },
             "slot": 0
         },
@@ -18,7 +18,7 @@
             "hitbox": {
                 "h": 112,
                 "w": 65,
-                "x": 37,
+                "x": 53,
                 "y": 37
             },
             "slot": 1
@@ -29,8 +29,8 @@
             "hitbox": {
                 "h": 94,
                 "w": 99,
-                "x": 3,
-                "y": 61
+                "x": 10,
+                "y": 62
             },
             "slot": 2
         },
@@ -40,8 +40,8 @@
             "hitbox": {
                 "h": 111,
                 "w": 63,
-                "x": 37,
-                "y": 37
+                "x": 53,
+                "y": 35
             },
             "slot": 3
         },
@@ -49,10 +49,10 @@
             "folderPath": "game_assets/char_sprites/elemental_devil/Fall",
             "fps": 0.0,
             "hitbox": {
-                "h": 107,
+                "h": 110,
                 "w": 62,
-                "x": 37,
-                "y": 37
+                "x": 50,
+                "y": 32
             },
             "slot": 4
         },
@@ -60,9 +60,9 @@
             "folderPath": "game_assets/char_sprites/elemental_devil/Slash",
             "fps": 33.0,
             "hitbox": {
-                "h": 115,
-                "w": 94,
-                "x": 37,
+                "h": 117,
+                "w": 67,
+                "x": 64,
                 "y": 37
             },
             "slot": 5
@@ -73,8 +73,8 @@
             "hitbox": {
                 "h": 113,
                 "w": 55,
-                "x": 37,
-                "y": 37
+                "x": 58,
+                "y": 36
             },
             "slot": 6
         },
@@ -84,12 +84,12 @@
             "hitbox": {
                 "h": 115,
                 "w": 102,
-                "x": 0,
-                "y": 37
+                "x": 23,
+                "y": 41
             },
             "slot": 7
         }
     ],
     "spriteH": 180,
-    "spriteW": 140
+    "spriteW": 180
 }

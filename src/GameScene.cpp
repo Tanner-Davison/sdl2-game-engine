@@ -95,21 +95,15 @@ void GameScene::Load(Window& window) {
                 if (e.path().extension() == ".png") pngs.push_back(e.path());
             if (!pngs.empty()) {
                 std::sort(pngs.begin(), pngs.end());
-                // Derive pad width and start index from the first file alphabetically,
-                // but load ALL PNGs in the folder regardless of filename prefix.
-                // This intentionally supports reuse: you can point the Walk slot and
-                // the Run slot at the same folder, then use fps to differentiate speed.
-                // Mixed-prefix folders (e.g. Run_000..005 + Walk_000..007) will play
-                // all frames in alphabetical order — keep folders single-purpose if
-                // you want clean animation boundaries.
-                std::string stem = pngs[0].stem().string();
-                int pad = 0;
-                { int k = (int)stem.size()-1; while(k>=0&&std::isdigit((unsigned char)stem[k])){++pad;--k;} }
-                std::string pfx = stem;
-                while (!pfx.empty() && std::isdigit((unsigned char)pfx.back())) pfx.pop_back();
-                std::string numPart = stem.substr(pfx.size());
-                int startIdx = numPart.empty() ? 0 : std::stoi(numPart);
-                return std::make_unique<SpriteSheet>(dir + "/", pfx, (int)pngs.size(), KW, KH, pad, startIdx);
+                // Pass the explicit sorted path list to SpriteSheet so every
+                // PNG in the folder is loaded in alphabetical order with no
+                // prefix filtering. This makes slot reuse work correctly:
+                // point two slots at the same folder, set different fps values,
+                // and both play the full frame set without any files being dropped.
+                std::vector<std::string> pathStrs;
+                pathStrs.reserve(pngs.size());
+                for (const auto& p : pngs) pathStrs.push_back(p.string());
+                return std::make_unique<SpriteSheet>(pathStrs, KW, KH);
             }
         }
         // No custom sprites for this slot — fall back to frost knight at its
@@ -404,22 +398,12 @@ void GameScene::Update(float dt) {
             for (entt::entity e : toConsume) {
                 if (!reg.valid(e)) continue;
                 const PowerUpTag& pu = reg.get<PowerUpTag>(e);
-                // Apply or refresh the power-up on the player
-                if (reg.all_of<ActivePowerUp>(playerEnt)) {
-                    auto& active = reg.get<ActivePowerUp>(playerEnt);
-                    // Refresh/stack: take whichever duration is longer
-                    if (active.type == pu.type) {
-                        active.remaining = std::max(active.remaining, pu.duration);
-                        active.duration  = active.remaining;
-                    } else {
-                        active.type      = pu.type;
-                        active.remaining = pu.duration;
-                        active.duration  = pu.duration;
-                    }
-                } else {
-                    reg.emplace<ActivePowerUp>(playerEnt, pu.type, pu.duration, pu.duration);
-                }
-                // Consume the tile — remove from render list, destroy entity
+                // Add/refresh this power-up in the multi-slot component.
+                // Each type runs its own independent timer.
+                if (!reg.all_of<ActivePowerUps>(playerEnt))
+                    reg.emplace<ActivePowerUps>(playerEnt);
+                reg.get<ActivePowerUps>(playerEnt).add(pu.type, pu.duration);
+                // Consume the tile
                 auto it2 = std::find(mSortedTileRenderList.begin(), mSortedTileRenderList.end(), e);
                 if (it2 != mSortedTileRenderList.end()) mSortedTileRenderList.erase(it2);
                 reg.destroy(e);
@@ -428,30 +412,37 @@ void GameScene::Update(float dt) {
     }
 
     // ── Active power-up tick ────────────────────────────────────────────────
-    // Counts down remaining time; removes component when expired.
-    // Also applies per-frame effects (e.g. zero gravity).
+    // Counts down each slot independently; removes expired slots.
+    // Applies per-frame effects for all currently active types.
     {
-        auto apv = reg.view<PlayerTag, ActivePowerUp, GravityState>();
-        apv.each([&](entt::entity e, ActivePowerUp& ap, GravityState& g) {
-            ap.remaining -= dt;
-            if (ap.remaining <= 0.0f) {
-                // Power-up expired: restore gravity
-                if (ap.type == PowerUpType::AntiGravity) {
-                    g.active    = true;
-                    g.velocity  = 0.0f;
+        auto apv = reg.view<PlayerTag, ActivePowerUps, GravityState>();
+        apv.each([&](entt::entity e, ActivePowerUps& aps, GravityState& g) {
+            std::vector<int> expired;
+            for (auto& [key, slot] : aps.slots) {
+                slot.remaining -= dt;
+                if (slot.remaining <= 0.f) {
+                    expired.push_back(key);
+                    // Restore effects when this type expires
+                    if ((PowerUpType)key == PowerUpType::AntiGravity) {
+                        // Only restore gravity if no other slot is also suspending it
+                        // (currently only AntiGravity does this, so safe to restore)
+                        g.active   = true;
+                        g.velocity = 0.0f;
+                    }
                 }
-                reg.remove<ActivePowerUp>(e);
-                return;
             }
-            // Apply per-frame effect
-            switch (ap.type) {
-                case PowerUpType::AntiGravity:
-                    // Suspend gravity: freeze Y velocity accumulation
-                    g.active   = false; // MovementSystem free-float path handles movement
-                    g.velocity = 0.0f;  // zero out any accumulated fall speed
-                    break;
-                default:
-                    break;
+            for (int k : expired) aps.slots.erase(k);
+            if (aps.slots.empty()) { reg.remove<ActivePowerUps>(e); return; }
+
+            // Apply per-frame effects for all remaining active slots
+            for (auto& [key, slot] : aps.slots) {
+                switch ((PowerUpType)key) {
+                    case PowerUpType::AntiGravity:
+                        g.active   = false;
+                        g.velocity = 0.0f;
+                        break;
+                    default: break;
+                }
             }
         });
     }
