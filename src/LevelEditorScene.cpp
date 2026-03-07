@@ -457,8 +457,7 @@ LevelEditorScene::ResizeEdge LevelEditorScene::DetectResizeEdge(int idx,
         return ResizeEdge::None;
     const auto& t = mLevel.tiles[idx];
     // mx/my are screen-space; convert to world space to compare with tile world coords
-    int wx = (int)(mx / mZoom + mCamX);
-    int wy = (int)(my / mZoom + mCamY);
+    auto [wx, wy] = mCamera.ScreenToWorld(mx, my);
     int rx = (int)t.x, ry = (int)t.y, rw = t.w, rh = t.h;
 
     // Cursor must be strictly inside the tile's visual bounds — this prevents
@@ -862,12 +861,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
     // ── Pan: middle-mouse drag OR Ctrl + left-mouse drag ────────────────────
     auto startPan = [&](int mx, int my) {
-        mIsPanning    = true;
-        mPanStartX    = mx;
-        mPanStartY    = my;
-        mPanCamStartX = mCamX;
-        mPanCamStartY = mCamY;
-        SDL_CaptureMouse(true); // capture mouse so motion events aren't coalesced or dropped
+        mCamera.StartPan(mx, my);
     };
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_MIDDLE) {
@@ -897,9 +891,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     }
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
         (e.button.button == SDL_BUTTON_MIDDLE || e.button.button == SDL_BUTTON_LEFT)) {
-        if (mIsPanning) {
-            mIsPanning = false;
-            SDL_CaptureMouse(false);
+        if (mCamera.IsPanning()) {
+            mCamera.StopPan();
             return true;
         }
     }
@@ -938,21 +931,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
         // Ctrl+scroll = zoom in/out, anchored to mouse position
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && mx < CanvasW()) {
-            float oldZoom = mZoom;
-            float newZoom = std::clamp(mZoom + e.wheel.y * ZOOM_STEP, ZOOM_MIN, ZOOM_MAX);
-            if (newZoom != oldZoom) {
-                // Anchor zoom to mouse position: keep world point under cursor fixed
-                float worldX = mx / oldZoom + mCamX;
-                float worldY = my / oldZoom + mCamY;
-                mZoom        = newZoom;
-                mCamX        = worldX - mx / mZoom;
-                mCamY        = worldY - my / mZoom;
-                // Clamp cam so we don't go into negative world space
-                if (mCamX < 0.0f)
-                    mCamX = 0.0f;
-                if (mCamY < 0.0f)
-                    mCamY = 0.0f;
-                SetStatus("Zoom: " + std::to_string((int)(mZoom * 100)) +
+            if (mCamera.ApplyZoom(e.wheel.y, mx, my)) {
+                SetStatus("Zoom: " + std::to_string(mCamera.ZoomPercent()) +
                           "%  (Ctrl+scroll)");
             }
             return true;
@@ -1578,7 +1558,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     background = std::make_unique<Image>(
                         mLevel.background, FitModeFromString(mLevel.bgFitMode));
                 LoadBgPalette();
-                mCamX = mCamY = 0.0f; // reset editor camera on load
+                mCamera.SetPosition(0.0f, 0.0f); // reset editor camera on load
             } else
                 SetStatus("No file: " + path);
             return true;
@@ -2003,10 +1983,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 bool keptCurrent = false;
                 if (mHitboxTileIdx >= 0 && mHitboxTileIdx < (int)mLevel.tiles.size()) {
                     const auto& ct  = mLevel.tiles[mHitboxTileIdx];
-                    int         csx = (int)((ct.x - mCamX) * mZoom);
-                    int         csy = (int)((ct.y - mCamY) * mZoom);
-                    int         csw = (int)(ct.w * mZoom);
-                    int         csh = (int)(ct.h * mZoom);
+                    auto [csx, csy]  = mCamera.WorldToScreen(ct.x, ct.y);
+                    int         csw = (int)(ct.w * mCamera.Zoom());
+                    int         csh = (int)(ct.h * mCamera.Zoom());
                     if (mx >= csx && mx <= csx + csw && my >= csy && my <= csy + csh)
                         keptCurrent = true;
                 }
@@ -2358,13 +2337,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         // Using absolute position minus the recorded start position means we
         // always land exactly where the mouse is right now, regardless of how
         // many motion events were coalesced into this one.
-        if (mIsPanning) {
-            mCamX = mPanCamStartX - (mx - mPanStartX) / mZoom;
-            mCamY = mPanCamStartY - (my - mPanStartY) / mZoom;
-            if (mCamX < 0.0f)
-                mCamX = 0.0f;
-            if (mCamY < 0.0f)
-                mCamY = 0.0f;
+        if (mCamera.IsPanning()) {
+            mCamera.UpdatePan(mx, my);
             return true;
         }
 
@@ -2505,10 +2479,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mHoverHitboxHdl = HitboxHandle::None;
             const auto& t   = mLevel.tiles[mHitboxTileIdx];
             // Hitbox is in world space; convert to screen space for mouse comparison
-            int       hx    = (int)((t.x - mCamX + t.hitboxOffX) * mZoom);
-            int       hy    = (int)((t.y - mCamY + t.hitboxOffY) * mZoom);
-            int       hw    = (int)(t.hitboxW * mZoom);
-            int       hh    = (int)(t.hitboxH * mZoom);
+            auto [htsx, htsy] = mCamera.WorldToScreen(t.x + t.hitboxOffX, t.y + t.hitboxOffY);
+            int       hx    = htsx;
+            int       hy    = htsy;
+            int       hw    = (int)(t.hitboxW * mCamera.Zoom());
+            int       hh    = (int)(t.hitboxH * mCamera.Zoom());
             const int H     = HBOX_HANDLE;
             bool      nearL = (mx >= hx - H && mx <= hx + H);
             bool      nearR = (mx >= hx + hw - H && mx <= hx + hw + H);
@@ -2600,6 +2575,11 @@ void LevelEditorScene::Render(Window& window) {
         SDL_MapRGBA(SDL_GetPixelFormatDetails(screen->format), nullptr, 0, 0, 0, 0));
     int cw = CanvasW();
 
+    // ── Camera aliases for brevity — mCamera owns these values now ──────────
+    const float mCamX = mCamera.X();
+    const float mCamY = mCamera.Y();
+    const float mZoom = mCamera.Zoom();
+
     // Background renders directly to the GPU renderer (it's a full-screen image)
     if (background->GetFitMode() == FitMode::SCROLL)
         background->RenderScrolling(ren, mCamX, 0.0f); // 0 = use image width as scroll range
@@ -2625,7 +2605,7 @@ void LevelEditorScene::Render(Window& window) {
     {
         // Map zoom range [ZOOM_MIN..1.0] → alpha [4..20] linearly, clamped.
         // Above 1.0 (zoomed in) alpha stays at 20 — lines are already very visible.
-        float  zoomT     = std::clamp((mZoom - ZOOM_MIN) / (1.0f - ZOOM_MIN), 0.0f, 1.0f);
+        float  zoomT     = std::clamp((mZoom - EditorCamera::ZOOM_MIN) / (1.0f - EditorCamera::ZOOM_MIN), 0.0f, 1.0f);
         Uint8  gridAlpha = (Uint8)(4.0f + zoomT * 16.0f); // 4 at min zoom, 20 at 100%+
         Uint32 gridCol   = SDL_MapRGBA(fmt, nullptr, 255, 255, 255, gridAlpha);
 

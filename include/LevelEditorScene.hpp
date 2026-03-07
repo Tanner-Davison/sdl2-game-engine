@@ -1,4 +1,5 @@
 #pragma once
+#include "EditorCamera.hpp"
 #include "EditorSurfaceCache.hpp"
 #include "Image.hpp"
 #include "Level.hpp"
@@ -241,18 +242,8 @@ class LevelEditorScene : public Scene {
     // Per-tile original positions captured at drag-start
     std::vector<std::pair<float, float>> mSelOrigPositions;
 
-    // Editor camera pan + zoom
-    float mCamX         = 0.0f; // world-space offset applied to all canvas rendering
-    float mCamY         = 0.0f;
-    float mZoom         = 1.0f; // canvas zoom: 1.0 = 100%, 0.5 = 50%, 2.0 = 200%
-    static constexpr float ZOOM_MIN = 0.25f;
-    static constexpr float ZOOM_MAX = 4.0f;
-    static constexpr float ZOOM_STEP = 0.1f;
-    bool  mIsPanning    = false; // true while middle-mouse is held
-    int   mPanStartX    = 0;
-    int   mPanStartY    = 0;
-    float mPanCamStartX = 0.0f;
-    float mPanCamStartY = 0.0f;
+    // Editor camera — owns position, zoom, pan state, and coordinate helpers
+    EditorCamera mCamera;
 
     // Double-click detection (palette items)
     Uint64                  mLastClickTime  = 0;
@@ -359,28 +350,11 @@ class LevelEditorScene : public Scene {
                                  : mWindow->GetWidth() - PALETTE_W;
     }
 
-    // Convert a screen-space canvas point to world space (accounts for zoom)
-    SDL_Point ScreenToWorld(int sx, int sy) const {
-        return {(int)(sx / mZoom + mCamX), (int)(sy / mZoom + mCamY)};
-    }
-    // Convert a world-space point to screen space (accounts for zoom)
-    SDL_Point WorldToScreen(float wx, float wy) const {
-        return {(int)((wx - mCamX) * mZoom), (int)((wy - mCamY) * mZoom)};
-    }
-
-    SDL_Point SnapToGrid(int sx, int sy) const {
-        // Convert screen coords to world coords (with zoom), then snap to grid.
-        // std::floor is used at every step so the result is always the grid cell
-        // that visually contains the cursor, regardless of zoom level or sign.
-        // Plain (int) cast truncates toward zero, which gives the wrong cell for
-        // any fractional world coordinate just left/above a grid boundary.
-        float wx = sx / mZoom + mCamX;
-        float wy = sy / mZoom + mCamY;
-        int cx = (int)std::floor(wx / GRID) * GRID;
-        int cy = (int)std::floor(wy / GRID) * GRID;
-        if (cy < 0) cy = 0;
-        return {cx, cy};
-    }
+    // ── Camera convenience wrappers ─────────────────────────────────────────
+    // Delegate to mCamera so existing call sites compile without modification.
+    SDL_Point ScreenToWorld(int sx, int sy) const { return mCamera.ScreenToWorld(sx, sy); }
+    SDL_Point WorldToScreen(float wx, float wy) const { return mCamera.WorldToScreen(wx, wy); }
+    SDL_Point SnapToGrid(int sx, int sy) const { return mCamera.SnapToGrid(sx, sy, GRID); }
 
     bool HitTest(const SDL_Rect& r, int x, int y) const {
         return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
