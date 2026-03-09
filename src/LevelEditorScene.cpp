@@ -82,35 +82,7 @@ void LevelEditorScene::ApplyBackground(int idx) {
     });
 }
 
-// --- DetectResizeEdge ------------------------------------------------------
-LevelEditorScene::ResizeEdge LevelEditorScene::DetectResizeEdge(int idx,
-                                                                int mx,
-                                                                int my) const {
-    if (idx < 0 || idx >= (int)mLevel.tiles.size())
-        return ResizeEdge::None;
-    const auto& t = mLevel.tiles[idx];
-    // mx/my are screen-space; convert to world space to compare with tile world coords
-    auto [wx, wy] = mCamera.ScreenToWorld(mx, my);
-    int rx = (int)t.x, ry = (int)t.y, rw = t.w, rh = t.h;
 
-    // Cursor must be strictly inside the tile's visual bounds — this prevents
-    // handle zones on one tile from bleeding into an adjacent tile.
-    if (wx < rx || wx > rx + rw)
-        return ResizeEdge::None;
-    if (wy < ry || wy > ry + rh)
-        return ResizeEdge::None;
-
-    bool nearRight  = (wx >= rx + rw - RESIZE_HANDLE);
-    bool nearBottom = (wy >= ry + rh - RESIZE_HANDLE);
-
-    if (nearRight && nearBottom)
-        return ResizeEdge::Corner;
-    if (nearRight)
-        return ResizeEdge::Right;
-    if (nearBottom)
-        return ResizeEdge::Bottom;
-    return ResizeEdge::None;
-}
 
 // ─── Load ─────────────────────────────────────────────────────────────────────
 void LevelEditorScene::Load(Window& window) {
@@ -203,11 +175,21 @@ void LevelEditorScene::Load(Window& window) {
         mStatusMsg, SDL_Color{180, 180, 200, 255}, BTN_GAP, TOOLBAR_H + 4, 12);
     lblTool = std::make_unique<Text>(
         "Pan", SDL_Color{255, 215, 0, 255}, window.GetWidth() - PALETTE_W - 120, 22, 13);
+
+    // Initialize the default tool
+    SwitchTool(ToolId::MoveCam);
 }
 
 // --- Unload ----------------------------------------------------------------
 void LevelEditorScene::Unload() {
-    // Palette owns all tile/bg item surfaces — free them in one call.
+    // Deactivate the current tool before teardown
+    if (mTool) {
+        auto ctx = MakeToolCtx();
+        mTool->OnDeactivate(ctx);
+        mTool.reset();
+    }
+
+    // Palette owns all tile/bg item surfaces -- free them in one call.
     mPalette.Clear();
 
     if (mFolderIcon) {
@@ -243,7 +225,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             // If Action tool is active and the dropped file is an animated tile JSON,
             // assign it as the destroy animation for whatever action tile the cursor
             // is over. Don't import it into the palette.
-            if (mActiveTool == Tool::Action && IsAnimatedTile(path)) {
+            if (mActiveToolId == ToolId::Action && IsAnimatedTile(path)) {
                 float fmx, fmy;
                 SDL_GetMouseState(&fmx, &fmy);
                 int mx = (int)fmx, my = (int)fmy;
@@ -410,7 +392,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     }
     // Left-drag with the MoveCam tool pans the camera.
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT &&
-        !(SDL_GetModState() & SDL_KMOD_CTRL) && mActiveTool == Tool::MoveCam) {
+        !(SDL_GetModState() & SDL_KMOD_CTRL) && mActiveToolId == ToolId::MoveCam) {
         int mx = (int)e.button.x, my = (int)e.button.y;
         if (mx < CanvasW() && my >= TOOLBAR_H) {
             startPan(mx, my);
@@ -436,7 +418,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         // When MovingPlat tool is active, Ctrl+scroll adjusts range instead of zooming.
         // Adjusts the hovered tile's group, OR the current session group if no hover.
         // Start position stays fixed; only the end (range) moves.
-        if ((SDL_GetModState() & SDL_KMOD_CTRL) && mActiveTool == Tool::MovingPlat &&
+        if ((SDL_GetModState() & SDL_KMOD_CTRL) && mActiveToolId == ToolId::MovingPlat &&
             mx < CanvasW()) {
             mMovPlatRange = std::max(GRID * 1.0f, mMovPlatRange + e.wheel.y * GRID);
             // Update current session tiles
@@ -477,18 +459,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 scroll = std::min(scroll, std::max(0, (int)mPalette.BgItems().size() - 1));
                 mPalette.SetBgScroll(scroll);
             }
-        } else if (mActiveTool == Tool::Tile) {
-            // e.wheel.y is a float in SDL3 — accumulate fractional ticks
-            // and step by GRID only when the buffer crosses ±0.5.
-            mScrollAccum += e.wheel.y;
-            int steps = (int)mScrollAccum; // truncate toward zero
-            if (steps != 0) {
-                mScrollAccum -= steps;
-                mTileW = std::max(GRID, mTileW + steps * GRID);
-                mTileH = mTileW;
-                SetStatus("Tile size: " + std::to_string(mTileW));
-            }
-        } else if (mActiveTool == Tool::Action) {
+        } else if (mActiveToolId == ToolId::Tile && mTool) {
+            auto ctx = MakeToolCtx();
+            mTool->OnScroll(ctx, e.wheel.y, mx, my, SDL_GetModState());
+        } else if (mActiveToolId == ToolId::Action) {
             // Accumulate fractional SDL3 scroll ticks, step by 1 hit per full tick
             float fmya;
             SDL_GetMouseState(nullptr, &fmya);
@@ -506,21 +480,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             } else {
                 mScrollAccum = 0.0f; // not hovering a tile, discard accumulation
             }
-        } else if (mActiveTool == Tool::Slope) {
-            // Shift+scroll on a slope tile: adjust slopeHeightFrac in 0.05 steps
-            float fmxs, fmys;
-            SDL_GetMouseState(&fmxs, &fmys);
-            int mxs = (int)fmxs, mys = (int)fmys;
-            int hovSlope = (mys >= TOOLBAR_H && mxs < CanvasW()) ? HitTile(mxs, mys) : -1;
-            if (hovSlope >= 0 && mLevel.tiles[hovSlope].slope != SlopeType::None) {
-                float& frac = mLevel.tiles[hovSlope].slopeHeightFrac;
-                frac        = std::clamp(frac + e.wheel.y * 0.05f, 0.05f, 1.0f);
-                // Round to nearest 0.05 to avoid floating-point drift
-                frac = std::round(frac * 20.0f) / 20.0f;
-                SetStatus("Slope height: " + std::to_string((int)(frac * 100)) +
-                          "%  (scroll to adjust)");
-            }
-        } else if (mActiveTool == Tool::MovingPlat) {
+        } else if (mActiveToolId == ToolId::Slope && mTool) {
+            auto ctx = MakeToolCtx();
+            mTool->OnScroll(ctx, e.wheel.y, mx, my, SDL_GetModState());
+        } else if (mActiveToolId == ToolId::MovingPlat) {
             float fmx2, fmy2;
             SDL_GetMouseState(&fmx2, &fmy2);
             int  mxw = (int)fmx2, myw = (int)fmy2;
@@ -578,30 +541,28 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_KEY_DOWN) {
         switch (e.key.key) {
             case SDLK_Q:
-                mActiveTool = Tool::Select;
+                SwitchTool(ToolId::Select);
                 lblTool->CreateSurface("Select");
-                mSelBoxing   = false;
-                mSelDragging = false;
                 break;
             case SDLK_1:
-                mActiveTool = Tool::Coin;
+                SwitchTool(ToolId::Coin);
                 lblTool->CreateSurface("Coin");
                 break;
             case SDLK_2:
-                mActiveTool = Tool::Enemy;
+                SwitchTool(ToolId::Enemy);
                 lblTool->CreateSurface("Enemy");
                 break;
             case SDLK_3:
-                mActiveTool = Tool::Tile;
+                SwitchTool(ToolId::Tile);
                 lblTool->CreateSurface("Tile");
                 mPalette.SetActiveTab(EditorPalette::Tab::Tiles);
                 break;
             case SDLK_4:
-                mActiveTool = Tool::Erase;
+                SwitchTool(ToolId::Erase);
                 lblTool->CreateSurface("Erase");
                 break;
             case SDLK_5:
-                mActiveTool = Tool::PlayerStart;
+                SwitchTool(ToolId::PlayerStart);
                 lblTool->CreateSurface("Player");
                 break;
             case SDLK_6:
@@ -610,33 +571,30 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 break;
             case SDLK_7:
             case SDLK_R:
-                mActiveTool = Tool::Resize;
+                SwitchTool(ToolId::Resize);
                 lblTool->CreateSurface("Resize");
-                mIsResizing   = false;
-                mHoverEdge    = ResizeEdge::None;
-                mHoverTileIdx = -1;
                 break;
             case SDLK_8:
             case SDLK_P:
-                mActiveTool = Tool::Prop;
+                SwitchTool(ToolId::Prop);
                 lblTool->CreateSurface("Prop");
                 break;
             case SDLK_9:
             case SDLK_L:
-                mActiveTool = Tool::Ladder;
+                SwitchTool(ToolId::Ladder);
                 lblTool->CreateSurface("Ladder");
                 break;
             case SDLK_0:
-                mActiveTool = Tool::Action;
+                SwitchTool(ToolId::Action);
                 lblTool->CreateSurface("Action");
                 CloseAnimPicker();
                 break;
             case SDLK_T:
-                mActiveTool = Tool::MoveCam;
+                SwitchTool(ToolId::MoveCam);
                 lblTool->CreateSurface("Pan");
                 break;
             case SDLK_MINUS:
-                mActiveTool = Tool::Slope;
+                SwitchTool(ToolId::Slope);
                 lblTool->CreateSurface("Slope");
                 break;
             case SDLK_G: {
@@ -693,15 +651,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 break;
             case SDLK_DELETE:
             case SDLK_BACKSPACE:
-                // Delete all selected tiles
-                if (!mSelIndices.empty()) {
-                    // Sort descending so erasing by index doesn't shift remaining indices
-                    std::sort(mSelIndices.begin(), mSelIndices.end(), std::greater<int>());
-                    for (int idx : mSelIndices)
-                        if (idx >= 0 && idx < (int)mLevel.tiles.size())
-                            mLevel.tiles.erase(mLevel.tiles.begin() + idx);
-                    SetStatus("Deleted " + std::to_string(mSelIndices.size()) + " tile(s)");
-                    mSelIndices.clear();
+                // Delegate to SelectTool if active
+                if (mTool) {
+                    auto ctx = MakeToolCtx();
+                    mTool->OnKeyDown(ctx, e.key.key, (SDL_Keymod)e.key.mod);
                 }
                 break;
             case SDLK_TAB:
@@ -714,12 +667,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     CloseAnimPicker();
                     break;
                 }
-                if (mActiveTool == Tool::Select) {
-                    mSelIndices.clear();
-                    mSelBoxing   = false;
-                    mSelDragging = false;
-                    SetStatus("Selection cleared");
-                    break; // don't fall through to the tile-browser Esc handler
+                if (mActiveToolId == ToolId::Select && mTool) {
+                    auto ctx = MakeToolCtx();
+                    if (mTool->OnKeyDown(ctx, e.key.key, (SDL_Keymod)e.key.mod) ==
+                        ToolResult::Consumed)
+                        break; // don't fall through to the tile-browser Esc handler
                 }
                 // Navigate back up in tile browser
                 if (mPalette.ActiveTab() == EditorPalette::Tab::Tiles &&
@@ -740,7 +692,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     // ── Right-click: group cycling for action tiles ──────────────────────────
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
-        if (mActiveTool == Tool::Action && my >= TOOLBAR_H && mx < CanvasW()) {
+        if (mActiveToolId == ToolId::Action && my >= TOOLBAR_H && mx < CanvasW()) {
             int ti = HitTile(mx, my);
             if (ti >= 0 && mLevel.tiles[ti].action) {
                 // Right-click cycles through available death animations:
@@ -779,7 +731,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     // Right-click on canvas: cycle tile rotation / action group / moving-plat params
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
-        if (mActiveTool == Tool::MovingPlat && my >= TOOLBAR_H && mx < CanvasW()) {
+        if (mActiveToolId == ToolId::MovingPlat && my >= TOOLBAR_H && mx < CanvasW()) {
             // Preset cycle:
             //  H  96  60  (default horiz, medium)
             //  H  48  40  (horiz, short)
@@ -847,7 +799,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         if (my >= TOOLBAR_H && mx < CanvasW()) {
             int ti = HitTile(mx, my);
             if (ti >= 0) {
-                if (mActiveTool == Tool::Action && mLevel.tiles[ti].action) {
+                if (mActiveToolId == ToolId::Action && mLevel.tiles[ti].action) {
                     int& grp = mLevel.tiles[ti].actionGroup;
                     grp      = (grp + 1) % 10;
                     SetStatus("Tile " + std::to_string(ti) + " group -> " +
@@ -859,11 +811,10 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                               std::to_string(rot) + "deg");
                 }
                 return true;
-            } else if (mActiveTool == Tool::Tile) {
-                // Hovering empty canvas space — cycle ghost rotation
-                mGhostRotation = (mGhostRotation + 90) % 360;
-                SetStatus("Ghost rotation: " + std::to_string(mGhostRotation) +
-                          "deg  (RClick to cycle)");
+            } else if (mActiveToolId == ToolId::Tile && mTool) {
+                // Delegate right-click to TileTool (cycles ghost rotation)
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, mx, my, SDL_BUTTON_RIGHT, SDL_GetModState());
                 return true;
             }
         }
@@ -941,8 +892,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (HitTest(mToolbar.PillRect(grp), mx, my)) {
                 mToolbar.ToggleGroup(grp);
                 static const char* kGrpNames[] = {"Place", "Modifier", "Actions"};
-                SetStatus(std::string(kGrpNames[gi]) +
-                          (mToolbar.IsCollapsed(grp) ? " group collapsed" : " group expanded"));
+                SetStatus(std::string(kGrpNames[gi]) + (mToolbar.IsCollapsed(grp)
+                                                            ? " group collapsed"
+                                                            : " group expanded"));
                 return true;
             }
         }
@@ -958,51 +910,91 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (click.kind == EditorToolbar::ClickResult::Kind::Button) {
                 // Helper: clear selection state when switching to a non-Select tool
                 auto clearSel = [&]() {
-                    mSelIndices.clear();
-                    mSelBoxing   = false;
-                    mSelDragging = false;
+                    // SwitchTool deactivates the old tool, which clears
+                    // SelectTool's state via OnDeactivate.
                 };
                 CloseAnimPicker();
                 switch (click.button) {
-                    case TBBtn::Coin:        clearSel(); mActiveTool = Tool::Coin;        lblTool->CreateSurface("Coin"); return true;
-                    case TBBtn::Enemy:       clearSel(); mActiveTool = Tool::Enemy;       lblTool->CreateSurface("Enemy"); return true;
-                    case TBBtn::Tile:        clearSel(); mActiveTool = Tool::Tile;        lblTool->CreateSurface("Tile"); return true;
-                    case TBBtn::Erase:       clearSel(); mActiveTool = Tool::Erase;       lblTool->CreateSurface("Erase"); return true;
-                    case TBBtn::PlayerStart: clearSel(); mActiveTool = Tool::PlayerStart; lblTool->CreateSurface("Player"); return true;
+                    case TBBtn::Coin:
+                        clearSel();
+                        SwitchTool(ToolId::Coin);
+                        lblTool->CreateSurface("Coin");
+                        return true;
+                    case TBBtn::Enemy:
+                        clearSel();
+                        SwitchTool(ToolId::Enemy);
+                        lblTool->CreateSurface("Enemy");
+                        return true;
+                    case TBBtn::Tile:
+                        clearSel();
+                        SwitchTool(ToolId::Tile);
+                        lblTool->CreateSurface("Tile");
+                        return true;
+                    case TBBtn::Erase:
+                        clearSel();
+                        SwitchTool(ToolId::Erase);
+                        lblTool->CreateSurface("Erase");
+                        return true;
+                    case TBBtn::PlayerStart:
+                        clearSel();
+                        SwitchTool(ToolId::PlayerStart);
+                        lblTool->CreateSurface("Player");
+                        return true;
                     case TBBtn::Select:
-                        mActiveTool = Tool::Select;
+                        SwitchTool(ToolId::Select);
                         lblTool->CreateSurface("Select");
-                        mSelBoxing = false; mSelDragging = false;
                         return true;
                     case TBBtn::MoveCam:
-                        mActiveTool = Tool::MoveCam;
+                        SwitchTool(ToolId::MoveCam);
                         lblTool->CreateSurface("Pan");
                         return true;
-                    case TBBtn::Prop:    clearSel(); mActiveTool = Tool::Prop;    lblTool->CreateSurface("Prop"); return true;
-                    case TBBtn::Ladder:  clearSel(); mActiveTool = Tool::Ladder;  lblTool->CreateSurface("Ladder"); return true;
-                    case TBBtn::Action:  clearSel(); mActiveTool = Tool::Action;  lblTool->CreateSurface("Action"); return true;
-                    case TBBtn::Slope:   clearSel(); mActiveTool = Tool::Slope;   lblTool->CreateSurface("Slope"); return true;
+                    case TBBtn::Prop:
+                        clearSel();
+                        SwitchTool(ToolId::Prop);
+                        lblTool->CreateSurface("Prop");
+                        return true;
+                    case TBBtn::Ladder:
+                        clearSel();
+                        SwitchTool(ToolId::Ladder);
+                        lblTool->CreateSurface("Ladder");
+                        return true;
+                    case TBBtn::Action:
+                        clearSel();
+                        SwitchTool(ToolId::Action);
+                        lblTool->CreateSurface("Action");
+                        return true;
+                    case TBBtn::Slope:
+                        clearSel();
+                        SwitchTool(ToolId::Slope);
+                        lblTool->CreateSurface("Slope");
+                        return true;
                     case TBBtn::Resize:
-                        mActiveTool = Tool::Resize;
+                        SwitchTool(ToolId::Resize);
                         lblTool->CreateSurface("Resize");
-                        mIsResizing = false; mHoverEdge = ResizeEdge::None; mHoverTileIdx = -1;
                         return true;
                     case TBBtn::Hitbox:
-                        mActiveTool = Tool::Hitbox;
+                        SwitchTool(ToolId::Hitbox);
                         lblTool->CreateSurface("Hitbox");
-                        mHitboxDragging = false; mHoverHitboxHdl = HitboxHandle::None;
                         return true;
-                    case TBBtn::Hazard:   clearSel(); mActiveTool = Tool::Hazard;   lblTool->CreateSurface("Hazard"); return true;
-                    case TBBtn::AntiGrav: clearSel(); mActiveTool = Tool::AntiGrav; lblTool->CreateSurface("Float"); return true;
+                    case TBBtn::Hazard:
+                        clearSel();
+                        SwitchTool(ToolId::Hazard);
+                        lblTool->CreateSurface("Hazard");
+                        return true;
+                    case TBBtn::AntiGrav:
+                        clearSel();
+                        SwitchTool(ToolId::AntiGrav);
+                        lblTool->CreateSurface("Float");
+                        return true;
                     case TBBtn::PowerUp:
-                        mActiveTool = Tool::PowerUp;
+                        SwitchTool(ToolId::PowerUp);
                         mPowerUpPopupOpen = true;
-                        mPowerUpTileIdx = -1;
+                        mPowerUpTileIdx   = -1;
                         lblTool->CreateSurface("PowerUp");
                         SetStatus("PowerUp: click a tile to assign a power-up pickup");
                         return true;
                     case TBBtn::MovingPlat: {
-                        mActiveTool = Tool::MovingPlat;
+                        SwitchTool(ToolId::MovingPlat);
                         lblTool->CreateSurface("MovingPlat");
                         int maxUsed = 0;
                         for (const auto& ts : mLevel.tiles)
@@ -1012,26 +1004,29 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                         mMovPlatCurGroupId  = mMovPlatNextGroupId++;
                         mMovPlatIndices.clear();
                         for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
-                            if (!mLevel.tiles[i].moving) continue;
+                            if (!mLevel.tiles[i].moving)
+                                continue;
                             const auto& first = mLevel.tiles[i];
-                            mMovPlatHoriz   = first.moveHoriz;
-                            mMovPlatRange   = first.moveRange;
-                            mMovPlatSpeed   = first.moveSpeed;
-                            mMovPlatLoop    = first.moveLoop;
-                            mMovPlatTrigger = first.moveTrigger;
+                            mMovPlatHoriz     = first.moveHoriz;
+                            mMovPlatRange     = first.moveRange;
+                            mMovPlatSpeed     = first.moveSpeed;
+                            mMovPlatLoop      = first.moveLoop;
+                            mMovPlatTrigger   = first.moveTrigger;
                             break;
                         }
                         mMovPlatPopupOpen  = true;
                         mMovPlatSpeedInput = false;
                         mMovPlatSpeedStr   = std::to_string((int)mMovPlatSpeed);
-                        SetStatus("MovingPlat: click tiles to add. RClick=axis/range. New group ID=" +
-                                  std::to_string(mMovPlatCurGroupId));
+                        SetStatus(
+                            "MovingPlat: click tiles to add. RClick=axis/range. New group "
+                            "ID=" +
+                            std::to_string(mMovPlatCurGroupId));
                         return true;
                     }
                     case TBBtn::Save: {
                         fs::create_directories("levels");
                         std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name = mLevelName;
+                        mLevel.name      = mLevelName;
                         SaveLevel(mLevel, path);
                         SetStatus("Saved: " + path);
                         return true;
@@ -1058,7 +1053,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     case TBBtn::Play: {
                         fs::create_directories("levels");
                         std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name = mLevelName;
+                        mLevel.name      = mLevelName;
                         SaveLevel(mLevel, path);
                         mLaunchGame = true;
                         return true;
@@ -1066,7 +1061,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     case TBBtn::Back: {
                         fs::create_directories("levels");
                         std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name = mLevelName;
+                        mLevel.name      = mLevelName;
                         SaveLevel(mLevel, path);
                         mGoBack = true;
                         return true;
@@ -1078,17 +1073,21 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                             mLevel.gravityMode = GravityMode::OpenWorld;
                         else
                             mLevel.gravityMode = GravityMode::Platformer;
-                        std::string gLbl = (mLevel.gravityMode == GravityMode::WallRun) ? "Wall Run"
-                                           : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Open World"
-                                                                                             : "Platform";
-                        std::string gStatus = (mLevel.gravityMode == GravityMode::WallRun) ? "Mode: Wall Run"
-                                              : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Mode: Open World (top-down)"
-                                                                                                : "Mode: Platformer";
+                        std::string gLbl =
+                            (mLevel.gravityMode == GravityMode::WallRun)     ? "Wall Run"
+                            : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Open World"
+                                                                             : "Platform";
+                        std::string gStatus =
+                            (mLevel.gravityMode == GravityMode::WallRun) ? "Mode: Wall Run"
+                            : (mLevel.gravityMode == GravityMode::OpenWorld)
+                                ? "Mode: Open World (top-down)"
+                                : "Mode: Platformer";
                         mToolbar.SetGravityLabel(gLbl);
                         SetStatus(gStatus);
                         return true;
                     }
-                    default: break;
+                    default:
+                        break;
                 } // switch
             } // if Button
         } // if toolbar
@@ -1142,7 +1141,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
                     mPalette.SetSelectedTile(idx);
                     mGhostRotation = 0; // reset rotation when a new tile is picked
-                    mActiveTool    = Tool::Tile;
+                    SwitchTool(ToolId::Tile);
                     lblTool->CreateSurface("Tool: Tile");
                     SetStatus("Selected: " + item.label + (isDouble ? " (double)" : ""));
                 }
@@ -1298,92 +1297,30 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         auto [sx, sy] = SnapToGrid(mx, my);
 
-        switch (mActiveTool) {
-            case Tool::Coin:
-                mLevel.coins.push_back({(float)sx, (float)sy});
-                SetStatus("Coin at " + std::to_string(sx) + "," + std::to_string(sy));
-                break;
-            case Tool::Enemy:
-                mLevel.enemies.push_back({(float)sx, (float)sy, ENEMY_SPEED});
-                SetStatus("Enemy at " + std::to_string(sx) + "," + std::to_string(sy));
-                break;
-            case Tool::Tile: {
-                const auto* selItem = mPalette.SelectedItem();
-                if (selItem && !selItem->isFolder) {
-                    auto newTile =
-                        TileSpawn{(float)sx, (float)sy, mTileW, mTileH, selItem->path};
-                    newTile.rotation = mGhostRotation;
-                    mLevel.tiles.push_back(std::move(newTile));
-                    SetStatus(
-                        "Tile: " + selItem->label +
-                        (mGhostRotation ? "  rot=" + std::to_string(mGhostRotation) : ""));
+        // Dispatch to extracted tools first
+        if (mTool) {
+            // Populate TileTool's placement info if active
+            if (mActiveToolId == ToolId::Tile) {
+                if (auto* tt = dynamic_cast<TileTool*>(mTool.get())) {
+                    const auto* selItem = mPalette.SelectedItem();
+                    tt->placementInfo   = selItem ? TilePlacementInfo{true,
+                                                                    selItem->isFolder,
+                                                                    selItem->path,
+                                                                    selItem->label}
+                                                  : TilePlacementInfo{};
                 }
-            } break;
-            case Tool::Erase: {
-                // Coins and enemies are checked before tiles so that objects
-                // placed on top of tiles are deleted first (layering order).
-                int ci = HitCoin(mx, my);
-                if (ci >= 0) {
-                    mLevel.coins.erase(mLevel.coins.begin() + ci);
-                    SetStatus("Erased coin");
-                    break;
-                }
-                int ei = HitEnemy(mx, my);
-                if (ei >= 0) {
-                    mLevel.enemies.erase(mLevel.enemies.begin() + ei);
-                    SetStatus("Erased enemy");
-                    break;
-                }
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    mLevel.tiles.erase(mLevel.tiles.begin() + ti);
-                    SetStatus("Erased tile");
-                    break;
-                }
-                break;
             }
-            case Tool::PlayerStart:
-                mLevel.player = {(float)sx, (float)sy};
-                SetStatus("Player start set");
-                break;
-            case Tool::Prop: {
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    bool nowProp          = !mLevel.tiles[ti].prop;
-                    mLevel.tiles[ti].prop = nowProp;
-                    // Prop, Ladder, and Action are mutually exclusive; Hazard is compatible
-                    // with Prop
-                    if (nowProp) {
-                        mLevel.tiles[ti].ladder = false;
-                        mLevel.tiles[ti].action = false;
-                        mLevel.tiles[ti].slope  = SlopeType::None;
-                    }
-                    bool isHazard = mLevel.tiles[ti].hazard;
-                    SetStatus(std::string("Tile ") + std::to_string(ti) +
-                              (nowProp ? (isHazard ? " → prop+hazard (walk-through, damages)"
-                                                   : " → prop (no collision)")
-                                       : " → solid (collision on)"));
-                }
+            auto ctx = MakeToolCtx();
+            auto res = mTool->OnMouseDown(ctx, mx, my, SDL_BUTTON_LEFT, SDL_GetModState());
+            if (res == ToolResult::Consumed)
                 return true;
-            }
-            case Tool::Ladder: {
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    bool nowLadder          = !mLevel.tiles[ti].ladder;
-                    mLevel.tiles[ti].ladder = nowLadder;
-                    // Ladder, Prop, and Action are mutually exclusive
-                    if (nowLadder) {
-                        mLevel.tiles[ti].prop   = false;
-                        mLevel.tiles[ti].action = false;
-                        mLevel.tiles[ti].slope  = SlopeType::None;
-                    }
-                    SetStatus(
-                        std::string("Tile ") + std::to_string(ti) +
-                        (nowLadder ? " → ladder (climbable)" : " → solid (ladder removed)"));
-                }
-                return true;
-            }
-            case Tool::Action: {
+        }
+
+        switch (mActiveToolId) {
+            // Coin, Enemy, Tile, Erase, PlayerStart, MoveCam handled by mTool above
+            default:
+                break;
+            case ToolId::Action: {
                 // If the picker is open and the click landed outside it, close it
                 // and fall through so the click can act on whatever tile is below.
                 if (mActionAnimPickerTile >= 0) {
@@ -1412,123 +1349,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 return true;
             }
-            case Tool::Slope: {
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    // Cycle: None → DiagUpRight → DiagUpLeft → None
-                    SlopeType   next;
-                    std::string label;
-                    if (mLevel.tiles[ti].slope == SlopeType::None) {
-                        next  = SlopeType::DiagUpRight;
-                        label = "DiagUpRight (rises left→right)";
-                    } else if (mLevel.tiles[ti].slope == SlopeType::DiagUpRight) {
-                        next  = SlopeType::DiagUpLeft;
-                        label = "DiagUpLeft  (rises right→left)";
-                    } else {
-                        next  = SlopeType::None;
-                        label = "slope removed";
-                    }
-                    mLevel.tiles[ti].slope = next;
-                    // Slope, Prop, Ladder, and Action are mutually exclusive
-                    if (next != SlopeType::None) {
-                        mLevel.tiles[ti].prop   = false;
-                        mLevel.tiles[ti].ladder = false;
-                        mLevel.tiles[ti].action = false;
-                    }
-                    SetStatus(std::string("Tile ") + std::to_string(ti) + " → " + label);
-                }
-                return true;
-            }
-            case Tool::Hitbox: {
-                // Priority 1: if we already have a tile selected and the cursor
-                // is on one of its handles, start the drag immediately — don't
-                // let HitTile() steal focus to an adjacent tile.
-                if (mHitboxTileIdx >= 0 && mHoverHitboxHdl != HitboxHandle::None) {
-                    auto& t         = mLevel.tiles[mHitboxTileIdx];
-                    mHitboxDragging = true;
-                    mHitboxHandle   = mHoverHitboxHdl;
-                    mHitboxDragX    = mx;
-                    mHitboxDragY    = my;
-                    mHitboxOrigOffX = t.hitboxOffX;
-                    mHitboxOrigOffY = t.hitboxOffY;
-                    mHitboxOrigW    = t.hitboxW;
-                    mHitboxOrigH    = t.hitboxH;
-                    return true;
-                }
-                // Priority 2: if a tile is already selected and the click lands
-                // inside its visual bounds, keep it selected (don't switch to a
-                // neighbour that also happens to overlap the cursor position).
-                bool keptCurrent = false;
-                if (mHitboxTileIdx >= 0 && mHitboxTileIdx < (int)mLevel.tiles.size()) {
-                    const auto& ct  = mLevel.tiles[mHitboxTileIdx];
-                    auto [csx, csy] = mCamera.WorldToScreen(ct.x, ct.y);
-                    int csw         = (int)(ct.w * mCamera.Zoom());
-                    int csh         = (int)(ct.h * mCamera.Zoom());
-                    if (mx >= csx && mx <= csx + csw && my >= csy && my <= csy + csh)
-                        keptCurrent = true;
-                }
-                if (!keptCurrent) {
-                    // Click is outside the current tile — select whichever tile
-                    // the cursor is over, or deselect if on empty space.
-                    int ti = HitTile(mx, my);
-                    if (ti >= 0) {
-                        mHitboxTileIdx = ti;
-                        auto& t        = mLevel.tiles[ti];
-                        // Initialise hitbox to full tile on first use
-                        if (t.hitboxW == 0 && t.hitboxH == 0) {
-                            t.hitboxOffX = 0;
-                            t.hitboxOffY = 0;
-                            t.hitboxW    = t.w;
-                            t.hitboxH    = t.h;
-                        }
-                        SetStatus("Hitbox: tile " + std::to_string(ti) +
-                                  "  drag edges to adjust");
-                    } else {
-                        mHitboxTileIdx = -1; // deselect on empty space
-                    }
-                }
-                return true;
-            }
-            case Tool::Hazard: {
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    bool nowHazard          = !mLevel.tiles[ti].hazard;
-                    mLevel.tiles[ti].hazard = nowHazard;
-                    if (nowHazard) {
-                        // Prop is intentionally NOT cleared — hazard+prop = walk-through
-                        // hazard
-                        mLevel.tiles[ti].ladder = false;
-                        mLevel.tiles[ti].action = false;
-                        mLevel.tiles[ti].slope  = SlopeType::None;
-                    }
-                    bool isProp = mLevel.tiles[ti].prop;
-                    SetStatus(std::string("Tile ") + std::to_string(ti) +
-                              (nowHazard ? (isProp ? " → hazard+prop (walk-through, damages)"
-                                                   : " → hazard (solid, 30 HP/sec)")
-                                         : " → solid (hazard removed)"));
-                }
-                return true;
-            }
-            case Tool::AntiGrav: {
-                int ti = HitTile(mx, my);
-                if (ti >= 0) {
-                    bool now                     = !mLevel.tiles[ti].antiGravity;
-                    mLevel.tiles[ti].antiGravity = now;
-                    SetStatus("Tile " + std::to_string(ti) +
-                              (now ? " -> floating (anti-gravity)" : " -> normal gravity"));
-                    return true;
-                }
-                int ei = HitEnemy(mx, my);
-                if (ei >= 0) {
-                    bool now                       = !mLevel.enemies[ei].antiGravity;
-                    mLevel.enemies[ei].antiGravity = now;
-                    SetStatus("Enemy " + std::to_string(ei) +
-                              (now ? " -> floating" : " -> normal gravity"));
-                    return true;
-                }
-                return true;
-            }
-            case Tool::PowerUp: {
+            case ToolId::PowerUp: {
                 // Handle PowerUp popup click: close popup if open and click is in it
                 if (mPowerUpPopupOpen && mPowerUpTileIdx >= 0 &&
                     HitTest(mPowerUpPopupRect, mx, my)) {
@@ -1593,7 +1414,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 return true;
             }
-            case Tool::MovingPlat: {
+            case ToolId::MovingPlat: {
                 // Left-click: toggle tile into/out of the current moving group
                 int ti = HitTile(mx, my);
                 if (ti >= 0) {
@@ -1667,75 +1488,18 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 }
                 return true;
             }
-            case Tool::Select: {
-                // Click on a selected tile: start moving. Click elsewhere: start
-                // rubber-band.
-                auto [wx, wy] = ScreenToWorld(mx, my);
-                int  ti       = HitTile(mx, my);
-                bool hitSelected =
-                    (ti >= 0 && std::find(mSelIndices.begin(), mSelIndices.end(), ti) !=
-                                    mSelIndices.end());
-                if (hitSelected) {
-                    // Begin drag-move of entire selection
-                    mSelDragging    = true;
-                    mSelDragStartWX = wx;
-                    mSelDragStartWY = wy;
-                    mSelOrigPositions.clear();
-                    for (int idx : mSelIndices)
-                        mSelOrigPositions.push_back(
-                            {mLevel.tiles[idx].x, mLevel.tiles[idx].y});
-                } else {
-                    // Click on unselected tile: select just it (or begin rubber-band on
-                    // empty space)
-                    if (ti >= 0) {
-                        // Shift-click: add/remove from selection
-                        if (SDL_GetModState() & SDL_KMOD_SHIFT) {
-                            auto it = std::find(mSelIndices.begin(), mSelIndices.end(), ti);
-                            if (it != mSelIndices.end())
-                                mSelIndices.erase(it);
-                            else
-                                mSelIndices.push_back(ti);
-                        } else {
-                            mSelIndices = {ti};
-                        }
-                        SetStatus("Selected " + std::to_string(mSelIndices.size()) +
-                                  " tile(s)");
-                    } else {
-                        // Empty space: begin rubber-band, clear selection unless Shift
-                        if (!(SDL_GetModState() & SDL_KMOD_SHIFT))
-                            mSelIndices.clear();
-                        mSelBoxing = true;
-                        mSelBoxX0 = mSelBoxX1 = wx;
-                        mSelBoxY0 = mSelBoxY1 = wy;
-                    }
-                }
-                return true;
-            }
-            case Tool::MoveCam:
-                // Pan is handled by the dedicated pan block above; nothing to do on click.
-                break;
-            case Tool::Resize:
-                // Mouse-down on a resize handle starts the drag
-                if (mHoverTileIdx >= 0 && mHoverEdge != ResizeEdge::None) {
-                    mIsResizing    = true;
-                    mResizeTileIdx = mHoverTileIdx;
-                    mResizeEdge    = mHoverEdge;
-                    mResizeDragX   = mx;
-                    mResizeDragY   = my;
-                    mResizeOrigW   = mLevel.tiles[mHoverTileIdx].w;
-                    mResizeOrigH   = mLevel.tiles[mHoverTileIdx].h;
-                    SetStatus("Resizing tile " + std::to_string(mHoverTileIdx));
-                    return true;
-                }
-                break;
         }
 
-        // Only start drag for placement tools that don't have their own case above.
-        // Coin/Enemy/Tile/PlayerStart already returned — this catches Select and modifier
-        // tools that might be clicked on top of an existing entity.
-        if (mActiveTool != Tool::Erase && mActiveTool != Tool::Coin &&
-            mActiveTool != Tool::Enemy && mActiveTool != Tool::Tile &&
-            mActiveTool != Tool::MoveCam && mActiveTool != Tool::PlayerStart) {
+        // Only start drag for inline tools that don't have their own entity-drag.
+        // Extracted tools (Prop, Ladder, Slope, Hazard, AntiGrav, Select, Resize,
+        // Hitbox) handle drag via mTool->OnMouseDown()/OnMouseMove()/OnMouseUp().
+        if (mActiveToolId != ToolId::Erase && mActiveToolId != ToolId::Coin &&
+            mActiveToolId != ToolId::Enemy && mActiveToolId != ToolId::Tile &&
+            mActiveToolId != ToolId::MoveCam && mActiveToolId != ToolId::PlayerStart &&
+            mActiveToolId != ToolId::Prop && mActiveToolId != ToolId::Ladder &&
+            mActiveToolId != ToolId::Slope && mActiveToolId != ToolId::Hazard &&
+            mActiveToolId != ToolId::AntiGrav && mActiveToolId != ToolId::Select &&
+            mActiveToolId != ToolId::Resize && mActiveToolId != ToolId::Hitbox) {
             int ti = HitTile(mx, my);
             if (ti >= 0) {
                 mIsDragging = true;
@@ -1764,47 +1528,13 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     }
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+        // Dispatch to active tool first (handles entity drag stop for modifier tools)
+        if (mTool) {
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseUp(
+                ctx, (int)e.button.x, (int)e.button.y, e.button.button, SDL_GetModState());
+        }
         mIsDragging = false;
-        if (mIsResizing) {
-            mIsResizing    = false;
-            mResizeTileIdx = -1;
-            SetStatus("Resize committed");
-        }
-        if (mHitboxDragging) {
-            mHitboxDragging = false;
-            mHitboxHandle   = HitboxHandle::None;
-            if (mHitboxTileIdx >= 0) {
-                auto& t = mLevel.tiles[mHitboxTileIdx];
-                SetStatus("Hitbox: off(" + std::to_string(t.hitboxOffX) + "," +
-                          std::to_string(t.hitboxOffY) + ") size(" +
-                          std::to_string(t.hitboxW) + "x" + std::to_string(t.hitboxH) + ")");
-            }
-        }
-        // Commit rubber-band selection
-        if (mSelBoxing) {
-            mSelBoxing = false;
-            int rx0    = std::min(mSelBoxX0, mSelBoxX1);
-            int ry0    = std::min(mSelBoxY0, mSelBoxY1);
-            int rx1    = std::max(mSelBoxX0, mSelBoxX1);
-            int ry1    = std::max(mSelBoxY0, mSelBoxY1);
-            if (!(SDL_GetModState() & SDL_KMOD_SHIFT))
-                mSelIndices.clear();
-            for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
-                const auto& t = mLevel.tiles[i];
-                // Include tile if it overlaps the marquee rect
-                if ((int)t.x + t.w > rx0 && (int)t.x < rx1 && (int)t.y + t.h > ry0 &&
-                    (int)t.y < ry1) {
-                    if (std::find(mSelIndices.begin(), mSelIndices.end(), i) ==
-                        mSelIndices.end())
-                        mSelIndices.push_back(i);
-                }
-            }
-            SetStatus("Selected " + std::to_string(mSelIndices.size()) + " tile(s)");
-        }
-        if (mSelDragging) {
-            mSelDragging = false;
-            SetStatus("Moved " + std::to_string(mSelIndices.size()) + " tile(s)");
-        }
     }
 
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
@@ -1822,186 +1552,18 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
         // Track which action tile is under the cursor during an active drag-drop
         // so Render can show the "drop here" highlight.
-        if (mDropActive && mActiveTool == Tool::Action) {
+        if (mDropActive && mActiveToolId == ToolId::Action) {
             int ti = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
             mActionAnimDropHover = (ti >= 0 && mLevel.tiles[ti].action) ? ti : -1;
         } else {
             mActionAnimDropHover = -1;
         }
 
-        // ── Selection rubber-band / drag-move ────────────────────────────────────
-        if (mSelBoxing) {
-            auto [wx, wy] = ScreenToWorld(mx, my);
-            mSelBoxX1     = wx;
-            mSelBoxY1     = wy;
-            return true;
-        }
-        if (mSelDragging && !mSelOrigPositions.empty()) {
-            auto [wx, wy] = ScreenToWorld(mx, my);
-            int dx        = wx - mSelDragStartWX;
-            int dy        = wy - mSelDragStartWY;
-            for (int i = 0; i < (int)mSelIndices.size(); i++) {
-                int idx = mSelIndices[i];
-                if (idx < (int)mLevel.tiles.size()) {
-                    // Snap each tile's displaced position to grid
-                    float rawX          = mSelOrigPositions[i].first + dx;
-                    float rawY          = mSelOrigPositions[i].second + dy;
-                    mLevel.tiles[idx].x = (float)((int(rawX) / GRID) * GRID);
-                    mLevel.tiles[idx].y = (float)((int(rawY) / GRID) * GRID);
-                }
-            }
-            return true;
-        }
-
-        // ── Resize drag ───────────────────────────────────────────────────────
-        if (mIsResizing && mResizeTileIdx >= 0 &&
-            mResizeTileIdx < (int)mLevel.tiles.size()) {
-            auto& t  = mLevel.tiles[mResizeTileIdx];
-            int   dx = mx - mResizeDragX;
-            int   dy = my - mResizeDragY;
-            if (mResizeEdge == ResizeEdge::Right || mResizeEdge == ResizeEdge::Corner) {
-                int newW = std::max(GRID, ((mResizeOrigW + dx + GRID / 2) / GRID) * GRID);
-                t.w      = newW;
-            }
-            if (mResizeEdge == ResizeEdge::Bottom || mResizeEdge == ResizeEdge::Corner) {
-                int newH = std::max(GRID, ((mResizeOrigH + dy + GRID / 2) / GRID) * GRID);
-                t.h      = newH;
-            }
-            SetStatus("Resize: " + std::to_string(t.w) + "x" + std::to_string(t.h));
-            return true;
-        }
-
-        // ── Hitbox drag update ────────────────────────────────────────────────
-        if (mHitboxDragging && mHitboxTileIdx >= 0 &&
-            mHitboxTileIdx < (int)mLevel.tiles.size()) {
-            auto& t  = mLevel.tiles[mHitboxTileIdx];
-            int   dx = mx - mHitboxDragX;
-            int   dy = my - mHitboxDragY;
-            // Minimum hitbox side: 4px
-            constexpr int MIN_SIDE = 4;
-            switch (mHitboxHandle) {
-                case HitboxHandle::Left: {
-                    int newOff   = std::min(mHitboxOrigOffX + dx,
-                                          mHitboxOrigOffX + mHitboxOrigW - MIN_SIDE);
-                    int delta    = newOff - mHitboxOrigOffX;
-                    t.hitboxOffX = newOff;
-                    t.hitboxW    = std::max(MIN_SIDE, mHitboxOrigW - delta);
-                    break;
-                }
-                case HitboxHandle::Right:
-                    t.hitboxW = std::max(MIN_SIDE, mHitboxOrigW + dx);
-                    // Clamp to tile width
-                    t.hitboxW = std::min(t.hitboxW, t.w - t.hitboxOffX);
-                    break;
-                case HitboxHandle::Top: {
-                    int newOff   = std::min(mHitboxOrigOffY + dy,
-                                          mHitboxOrigOffY + mHitboxOrigH - MIN_SIDE);
-                    int delta    = newOff - mHitboxOrigOffY;
-                    t.hitboxOffY = newOff;
-                    t.hitboxH    = std::max(MIN_SIDE, mHitboxOrigH - delta);
-                    break;
-                }
-                case HitboxHandle::Bottom:
-                    t.hitboxH = std::max(MIN_SIDE, mHitboxOrigH + dy);
-                    t.hitboxH = std::min(t.hitboxH, t.h - t.hitboxOffY);
-                    break;
-                case HitboxHandle::TopLeft: {
-                    int newOffX = std::min(mHitboxOrigOffX + dx,
-                                           mHitboxOrigOffX + mHitboxOrigW - MIN_SIDE);
-                    int newOffY = std::min(mHitboxOrigOffY + dy,
-                                           mHitboxOrigOffY + mHitboxOrigH - MIN_SIDE);
-                    t.hitboxW =
-                        std::max(MIN_SIDE, mHitboxOrigW - (newOffX - mHitboxOrigOffX));
-                    t.hitboxH =
-                        std::max(MIN_SIDE, mHitboxOrigH - (newOffY - mHitboxOrigOffY));
-                    t.hitboxOffX = newOffX;
-                    t.hitboxOffY = newOffY;
-                    break;
-                }
-                case HitboxHandle::TopRight: {
-                    int newOffY = std::min(mHitboxOrigOffY + dy,
-                                           mHitboxOrigOffY + mHitboxOrigH - MIN_SIDE);
-                    t.hitboxW   = std::max(MIN_SIDE, mHitboxOrigW + dx);
-                    t.hitboxH =
-                        std::max(MIN_SIDE, mHitboxOrigH - (newOffY - mHitboxOrigOffY));
-                    t.hitboxOffY = newOffY;
-                    break;
-                }
-                case HitboxHandle::BotLeft: {
-                    int newOffX = std::min(mHitboxOrigOffX + dx,
-                                           mHitboxOrigOffX + mHitboxOrigW - MIN_SIDE);
-                    t.hitboxW =
-                        std::max(MIN_SIDE, mHitboxOrigW - (newOffX - mHitboxOrigOffX));
-                    t.hitboxH    = std::max(MIN_SIDE, mHitboxOrigH + dy);
-                    t.hitboxOffX = newOffX;
-                    break;
-                }
-                case HitboxHandle::BotRight:
-                    t.hitboxW = std::max(MIN_SIDE, mHitboxOrigW + dx);
-                    t.hitboxH = std::max(MIN_SIDE, mHitboxOrigH + dy);
-                    break;
-                default:
-                    break;
-            }
-            // Clamp offsets to stay inside the visual tile
-            t.hitboxOffX = std::max(0, std::min(t.hitboxOffX, t.w - MIN_SIDE));
-            t.hitboxOffY = std::max(0, std::min(t.hitboxOffY, t.h - MIN_SIDE));
-            SetStatus("Hitbox: off(" + std::to_string(t.hitboxOffX) + "," +
-                      std::to_string(t.hitboxOffY) + ") size(" + std::to_string(t.hitboxW) +
-                      "x" + std::to_string(t.hitboxH) + ")");
-            return true;
-        }
-
-        // ── Hitbox handle hover detection ─────────────────────────────────────
-        if (mActiveTool == Tool::Hitbox && mHitboxTileIdx >= 0 && !mHitboxDragging) {
-            mHoverHitboxHdl = HitboxHandle::None;
-            const auto& t   = mLevel.tiles[mHitboxTileIdx];
-            // Hitbox is in world space; convert to screen space for mouse comparison
-            auto [htsx, htsy] =
-                mCamera.WorldToScreen(t.x + t.hitboxOffX, t.y + t.hitboxOffY);
-            int       hx    = htsx;
-            int       hy    = htsy;
-            int       hw    = (int)(t.hitboxW * mCamera.Zoom());
-            int       hh    = (int)(t.hitboxH * mCamera.Zoom());
-            const int H     = HBOX_HANDLE;
-            bool      nearL = (mx >= hx - H && mx <= hx + H);
-            bool      nearR = (mx >= hx + hw - H && mx <= hx + hw + H);
-            bool      nearT = (my >= hy - H && my <= hy + H);
-            bool      nearB = (my >= hy + hh - H && my <= hy + hh + H);
-            bool      inH   = (mx >= hx && mx <= hx + hw);
-            bool      inV   = (my >= hy && my <= hy + hh);
-            if (nearL && nearT)
-                mHoverHitboxHdl = HitboxHandle::TopLeft;
-            else if (nearR && nearT)
-                mHoverHitboxHdl = HitboxHandle::TopRight;
-            else if (nearL && nearB)
-                mHoverHitboxHdl = HitboxHandle::BotLeft;
-            else if (nearR && nearB)
-                mHoverHitboxHdl = HitboxHandle::BotRight;
-            else if (nearL && inV)
-                mHoverHitboxHdl = HitboxHandle::Left;
-            else if (nearR && inV)
-                mHoverHitboxHdl = HitboxHandle::Right;
-            else if (nearT && inH)
-                mHoverHitboxHdl = HitboxHandle::Top;
-            else if (nearB && inH)
-                mHoverHitboxHdl = HitboxHandle::Bottom;
-        }
-
-        // ── Resize hover detection ────────────────────────────────────────────
-        if (mActiveTool == Tool::Resize && my >= TOOLBAR_H && mx < CanvasW()) {
-            mHoverEdge    = ResizeEdge::None;
-            mHoverTileIdx = -1;
-            // Iterate reverse (topmost drawn tile first) so a small tile in
-            // front of a large one gets handle priority, matching HitTile().
-            for (int i = (int)mLevel.tiles.size() - 1; i >= 0; i--) {
-                ResizeEdge edge = DetectResizeEdge(i, mx, my);
-                if (edge != ResizeEdge::None) {
-                    mHoverEdge    = edge;
-                    mHoverTileIdx = i;
-                    break;
-                }
-            }
+        // Delegate motion to active tool (select, resize, hitbox, entity drag)
+        if (mTool) {
+            auto ctx = MakeToolCtx();
+            if (mTool->OnMouseMove(ctx, mx, my) == ToolResult::Consumed)
+                return true;
         }
 
         // ── Entity drag ───────────────────────────────────────────────────────
@@ -2224,7 +1786,7 @@ void LevelEditorScene::Render(Window& window) {
                     DrawOutline(screen,
                                 {abx - 1, aby - 1, ANIM_BADGE_SZ + 2, ANIM_BADGE_SZ + 2},
                                 {200, 80, 255, 255});
-                } else if (mActiveTool == Tool::Action && tsw >= 24 && tsh >= 24) {
+                } else if (mActiveToolId == ToolId::Action && tsw >= 24 && tsh >= 24) {
                     // Faint "+anim" hint to signal the tile can accept a drop
                     DrawRect(
                         screen, {abx, aby, ANIM_BADGE_SZ, ANIM_BADGE_SZ}, {60, 20, 80, 140});
@@ -2236,7 +1798,7 @@ void LevelEditorScene::Render(Window& window) {
                 // Group number label just to the left of the bottom-right badge.
                 // Always shown on action tiles so right-click cycling is visible.
                 // "G0" = standalone (no group), "G1".."G9" = grouped.
-                if (mActiveTool == Tool::Action && tsw >= 40) {
+                if (mActiveToolId == ToolId::Action && tsw >= 40) {
                     std::string grpStr =
                         (t.actionGroup == 0) ? "G-" : ("G" + std::to_string(t.actionGroup));
                     SDL_Color grpCol =
@@ -2303,7 +1865,7 @@ void LevelEditorScene::Render(Window& window) {
     }
 
     // ── Moving platform tool overlay ───────────────────────────────────────────────────
-    if (mActiveTool == Tool::MovingPlat) {
+    if (mActiveToolId == ToolId::MovingPlat) {
         // Highlight every moving tile in the level; brighten the current group
         for (int ti = 0; ti < (int)mLevel.tiles.size(); ti++) {
             const auto& t = mLevel.tiles[ti];
@@ -2650,144 +2212,14 @@ void LevelEditorScene::Render(Window& window) {
     DrawRect(screen, {pmx, pmy, pmw, pmh}, {0, 200, 80, 180});
     DrawOutline(screen, {pmx, pmy, pmw, pmh}, {0, 255, 100, 255}, 2);
 
-    // ── Selection tool feedback ─────────────────────────────────────────────────
-    if (!mSelIndices.empty()) {
-        // Teal highlight overlay on each selected tile — low alpha fill so tile is visible
-        for (int idx : mSelIndices) {
-            if (idx < 0 || idx >= (int)mLevel.tiles.size())
-                continue;
-            const auto& t  = mLevel.tiles[idx];
-            int         sx = (int)((t.x - mCamX) * mZoom), sy = (int)((t.y - mCamY) * mZoom);
-            int         sw = (int)(t.w * mZoom), sh = (int)(t.h * mZoom);
-            DrawRectAlpha(screen, {sx, sy, sw, sh}, {0, 220, 220, 40});
-            DrawOutline(screen, {sx, sy, sw, sh}, {0, 255, 255, 220}, 2);
-        }
-        // Bounding box around entire selection
-        int bx0 = INT_MAX, by0 = INT_MAX, bx1 = INT_MIN, by1 = INT_MIN;
-        for (int idx : mSelIndices) {
-            if (idx < 0 || idx >= (int)mLevel.tiles.size())
-                continue;
-            const auto& t = mLevel.tiles[idx];
-            bx0           = std::min(bx0, (int)t.x);
-            by0           = std::min(by0, (int)t.y);
-            bx1           = std::max(bx1, (int)t.x + t.w);
-            by1           = std::max(by1, (int)t.y + t.h);
-        }
-        int sbx = (int)((bx0 - mCamX) * mZoom), sby = (int)((by0 - mCamY) * mZoom);
-        int sbbw = (int)((bx1 - bx0) * mZoom), sbbh = (int)((by1 - by0) * mZoom);
-        DrawOutline(screen, {sbx - 2, sby - 2, sbbw + 4, sbbh + 4}, {0, 255, 255, 180}, 1);
-        // Count label
-        std::string selLabel = std::to_string(mSelIndices.size()) + " selected";
-        DrawRect(
-            screen, {sbx, sby - 16, (int)selLabel.size() * 7 + 4, 14}, {0, 60, 70, 200});
-        Text selT(selLabel, SDL_Color{0, 255, 255, 255}, sbx + 2, sby - 15, 10);
-        selT.RenderToSurface(screen);
-    }
-    // Rubber-band marquee rect
-    if (mSelBoxing) {
-        int rx0 = (int)((std::min(mSelBoxX0, mSelBoxX1) - mCamX) * mZoom);
-        int ry0 = (int)((std::min(mSelBoxY0, mSelBoxY1) - mCamY) * mZoom);
-        int rx1 = (int)((std::max(mSelBoxX0, mSelBoxX1) - mCamX) * mZoom);
-        int ry1 = (int)((std::max(mSelBoxY0, mSelBoxY1) - mCamY) * mZoom);
-        int rw = rx1 - rx0, rh = ry1 - ry0;
-        if (rw > 0 && rh > 0) {
-            DrawRectAlpha(screen, {rx0, ry0, rw, rh}, {100, 220, 255, 20});
-            DrawOutline(screen, {rx0, ry0, rw, rh}, {100, 220, 255, 180}, 1);
-        }
-    }
-
-    // ── Resize tool feedback ─────────────────────────────────────────────────
-    if (mActiveTool == Tool::Resize) {
-        const SDL_Color handleCol = {255, 180, 0, 220};
-        const SDL_Color dragCol   = {255, 220, 80, 180};
-        const int       HS        = RESIZE_HANDLE;
-
-        if (mHoverTileIdx >= 0 && !mIsResizing) {
-            const auto& t  = mLevel.tiles[mHoverTileIdx];
-            int         rx = (int)((t.x - mCamX) * mZoom), ry = (int)((t.y - mCamY) * mZoom);
-            int         rw = (int)(t.w * mZoom), rh = (int)(t.h * mZoom);
-            if (mHoverEdge == ResizeEdge::Right || mHoverEdge == ResizeEdge::Corner)
-                DrawRect(screen, {rx + rw - HS, ry + HS, HS, rh - HS * 2}, handleCol);
-            if (mHoverEdge == ResizeEdge::Bottom || mHoverEdge == ResizeEdge::Corner)
-                DrawRect(screen, {rx + HS, ry + rh - HS, rw - HS * 2, HS}, handleCol);
-            if (mHoverEdge == ResizeEdge::Corner)
-                DrawRect(screen, {rx + rw - HS, ry + rh - HS, HS, HS}, handleCol);
-        }
-
-        if (mIsResizing && mResizeTileIdx >= 0 &&
-            mResizeTileIdx < (int)mLevel.tiles.size()) {
-            const auto& t  = mLevel.tiles[mResizeTileIdx];
-            int         rx = (int)((t.x - mCamX) * mZoom), ry = (int)((t.y - mCamY) * mZoom);
-            int         rw = (int)(t.w * mZoom), rh = (int)(t.h * mZoom);
-            DrawOutline(screen, {rx, ry, rw, rh}, {255, 220, 80, 255}, 2);
-            Text szT(
-                std::to_string(t.w / GRID) + "x" + std::to_string(t.h / GRID) + " tiles",
-                dragCol,
-                rx + 4,
-                ry + 4,
-                12);
-            szT.RenderToSurface(screen);
-        }
-    }
-
-    // ── Hitbox tool feedback ───────────────────────────────────────────────────
-    if (mActiveTool == Tool::Hitbox && mHitboxTileIdx >= 0 &&
-        mHitboxTileIdx < (int)mLevel.tiles.size()) {
-        const auto& t  = mLevel.tiles[mHitboxTileIdx];
-        int         hx = (int)((t.x - mCamX + t.hitboxOffX) * mZoom);
-        int         hy = (int)((t.y - mCamY + t.hitboxOffY) * mZoom);
-        int         hw = (int)(t.hitboxW * mZoom);
-        int         hh = (int)(t.hitboxH * mZoom);
-
-        // Semi-transparent fill inside the hitbox
-        DrawRect(screen, {hx, hy, hw, hh}, {80, 160, 255, 40});
-        // Bright blue border
-        DrawOutline(screen, {hx, hy, hw, hh}, {80, 180, 255, 255}, 2);
-
-        // Draw a faint dashed outline of the visual tile for reference
-        DrawOutline(screen,
-                    {(int)((t.x - mCamX) * mZoom),
-                     (int)((t.y - mCamY) * mZoom),
-                     (int)(t.w * mZoom),
-                     (int)(t.h * mZoom)},
-                    {255, 255, 255, 60},
-                    1);
-
-        // 8 drag handles: corners + edge midpoints
-        const int       HS     = HBOX_HANDLE;         // half-side of handle square
-        const SDL_Color hcNorm = {80, 180, 255, 220}; // normal
-        const SDL_Color hcHov  = {255, 220, 80, 255}; // hovered
-
-        auto hdlColor = [&](HitboxHandle h) -> SDL_Color {
-            return (mHoverHitboxHdl == h) ? hcHov : hcNorm;
-        };
-        auto drawHandle = [&](int cx, int cy, HitboxHandle h) {
-            DrawRect(screen, {cx - HS / 2, cy - HS / 2, HS, HS}, hdlColor(h));
-            DrawOutline(screen, {cx - HS / 2, cy - HS / 2, HS, HS}, {20, 20, 40, 255});
-        };
-
-        int cx = hx + hw / 2;
-        int cy = hy + hh / 2;
-        drawHandle(hx, hy, HitboxHandle::TopLeft);
-        drawHandle(cx, hy, HitboxHandle::Top);
-        drawHandle(hx + hw, hy, HitboxHandle::TopRight);
-        drawHandle(hx, cy, HitboxHandle::Left);
-        drawHandle(hx + hw, cy, HitboxHandle::Right);
-        drawHandle(hx, hy + hh, HitboxHandle::BotLeft);
-        drawHandle(cx, hy + hh, HitboxHandle::Bottom);
-        drawHandle(hx + hw, hy + hh, HitboxHandle::BotRight);
-
-        // Info label in top-left corner of the hitbox
-        std::string info = "HB: " + std::to_string(hw) + "x" + std::to_string(hh) + " @(" +
-                           std::to_string(t.hitboxOffX) + "," +
-                           std::to_string(t.hitboxOffY) + ")";
-        DrawRect(screen, {hx, hy - 16, (int)info.size() * 7, 14}, {10, 20, 50, 200});
-        Text infoT(info, SDL_Color{180, 220, 255, 255}, hx + 2, hy - 15, 10);
-        infoT.RenderToSurface(screen);
+    // ── Tool overlay dispatch (Select marquee, Resize handles, Hitbox handles) ──
+    if (mTool) {
+        auto ctx = MakeToolCtx();
+        mTool->RenderOverlay(ctx, screen, cw);
     }
 
     // Tile ghost — SnapToGrid returns world coords; convert to screen for drawing
-    if (mActiveTool == Tool::Tile && mPalette.SelectedItem() &&
+    if (mActiveToolId == ToolId::Tile && mPalette.SelectedItem() &&
         !mPalette.SelectedItem()->isFolder) {
         float fmx, fmy;
         SDL_GetMouseState(&fmx, &fmy);
@@ -2797,8 +2229,8 @@ void LevelEditorScene::Render(Window& window) {
             // Apply zoom to get screen-space position (was missing mZoom)
             int      gsx      = (int)((wx - mCamX) * mZoom);
             int      gsy      = (int)((wy - mCamY) * mZoom);
-            int      gsw      = (int)(mTileW * mZoom);
-            int      gsh      = (int)(mTileH * mZoom);
+            int      gsw      = (int)(GetTileW() * mZoom);
+            int      gsh      = (int)(GetTileH() * mZoom);
             SDL_Rect ghostDst = {gsx, gsy, gsw, gsh};
             // Draw the actual selected tile image as a semi-transparent ghost
             const auto&  selItem   = *mPalette.SelectedItem();
@@ -2807,9 +2239,10 @@ void LevelEditorScene::Render(Window& window) {
                 ghostSurf = selItem.full;
             if (ghostSurf) {
                 // Apply ghost rotation using the same rotation cache as placed tiles
+                int curGhostRot = GetGhostRotation();
                 SDL_Surface* drawSurf =
-                    (mGhostRotation != 0)
-                        ? GetRotated(selItem.path, ghostSurf, mGhostRotation)
+                    (curGhostRot != 0)
+                        ? GetRotated(selItem.path, ghostSurf, curGhostRot)
                         : ghostSurf;
                 if (!drawSurf)
                     drawSurf = ghostSurf; // fallback if rotation failed
@@ -2821,8 +2254,8 @@ void LevelEditorScene::Render(Window& window) {
                 DrawRectAlpha(screen, ghostDst, {100, 180, 255, 60});
             }
             // Show rotation badge on ghost so user knows current angle
-            if (mGhostRotation != 0) {
-                std::string  rBadge = std::to_string(mGhostRotation) + "\xc2\xb0";
+            if (GetGhostRotation() != 0) {
+                std::string  rBadge = std::to_string(GetGhostRotation()) + "\xc2\xb0";
                 SDL_Surface* rb     = GetBadge(rBadge, {255, 220, 80, 255});
                 if (rb) {
                     int      bx = gsx + gsw - rb->w - 3;
@@ -2859,55 +2292,80 @@ void LevelEditorScene::Render(Window& window) {
     constexpr SDL_Color ACCENT_MODIFIER = {80, 220, 140, 255};
     constexpr SDL_Color ACCENT_ACTION   = {200, 160, 60, 255};
 
-
-
     // ── Toolbar button rendering via mToolbar ──────────────────────────────
     // Map Tool enum to ButtonId for active-state highlighting
-    auto toolToBtn = [&](Tool t) -> TBBtn {
+    auto toolToBtn = [&](ToolId t) -> TBBtn {
         switch (t) {
-            case Tool::Coin:        return TBBtn::Coin;
-            case Tool::Enemy:       return TBBtn::Enemy;
-            case Tool::Tile:        return TBBtn::Tile;
-            case Tool::Erase:       return TBBtn::Erase;
-            case Tool::PlayerStart: return TBBtn::PlayerStart;
-            case Tool::Select:      return TBBtn::Select;
-            case Tool::MoveCam:     return TBBtn::MoveCam;
-            case Tool::Prop:        return TBBtn::Prop;
-            case Tool::Ladder:      return TBBtn::Ladder;
-            case Tool::Action:      return TBBtn::Action;
-            case Tool::Slope:       return TBBtn::Slope;
-            case Tool::Resize:      return TBBtn::Resize;
-            case Tool::Hitbox:      return TBBtn::Hitbox;
-            case Tool::Hazard:      return TBBtn::Hazard;
-            case Tool::AntiGrav:    return TBBtn::AntiGrav;
-            case Tool::MovingPlat:  return TBBtn::MovingPlat;
-            case Tool::PowerUp:     return TBBtn::PowerUp;
+            case ToolId::Coin:
+                return TBBtn::Coin;
+            case ToolId::Enemy:
+                return TBBtn::Enemy;
+            case ToolId::Tile:
+                return TBBtn::Tile;
+            case ToolId::Erase:
+                return TBBtn::Erase;
+            case ToolId::PlayerStart:
+                return TBBtn::PlayerStart;
+            case ToolId::Select:
+                return TBBtn::Select;
+            case ToolId::MoveCam:
+                return TBBtn::MoveCam;
+            case ToolId::Prop:
+                return TBBtn::Prop;
+            case ToolId::Ladder:
+                return TBBtn::Ladder;
+            case ToolId::Action:
+                return TBBtn::Action;
+            case ToolId::Slope:
+                return TBBtn::Slope;
+            case ToolId::Resize:
+                return TBBtn::Resize;
+            case ToolId::Hitbox:
+                return TBBtn::Hitbox;
+            case ToolId::Hazard:
+                return TBBtn::Hazard;
+            case ToolId::AntiGrav:
+                return TBBtn::AntiGrav;
+            case ToolId::MovingPlat:
+                return TBBtn::MovingPlat;
+            case ToolId::PowerUp:
+                return TBBtn::PowerUp;
         }
         return TBBtn::COUNT;
     };
-    TBBtn activeBtn = toolToBtn(mActiveTool);
+    TBBtn activeBtn = toolToBtn(mActiveToolId);
 
     // Per-button accent overrides (most inherit from group accent)
     auto accentFor = [&](TBBtn id) -> SDL_Color {
         switch (id) {
-            case TBBtn::Hazard:     return {220, 60, 60, 255};
-            case TBBtn::AntiGrav:   return {0, 180, 200, 255};
-            case TBBtn::MovingPlat: return {0, 200, 160, 255};
-            case TBBtn::PowerUp:    return {200, 80, 255, 255};
-            case TBBtn::Clear:      return {220, 80, 80, 255};
-            case TBBtn::Play:       return {80, 220, 100, 255};
-            case TBBtn::Back:       return {120, 100, 160, 255};
+            case TBBtn::Hazard:
+                return {220, 60, 60, 255};
+            case TBBtn::AntiGrav:
+                return {0, 180, 200, 255};
+            case TBBtn::MovingPlat:
+                return {0, 200, 160, 255};
+            case TBBtn::PowerUp:
+                return {200, 80, 255, 255};
+            case TBBtn::Clear:
+                return {220, 80, 80, 255};
+            case TBBtn::Play:
+                return {80, 220, 100, 255};
+            case TBBtn::Back:
+                return {120, 100, 160, 255};
             case TBBtn::Gravity:
                 return (mLevel.gravityMode == GravityMode::WallRun)
                            ? SDL_Color{100, 140, 255, 255}
                        : (mLevel.gravityMode == GravityMode::OpenWorld)
                            ? SDL_Color{80, 220, 120, 255}
                            : ACCENT_ACTION;
-            default: break;
+            default:
+                break;
         }
         auto grp = EditorToolbar::GroupOf(id);
-        if (grp == TBGrp::Place)    return ACCENT_PLACE;
-        if (grp == TBGrp::Modifier) return ACCENT_MODIFIER;
+        if (grp == TBGrp::Place)
+            return ACCENT_PLACE;
+        if (grp == TBGrp::Modifier)
+            return ACCENT_MODIFIER;
         return ACCENT_ACTION;
     };
 
@@ -2927,13 +2385,17 @@ void LevelEditorScene::Render(Window& window) {
         if (!collapsed) {
             // Draw all buttons in this group
             for (const auto& meta : EditorToolbar::AllButtons()) {
-                if (meta.group != grp) continue;
+                if (meta.group != grp)
+                    continue;
                 const auto& r = mToolbar.Rect(meta.id);
-                if (r.x < 0) continue; // off-screen
+                if (r.x < 0)
+                    continue; // off-screen
                 bool isActive = (meta.id == activeBtn);
                 // Action buttons (group 3) are never "active" in the tool sense
-                if (grp == TBGrp::Actions) isActive = false;
-                drawBtn(r, accentFor(meta.id),
+                if (grp == TBGrp::Actions)
+                    isActive = false;
+                drawBtn(r,
+                        accentFor(meta.id),
                         mToolbar.Label(meta.id),
                         mToolbar.Hint(meta.id),
                         isActive);
@@ -2941,17 +2403,20 @@ void LevelEditorScene::Render(Window& window) {
             // Find rightmost button edge for the divider
             gx1 = gx0;
             for (const auto& meta : EditorToolbar::AllButtons()) {
-                if (meta.group != grp) continue;
+                if (meta.group != grp)
+                    continue;
                 const auto& r = mToolbar.Rect(meta.id);
-                if (r.x >= 0) gx1 = std::max(gx1, r.x + r.w);
+                if (r.x >= 0)
+                    gx1 = std::max(gx1, r.x + r.w);
             }
             // Divider line after Play button in Actions group
             if (grp == TBGrp::Actions) {
                 const auto& playR = mToolbar.Rect(TBBtn::Play);
                 if (playR.x >= 0)
-                    DrawRect(screen,
-                             {playR.x + playR.w + BTN_GAP + GRP_GAP / 2, BTN_Y + 4, 1, BTN_H - 8},
-                             {70, 70, 90, 255});
+                    DrawRect(
+                        screen,
+                        {playR.x + playR.w + BTN_GAP + GRP_GAP / 2, BTN_Y + 4, 1, BTN_H - 8},
+                        {70, 70, 90, 255});
             }
         } else {
             // Collapsed pill bar
@@ -2959,21 +2424,26 @@ void LevelEditorScene::Render(Window& window) {
             DrawRect(screen, bar, {30, 30, 48, 255});
             DrawOutline(screen, bar, {55, 55, 75, 255});
             DrawRect(screen, {bar.x + 1, bar.y + 1, 3, bar.h - 2}, kGrpAccents[gi]);
-            blitBadge(GetBadge(kGrpPills[gi], kGrpPillCol[gi]), bar.x + 10, bar.y + BTN_H / 2 - 5);
+            blitBadge(
+                GetBadge(kGrpPills[gi], kGrpPillCol[gi]), bar.x + 10, bar.y + BTN_H / 2 - 5);
             gx1 = gx0 + 32;
         }
 
         // Collapse strip
         {
-            SDL_Color bg = collapsed ? SDL_Color{70, 70, 120, 255} : SDL_Color{38, 38, 58, 255};
+            SDL_Color bg =
+                collapsed ? SDL_Color{70, 70, 120, 255} : SDL_Color{38, 38, 58, 255};
             DrawRect(screen, pill, bg);
-            DrawOutline(screen, pill,
-                        {collapsed ? (Uint8)120 : (Uint8)55, 55,
-                         collapsed ? (Uint8)180 : (Uint8)80, 255});
+            DrawOutline(screen,
+                        pill,
+                        {collapsed ? (Uint8)120 : (Uint8)55,
+                         55,
+                         collapsed ? (Uint8)180 : (Uint8)80,
+                         255});
             DrawRect(screen, {pill.x, pill.y, pill.w, 2}, kGrpAccents[gi]);
             const char* sym = collapsed ? "+" : "-";
-            SDL_Color symCol = collapsed ? SDL_Color{200, 220, 255, 255}
-                                         : SDL_Color{100, 120, 160, 255};
+            SDL_Color   symCol =
+                collapsed ? SDL_Color{200, 220, 255, 255} : SDL_Color{100, 120, 160, 255};
             blitBadge(GetBadge(sym, symCol), pill.x + pill.w / 2 - 3, pill.y + 2);
         }
 
@@ -3067,14 +2537,15 @@ void LevelEditorScene::Render(Window& window) {
                 if (loc.empty() || loc == "/")
                     loc = "/";
                 std::string hdrStr = "Tiles" + loc;
-                if (hdrStr != mLastPalHeaderPath || mTileW != mLastTileSizeW) {
+                int curTileW = GetTileW();
+                if (hdrStr != mLastPalHeaderPath || curTileW != mLastTileSizeW) {
                     mLastPalHeaderPath = hdrStr;
-                    mLastTileSizeW     = mTileW;
+                    mLastTileSizeW     = curTileW;
                     const_cast<std::unique_ptr<Text>&>(lblPalHeader) =
                         std::make_unique<Text>(
                             hdrStr, SDL_Color{200, 200, 220, 255}, cw + 4, palY + 4, 10);
                     const_cast<std::unique_ptr<Text>&>(lblPalHint1) = std::make_unique<Text>(
-                        "Size: " + std::to_string(mTileW) + "  Esc=up  Click=enter",
+                        "Size: " + std::to_string(curTileW) + "  Esc=up  Click=enter",
                         SDL_Color{100, 120, 140, 255},
                         cw + 4,
                         palY + 18,
@@ -3113,7 +2584,7 @@ void LevelEditorScene::Render(Window& window) {
                 int         iy   = palY + PAD + row * itemH;
                 const auto& item = mPalette.Items()[i];
                 bool        sel  = (i == mPalette.SelectedTile() && !item.isFolder &&
-                            mActiveTool == Tool::Tile);
+                            mActiveToolId == ToolId::Tile);
 
                 SDL_Rect cell = {ix, iy, cellW, cellH};
 
@@ -3347,7 +2818,7 @@ void LevelEditorScene::Render(Window& window) {
     // Rebuild hint — tool-specific for Action, generic otherwise
     {
         std::string hint;
-        if (mActiveTool == Tool::Action) {
+        if (mActiveToolId == ToolId::Action) {
             hint =
                 "LClick:toggle action  Scroll:adjust hits  RClick:cycle group or clear anim "
                 " Drop .json:assign death anim";
@@ -3587,7 +3058,7 @@ void LevelEditorScene::Render(Window& window) {
         int cx2 = cw / 2, cy2 = window.GetHeight() / 2;
         DrawRect(screen, {cx2 - 220, cy2 - 44, 440, 88}, {10, 30, 70, 220});
         DrawOutline(screen, {cx2 - 220, cy2 - 44, 440, 88}, {80, 180, 255, 255}, 2);
-        if (mActiveTool == Tool::Action) {
+        if (mActiveToolId == ToolId::Action) {
             Text d1("Drop animated tile .json onto an Action tile",
                     SDL_Color{255, 200, 255, 255},
                     cx2 - 200,
@@ -3822,10 +3293,30 @@ bool LevelEditorScene::ImportPath(const std::string& srcPath) {
             SDL_DestroySurface(thumb);
         SDL_DestroySurface(full);
 
-        mActiveTool = Tool::Tile;
+        SwitchTool(ToolId::Tile);
         if (lblTool)
             lblTool->CreateSurface("Tile");
         SetStatus("Imported: " + dest.filename().string() + " -> auto-selected");
     }
     return true;
+}
+
+// --- Tile tool accessors (delegate to TileTool when active) ------------------
+int LevelEditorScene::GetTileW() const {
+    if (mActiveToolId == ToolId::Tile && mTool)
+        if (auto* tt = dynamic_cast<const TileTool*>(mTool.get()))
+            return tt->tileW;
+    return mTileW;
+}
+int LevelEditorScene::GetTileH() const {
+    if (mActiveToolId == ToolId::Tile && mTool)
+        if (auto* tt = dynamic_cast<const TileTool*>(mTool.get()))
+            return tt->tileH;
+    return mTileH;
+}
+int LevelEditorScene::GetGhostRotation() const {
+    if (mActiveToolId == ToolId::Tile && mTool)
+        if (auto* tt = dynamic_cast<const TileTool*>(mTool.get()))
+            return tt->ghostRotation;
+    return mGhostRotation;
 }

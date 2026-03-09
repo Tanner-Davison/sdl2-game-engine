@@ -11,6 +11,7 @@
 #include "SpriteSheet.hpp"
 #include "Text.hpp"
 #include "Window.hpp"
+#include "tools/EditorTools.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
@@ -40,26 +41,6 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    enum class Tool {
-        Coin,
-        Enemy,
-        Erase,
-        PlayerStart,
-        Tile,
-        Resize,
-        Prop,
-        Ladder,
-        Action,
-        Slope,
-        Hitbox,
-        Hazard,
-        AntiGrav,
-        MovingPlat,
-        Select,
-        MoveCam,
-        PowerUp
-    };
-
     // Toolbar type aliases for brevity at call sites
     using TBBtn = EditorToolbar::ButtonId;
     using TBGrp = EditorToolbar::Group;
@@ -89,6 +70,69 @@ class LevelEditorScene : public Scene {
     static constexpr const char* BG_ROOT   = EditorPalette::BG_ROOT;
 
     // -------------------------------------------------------------------------
+    // Tool system
+    // -------------------------------------------------------------------------
+    ToolId                      mActiveToolId = ToolId::MoveCam;
+    std::unique_ptr<EditorTool> mTool;        // active tool (nullptr for complex inline tools)
+
+    // Build a fresh EditorToolContext pointing at current state.
+    // Called before every tool dispatch so the context is always up-to-date.
+    EditorToolContext MakeToolCtx() {
+        return EditorToolContext{
+            .level        = mLevel,
+            .camera       = mCamera,
+            .surfaceCache = mSurfaceCache,
+            .grid         = GRID,
+            .toolbarH     = TOOLBAR_H,
+            .setStatus    = [this](const std::string& msg) { SetStatus(msg); },
+            .canvasW      = [this]() { return CanvasW(); },
+            .sdlWindow    = mWindow ? mWindow->GetRaw() : nullptr,
+        };
+    }
+
+    // Switch to a new tool. Deactivates the old tool, creates the new one,
+    // and activates it. Updates the toolbar label.
+    void SwitchTool(ToolId id) {
+        if (mTool) {
+            auto ctx = MakeToolCtx();
+            mTool->OnDeactivate(ctx);
+        }
+        mActiveToolId = id;
+        mTool         = MakeEditorTool(id);
+        if (mTool) {
+            auto ctx = MakeToolCtx();
+            mTool->OnActivate(ctx);
+            if (lblTool) lblTool->CreateSurface(mTool->Name());
+        }
+        // For complex inline tools (Action, PowerUp, MovingPlat), mTool is null.
+        // The orchestrator sets lblTool manually in those cases.
+    }
+
+    // Map ToolId -> TBBtn for toolbar active-state highlighting
+    static TBBtn ToolIdToBtn(ToolId id) {
+        switch (id) {
+            case ToolId::Coin:        return TBBtn::Coin;
+            case ToolId::Enemy:       return TBBtn::Enemy;
+            case ToolId::Tile:        return TBBtn::Tile;
+            case ToolId::Erase:       return TBBtn::Erase;
+            case ToolId::PlayerStart: return TBBtn::PlayerStart;
+            case ToolId::Select:      return TBBtn::Select;
+            case ToolId::MoveCam:     return TBBtn::MoveCam;
+            case ToolId::Prop:        return TBBtn::Prop;
+            case ToolId::Ladder:      return TBBtn::Ladder;
+            case ToolId::Action:      return TBBtn::Action;
+            case ToolId::Slope:       return TBBtn::Slope;
+            case ToolId::Resize:      return TBBtn::Resize;
+            case ToolId::Hitbox:      return TBBtn::Hitbox;
+            case ToolId::Hazard:      return TBBtn::Hazard;
+            case ToolId::AntiGrav:    return TBBtn::AntiGrav;
+            case ToolId::MovingPlat:  return TBBtn::MovingPlat;
+            case ToolId::PowerUp:     return TBBtn::PowerUp;
+        }
+        return TBBtn::COUNT;
+    }
+
+    // -------------------------------------------------------------------------
     // Editor state
     // -------------------------------------------------------------------------
     std::string mOpenPath;
@@ -96,7 +140,6 @@ class LevelEditorScene : public Scene {
     std::string mPresetName;
     std::string mProfilePath;
     Window*     mWindow     = nullptr;
-    Tool        mActiveTool = Tool::MoveCam;
     bool        mLaunchGame = false;
     bool        mGoBack     = false;
 
@@ -117,43 +160,10 @@ class LevelEditorScene : public Scene {
     int         mLastTileSizeW  = -1;
     std::string mLastPalHeaderPath;
 
-    // ── Hitbox tool state ──────────────────────────────────────────────────
-    int mHitboxTileIdx = -1;
-    enum class HitboxHandle {
-        None, Left, Right, Top, Bottom, TopLeft, TopRight, BotLeft, BotRight
-    };
-    HitboxHandle mHitboxHandle   = HitboxHandle::None;
-    HitboxHandle mHoverHitboxHdl = HitboxHandle::None;
-    bool         mHitboxDragging = false;
-    int          mHitboxDragX    = 0;
-    int          mHitboxDragY    = 0;
-    int                  mHitboxOrigOffX  = 0;
-    int                  mHitboxOrigOffY  = 0;
-    int                  mHitboxOrigW     = 0;
-    int                  mHitboxOrigH     = 0;
-    static constexpr int HBOX_HANDLE      = 10;
-    bool                 mIsDragging      = false;
-    int                  mDragIndex       = -1;
-    bool                 mDragIsCoin      = false;
-    bool                 mDragIsTile      = false;
+    // ── Generic state still used by inline complex tools ─────────────────────
     std::string          mStatusMsg       = "New level";
     std::string          mLevelName       = "level1";
-    int                  mTileW = GRID, mTileH = GRID;
-    int                  mGhostRotation = 0;
     float mScrollAccum = 0.0f;
-
-    // Resize tool state
-    enum class ResizeEdge { None, Right, Bottom, Corner };
-    ResizeEdge           mHoverEdge     = ResizeEdge::None;
-    int                  mHoverTileIdx  = -1;
-    bool                 mIsResizing    = false;
-    int                  mResizeTileIdx = -1;
-    ResizeEdge           mResizeEdge    = ResizeEdge::None;
-    int                  mResizeDragX   = 0;
-    int                  mResizeDragY   = 0;
-    int                  mResizeOrigW   = 0;
-    int                  mResizeOrigH   = 0;
-    static constexpr int RESIZE_HANDLE  = 10;
 
     // Surface cache
     EditorSurfaceCache mSurfaceCache;
@@ -173,11 +183,9 @@ class LevelEditorScene : public Scene {
     void CloseAnimPicker();
 
     // ── Toolbar subsystem ─────────────────────────────────────────────────────
-    // Owns all button rects, labels, hints, group collapse state, and pills.
     EditorToolbar mToolbar;
 
-    // Status / active tool display (not part of EditorToolbar because they
-    // reflect editor state, not toolbar layout)
+    // Status / active tool display
     std::unique_ptr<Text> lblStatus, lblTool;
 
     // Delete confirmation popup state
@@ -192,15 +200,6 @@ class LevelEditorScene : public Scene {
     bool        mDropActive        = false;
     bool        mImportInputActive = false;
     std::string mImportInputText;
-
-    // ── Selection tool state ───────────────────────────────────────────────
-    std::vector<int> mSelIndices;
-    bool mSelBoxing = false;
-    int  mSelBoxX0  = 0, mSelBoxY0 = 0;
-    int  mSelBoxX1  = 0, mSelBoxY1 = 0;
-    bool mSelDragging    = false;
-    int  mSelDragStartWX = 0, mSelDragStartWY = 0;
-    std::vector<std::pair<float, float>> mSelOrigPositions;
 
     // Editor camera
     EditorCamera mCamera;
@@ -339,6 +338,27 @@ class LevelEditorScene : public Scene {
     void LoadTileView(const std::string& dir) { mPalette.LoadTileView(dir, mLevel); }
     void LoadBgPalette() { mPalette.LoadBgPalette(mLevel); }
     void ApplyBackground(int idx);
-    ResizeEdge DetectResizeEdge(int tileIdx, int mx, int my) const;
-    bool       ImportPath(const std::string& srcPath);
+    bool ImportPath(const std::string& srcPath);
+
+    // ── Tile tool helpers (used by Render for ghost preview) ─────────────────
+    // These delegate to the TileTool if it's the active tool.
+    int  GetTileW() const;
+    int  GetTileH() const;
+    int  GetGhostRotation() const;
+
+    // =========================================================================
+    // COMPAT SHIM — remaining state for inline tools (Action, PowerUp,
+    // MovingPlat) that haven't been extracted yet.
+    // =========================================================================
+
+    // Generic entity drag (used by Action/PowerUp/MovingPlat inline tools)
+    bool mIsDragging  = false;
+    int  mDragIndex   = -1;
+    bool mDragIsCoin  = false;
+    bool mDragIsTile  = false;
+
+    // Tile tool state (used by Render ghost preview, delegated to TileTool)
+    int mTileW         = GRID;
+    int mTileH         = GRID;
+    int mGhostRotation = 0;
 };
