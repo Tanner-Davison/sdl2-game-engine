@@ -14,9 +14,10 @@
     ],
     "gravityMode": "platformer",
     "name": "RetroForest",
+    "parallaxLayers": [],
     "player": {
-        "x": 4180.0,
-        "y": 190.0
+        "x": 38.0,
+        "y": 304.0
     },
     "tiles": [
         {

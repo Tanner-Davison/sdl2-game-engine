@@ -214,7 +214,7 @@ forge2d/
 
 ## Controls
 
-### Gameplay
+### Gameplay — Keyboard
 
 | Key | Action |
 |-----|--------|
@@ -228,6 +228,22 @@ forge2d/
 | R | Retry after game over |
 | F1 | Debug hitbox overlay |
 | F11 | Toggle fullscreen |
+
+### Gameplay — Xbox Controller
+
+Plug in any Xbox-compatible controller (XInput/SDL gamepad). Hot-plug is supported.
+
+| Button | Action |
+|--------|--------|
+| Left Stick | Move (analog) |
+| A (South) | Jump (hold for higher) |
+| X (West) | Slash attack |
+| B (East) / RB | Dash (in current movement direction) |
+| Left Stick Click | Crouch |
+| LB | Sprint |
+| Start | Pause / Resume |
+| Back (Select) | Return to title (while paused) |
+| A (South) | Retry (on game over screen) |
 
 ### Level Editor
 

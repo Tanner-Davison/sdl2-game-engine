@@ -79,6 +79,7 @@ class GameScene : public Scene {
     std::unique_ptr<Text>      mPauseResumeLbl;
     std::unique_ptr<Text>      mPauseBackLbl;
     std::unique_ptr<Text>      mPauseHintLbl;
+    std::unique_ptr<Text>      mPauseHintLbl2;
     void BuildPauseUI(int W, int H);
     void RenderPauseOverlay(Window& window);
     Level          mLevel;

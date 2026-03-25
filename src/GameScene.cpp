@@ -276,32 +276,47 @@ void GameScene::Load(Window& window) {
     actionText   = std::make_unique<Text>(
         "Collect all goals to complete the level!", SDL_Color{255, 255, 255, 0}, 20, 80, 20);
 
-    gameOverText = std::make_unique<Text>("Game Over!",
-                                          SDL_Color{255, 0, 0, 255},
-                                          window.GetWidth() / 2 - 100,
-                                          window.GetHeight() / 2 - 60,
-                                          64);
-    retryBtnText = std::make_unique<Text>("Retry",
-                                          SDL_Color{0, 0, 0, 255},
-                                          window.GetWidth() / 2 - 28,
-                                          window.GetHeight() / 2 + 22,
-                                          32);
-    retryKeyText = std::make_unique<Text>("Press R to Retry",
-                                          SDL_Color{200, 200, 200, 255},
-                                          window.GetWidth() / 2 - 100,
-                                          window.GetHeight() / 2 + 110,
-                                          24);
+    {
+        int cx = window.GetWidth() / 2;
+        int cy = window.GetHeight() / 2;
 
-    retryBtnRect = {window.GetWidth() / 2 - 75, window.GetHeight() / 2 + 10, 150, 55};
-    retryButton  = std::make_unique<Rectangle>(retryBtnRect);
-    retryButton->SetColor({255, 255, 255, 255});
-    retryButton->SetHoverColor({180, 180, 180, 255});
+        auto goSize = Text::Measure("Game Over!", 64);
+        gameOverText = std::make_unique<Text>("Game Over!",
+                                              SDL_Color{255, 0, 0, 255},
+                                              cx - goSize.x / 2,
+                                              cy - 80,
+                                              64);
 
-    levelCompleteText = std::make_unique<Text>("Level Complete!",
-                                               SDL_Color{255, 215, 0, 255},
-                                               window.GetWidth() / 2 - 160,
-                                               window.GetHeight() / 2 - 40,
-                                               64);
+        int btnW = 160, btnH = 50;
+        int btnY = cy + goSize.y / 2 - 50;
+        retryBtnRect = {cx - btnW / 2, btnY, btnW, btnH};
+        retryButton  = std::make_unique<Rectangle>(retryBtnRect);
+        retryButton->SetColor({255, 255, 255, 255});
+        retryButton->SetHoverColor({180, 180, 180, 255});
+
+        auto btnTxtPos = Text::CenterInRect("Retry", 32, retryBtnRect);
+        retryBtnText = std::make_unique<Text>("Retry",
+                                              SDL_Color{0, 0, 0, 255},
+                                              btnTxtPos.x, btnTxtPos.y,
+                                              32);
+
+        std::string hintStr = "R  or  A  to Retry";
+        auto hintSize = Text::Measure(hintStr, 22);
+        retryKeyText = std::make_unique<Text>(hintStr,
+                                              SDL_Color{200, 200, 200, 255},
+                                              cx - hintSize.x / 2,
+                                              btnY + btnH + 18,
+                                              22);
+    }
+
+    {
+        auto lcSize = Text::Measure("Level Complete!", 64);
+        levelCompleteText = std::make_unique<Text>("Level Complete!",
+                                                   SDL_Color{255, 215, 0, 255},
+                                                   window.GetWidth() / 2 - lcSize.x / 2,
+                                                   window.GetHeight() / 2 - lcSize.y / 2,
+                                                   64);
+    }
     Spawn();
 }
 
@@ -336,10 +351,28 @@ bool GameScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
+    // ── Gamepad hot-plug ─────────────────────────────────────────────────
+    if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
+        SDL_OpenGamepad(e.gdevice.which);
+        return true;
+    }
+
     if (mPaused) {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
             mPaused = false;
             return true;
+        }
+        // Gamepad: Start or B to resume, Back to go to title
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            if (e.gbutton.button == SDL_GAMEPAD_BUTTON_START ||
+                e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) {
+                mPaused = false;
+                return true;
+            }
+            if (e.gbutton.button == SDL_GAMEPAD_BUTTON_BACK) {
+                mGoBackFromPause = true;
+                return true;
+            }
         }
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
@@ -376,9 +409,22 @@ bool GameScene::HandleEvent(SDL_Event& e) {
                 BuildPauseUI(mWindow->GetWidth(), mWindow->GetHeight());
             return true;
         }
+        // Gamepad: Start to pause
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_START && !levelComplete) {
+            mPaused = true;
+            if (mWindow)
+                BuildPauseUI(mWindow->GetWidth(), mWindow->GetHeight());
+            return true;
+        }
         InputSystem(reg, e);
+        GamepadInputEvent(reg, e);
     } else {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_R)
+            Respawn();
+        // Gamepad: A to retry
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH)
             Respawn();
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
@@ -422,6 +468,7 @@ void GameScene::Update(float dt) {
         return;
     }
 
+    GamepadPollSystem(reg);
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
@@ -1166,11 +1213,12 @@ void GameScene::Render(Window& window, float alpha) {
 // Pause overlay
 // ─────────────────────────────────────────────────────────────────────────────
 void GameScene::BuildPauseUI(int W, int H) {
-    int      cx = W / 2, cy = H / 2;
-    SDL_Rect titleRect = {cx - 160, cy - 145, 320, 50};
-    auto [tx, ty]      = Text::CenterInRect("PAUSED", 36, titleRect);
-    mPauseTitleLbl =
-        std::make_unique<Text>("PAUSED", SDL_Color{255, 215, 0, 255}, tx, ty, 36);
+    int cx = W / 2, cy = H / 2;
+
+    auto titleSize = Text::Measure("PAUSED", 36);
+    mPauseTitleLbl = std::make_unique<Text>(
+        "PAUSED", SDL_Color{255, 215, 0, 255},
+        cx - titleSize.x / 2, cy - 140, 36);
 
     mPauseResumeRect = {cx - 130, cy - 60, 260, 55};
     mPauseResumeBtn  = std::make_unique<Rectangle>(mPauseResumeRect);
@@ -1188,8 +1236,16 @@ void GameScene::BuildPauseUI(int W, int H) {
     auto [bx, by] = Text::CenterInRect(backLabel, 22, mPauseBackRect);
     mPauseBackLbl =
         std::make_unique<Text>(backLabel, SDL_Color{255, 220, 220, 255}, bx, by, 22);
+
+    std::string hint1 = "ESC  or  Start  to resume";
+    auto h1Size = Text::Measure(hint1, 14);
     mPauseHintLbl = std::make_unique<Text>(
-        "ESC to resume", SDL_Color{100, 100, 120, 255}, cx - 70, cy + 100, 14);
+        hint1, SDL_Color{140, 140, 160, 255}, cx - h1Size.x / 2, cy + 100, 14);
+
+    std::string hint2 = "Back  to return to title";
+    auto h2Size = Text::Measure(hint2, 14);
+    mPauseHintLbl2 = std::make_unique<Text>(
+        hint2, SDL_Color{110, 110, 130, 255}, cx - h2Size.x / 2, cy + 120, 14);
 }
 
 void GameScene::RenderPauseOverlay(Window& window) {
@@ -1224,6 +1280,8 @@ void GameScene::RenderPauseOverlay(Window& window) {
         mPauseBackLbl->Render(ren);
     if (mPauseHintLbl)
         mPauseHintLbl->Render(ren);
+    if (mPauseHintLbl2)
+        mPauseHintLbl2->Render(ren);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

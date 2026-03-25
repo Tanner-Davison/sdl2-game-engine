@@ -242,7 +242,7 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
     outlineRect(ren, {p.x, p.y + p.h - 52, p.w, 1}, {60, 70, 110, 255});
 
     // Hint texts in footer
-    Text esc("Esc to cancel", {60,70,100,255}, p.x + 10, p.y + p.h - 36, 11);
+    Text esc("Esc / B to close    D-pad to browse    A to select", {60,70,100,255}, p.x + 10, p.y + p.h - 36, 11);
     esc.Render(ren);
     if (mCharPickerMaxScroll > 0) {
         Text sh("scroll for more", {80,90,120,255}, p.x + 10, p.y + p.h - 20, 11);

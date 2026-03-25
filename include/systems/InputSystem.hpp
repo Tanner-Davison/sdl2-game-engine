@@ -2,6 +2,114 @@
 #include <Components.hpp>
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
+#include <cmath>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gamepad polling — called once per physics tick (not per-event).
+// Reads held-state buttons (jump, crouch, sprint, ladder climb).
+// Movement is handled by MovementSystem which reads the stick directly.
+// ─────────────────────────────────────────────────────────────────────────────
+inline SDL_Gamepad* GetFirstGamepad() {
+    int count = 0;
+    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    if (!ids || count == 0) { SDL_free(ids); return nullptr; }
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
+    SDL_free(ids);
+    return pad;
+}
+
+inline void GamepadPollSystem(entt::registry& reg) {
+    SDL_Gamepad* pad = GetFirstGamepad();
+    if (!pad) return;
+
+    constexpr float DEAD_ZONE       = 0.25f;
+    constexpr float CLIMB_DEAD_ZONE = 0.5f;
+
+    float rawY = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+
+    bool btnJump   = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
+    bool btnCrouch = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+    bool btnSprint = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+
+    const bool* keys = SDL_GetKeyboardState(nullptr);
+    bool kbW = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+    bool kbS = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+
+    auto view = reg.view<PlayerTag, GravityState, ClimbState>();
+    view.each([&](GravityState& g, ClimbState& climb) {
+        bool padUp   = rawY < -CLIMB_DEAD_ZONE;
+        bool padDown = rawY >  CLIMB_DEAD_ZONE;
+        climb.wPressed = kbW || padUp;
+        climb.sPressed = kbS || padDown;
+
+        if (g.active)
+            g.jumpHeld = g.jumpHeld || btnJump;
+
+        g.isCrouching = g.isCrouching || btnCrouch;
+        g.sprinting   = g.sprinting   || btnSprint;
+    });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gamepad event handler — called from the SDL event loop for button presses.
+// Handles discrete actions: attack, dash, ladder climb overrides.
+// ─────────────────────────────────────────────────────────────────────────────
+inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
+    constexpr float TRIGGER_THRESHOLD = 0.3f;
+    constexpr float STICK_DEAD_ZONE   = 0.25f;
+
+    // ── Attack — Right Trigger ─────────────────────────────────────────
+    if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION &&
+        e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+        float val = e.gaxis.value / 32767.0f;
+        if (val > TRIGGER_THRESHOLD) {
+            auto atk = reg.view<PlayerTag, AttackState>();
+            atk.each([](AttackState& a) {
+                if (!a.isAttacking) a.attackPressed = true;
+            });
+        }
+    }
+
+    // ── Dash — X (West face) + stick direction ─────────────────────────
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+        e.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
+        SDL_Gamepad* pad = GetFirstGamepad();
+        float stickX = 0.0f;
+        if (pad)
+            stickX = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+
+        auto dashView = reg.view<PlayerTag, DashState, GravityState, ClimbState, Renderable>();
+        dashView.each([&](DashState& dash, const GravityState& g,
+                          const ClimbState& climb, const Renderable& r) {
+            if (dash.active || dash.cooldown > 0.0f) return;
+            if (climb.climbing || climb.atTop) return;
+            if (g.isCrouching) return;
+            float dir = 0.0f;
+            if (std::abs(stickX) > STICK_DEAD_ZONE)
+                dir = (stickX > 0.0f) ? 1.0f : -1.0f;
+            else
+                dir = r.flipH ? -1.0f : 1.0f;
+            dash.active    = true;
+            dash.remaining = DASH_DURATION;
+            dash.cooldown  = DASH_COOLDOWN;
+            dash.direction = dir;
+        });
+    }
+
+    // ── Jump release (button up) — clear jumpHeld ────────────────────────
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
+        e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+        auto view = reg.view<PlayerTag, GravityState>();
+        view.each([](GravityState& g) { g.jumpHeld = false; });
+    }
+
+    // ── Crouch release (left stick click up) ─────────────────────────────
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
+        e.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
+        auto view = reg.view<PlayerTag, GravityState>();
+        view.each([](GravityState& g) { g.isCrouching = false; });
+    }
+}
 
 inline void InputSystem(entt::registry& reg, SDL_Event& e) {
     // F key — set attackPressed on the player's AttackState

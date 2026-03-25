@@ -160,6 +160,25 @@ class TitleScene : public Scene {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
                 mDelConfirmOpen = false; return true;
             }
+            if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                auto btn = e.gbutton.button;
+                if (btn == SDL_GAMEPAD_BUTTON_EAST || btn == SDL_GAMEPAD_BUTTON_BACK) {
+                    mDelConfirmOpen = false; return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT || btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT)
+                    mDelPadOnYes = !mDelPadOnYes;
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    if (mDelPadOnYes) {
+                        std::error_code ec;
+                        fs::remove(mDelConfirmPath, ec);
+                        mDelConfirmOpen = false; mDelConfirmPath.clear();
+                        scanLevels(); mLevelBrowserOpen = true;
+                    } else {
+                        mDelConfirmOpen = false;
+                    }
+                }
+                return true;
+            }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
                 int mx = (int)e.button.x, my = (int)e.button.y;
                 if (hit(mDelConfirmYes, mx, my)) {
@@ -185,6 +204,32 @@ class TitleScene : public Scene {
         if (mLevelBrowserOpen) {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
                 mLevelBrowserOpen = false; mLoadingEditor = false; return true;
+            }
+            if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                auto btn = e.gbutton.button;
+                if (btn == SDL_GAMEPAD_BUTTON_EAST || btn == SDL_GAMEPAD_BUTTON_BACK) {
+                    mLevelBrowserOpen = false; mLoadingEditor = false; return true;
+                }
+                int count = (int)mLevelButtons.size();
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP && count > 0) {
+                    mBrowserPadRow = (mBrowserPadRow - 1 + count) % count;
+                    mHoverRow = mBrowserPadRow; mHoverPlay = true; mHoverEdit = false; mHoverDel = false;
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN && count > 0) {
+                    mBrowserPadRow = (mBrowserPadRow + 1) % count;
+                    mHoverRow = mBrowserPadRow; mHoverPlay = true; mHoverEdit = false; mHoverDel = false;
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH && count > 0 && mBrowserPadRow < count) {
+                    mChosenLevel = mLevelButtons[mBrowserPadRow].path;
+                    startGame = true; mLevelBrowserOpen = false; return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_WEST && count > 0 && mBrowserPadRow < count) {
+                    mLoadingEditor = true; mLoadingTimer = 0.0f; mLoadingIdx = mBrowserPadRow;
+                    mEditorPath = mLevelButtons[mBrowserPadRow].path; mEditorForce = false; mEditorName = "";
+                    return true;
+                }
             }
             if (e.type == SDL_EVENT_MOUSE_WHEEL) {
                 mLevelBrowserScroll -= (int)e.wheel.y; clampBrowserScroll(); return true;
@@ -235,6 +280,32 @@ class TitleScene : public Scene {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
                 mCharPickerOpen = false; return true;
             }
+            if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                auto btn = e.gbutton.button;
+                int count = (int)mCharCards.size();
+                if (btn == SDL_GAMEPAD_BUTTON_EAST || btn == SDL_GAMEPAD_BUTTON_BACK) {
+                    mCharPickerOpen = false; return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT && count > 0) {
+                    mCharPickerHighlight = (mCharPickerHighlight - 1 + count) % count;
+                    mCharCards[mCharPickerHighlight].walkAnimFrame = 0;
+                    mCharCards[mCharPickerHighlight].walkAnimTimer = 0.f;
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT && count > 0) {
+                    mCharPickerHighlight = (mCharPickerHighlight + 1) % count;
+                    mCharCards[mCharPickerHighlight].walkAnimFrame = 0;
+                    mCharCards[mCharPickerHighlight].walkAnimTimer = 0.f;
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    mProfileIdx    = mCharPickerHighlight;
+                    mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                    rebuildProfileSelector();
+                    mCharPickerOpen = false;
+                    return true;
+                }
+            }
             if (e.type == SDL_EVENT_MOUSE_WHEEL) {
                 float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
                 if (hit(mCharPickerPanel, (int)fmx, (int)fmy)) {
@@ -280,6 +351,8 @@ class TitleScene : public Scene {
             if (hit(viewLevelsBtnRect, mx, my))     { mLevelBrowserOpen = true; mLevelBrowserScroll = 0; return true; }
             if (hit(mChooseCharBtnRect, mx, my))    { openCharPicker(); return true; }
         }
+
+        if (handleGamepadNav(e)) return true;
 
         editorButton->HandleEvent(e);
         if (createPlayerButton) createPlayerButton->HandleEvent(e);
@@ -369,6 +442,15 @@ class TitleScene : public Scene {
 
         if (viewLevelsButton) { viewLevelsButton->Render(ren); viewLevelsBtnText->Render(ren); }
 
+        // Gamepad focus indicator
+        if (mPadFocus >= 0) {
+            SDL_Rect fr = padFocusRect();
+            if (fr.w > 0) {
+                SDL_Rect expanded = {fr.x - 3, fr.y - 3, fr.w + 6, fr.h + 6};
+                outlineRect(ren, expanded, {255, 220, 60, 255}, 3);
+            }
+        }
+
         // ── Character picker popup ─────────────────────────────────────────────
         if (mCharPickerOpen) {
             renderCharPicker(ren);
@@ -397,19 +479,27 @@ class TitleScene : public Scene {
 
             mDelConfirmYes = {mx + 24,        my + mh - 50, 140, 36};
             mDelConfirmNo  = {mx + mw - 164,  my + mh - 50, 140, 36};
-            fillRect(ren, mDelConfirmYes, {160, 30, 30, 255});
-            outlineRect(ren, mDelConfirmYes, {220, 70, 70, 255});
+
+            bool yesFocused = mDelPadOnYes && mPadFocus >= 0;
+            bool noFocused  = !mDelPadOnYes && mPadFocus >= 0;
+
+            fillRect(ren, mDelConfirmYes, yesFocused ? SDL_Color{200,40,40,255} : SDL_Color{160,30,30,255});
+            outlineRect(ren, mDelConfirmYes, yesFocused ? SDL_Color{255,220,60,255} : SDL_Color{220,70,70,255},
+                        yesFocused ? 3 : 1);
             auto [yx, yy] = Text::CenterInRect("Delete", 16, mDelConfirmYes);
             Text yLbl("Delete", {255, 200, 200, 255}, yx, yy, 16);
             yLbl.Render(ren);
 
-            fillRect(ren, mDelConfirmNo, {40, 40, 60, 255});
-            outlineRect(ren, mDelConfirmNo, {80, 80, 120, 255});
+            fillRect(ren, mDelConfirmNo, noFocused ? SDL_Color{60,60,90,255} : SDL_Color{40,40,60,255});
+            outlineRect(ren, mDelConfirmNo, noFocused ? SDL_Color{255,220,60,255} : SDL_Color{80,80,120,255},
+                        noFocused ? 3 : 1);
             auto [nx, ny] = Text::CenterInRect("Cancel", 16, mDelConfirmNo);
             Text nLbl("Cancel", {180, 180, 220, 255}, nx, ny, 16);
             nLbl.Render(ren);
 
-            Text hint("Esc to cancel", {80, 80, 100, 255}, mx + mw/2 - 36, my + mh - 14, 11);
+            std::string delHint = "Esc / B to cancel";
+            auto dhs = Text::Measure(delHint, 11);
+            Text hint(delHint, {80, 80, 100, 255}, mx + mw/2 - dhs.x/2, my + mh - 14, 11);
             hint.Render(ren);
         }
 
@@ -494,7 +584,7 @@ class TitleScene : public Scene {
                 int ry = listY + i * (rowH + rowGap);
                 if (ry + rowH < listTop - rowH || ry > listBottom + rowH) continue;
 
-                bool isHover = (i == mHoverRow);
+                bool isHover = (i == mHoverRow) || (i == mBrowserPadRow && mPadFocus >= 0);
                 bool isLoading = (mLoadingEditor && i == mLoadingIdx);
 
                 // Play/name button
@@ -564,6 +654,14 @@ class TitleScene : public Scene {
                 scrollFrac = std::clamp(scrollFrac, 0.0f, 1.0f);
                 int barY  = listTop + (int)((listH - barH) * scrollFrac);
                 fillRect(ren, {px + pw - 8, barY, 4, barH}, {80, 120, 200, 160});
+            }
+
+            // Gamepad hints
+            {
+                std::string bHint = "A = Play    X = Edit    B = Close";
+                auto bhs = Text::Measure(bHint, 11);
+                Text bh(bHint, {80, 90, 120, 255}, px + pw/2 - bhs.x/2, py + ph - 16, 11);
+                bh.Render(ren);
             }
 
             // Empty state
@@ -715,6 +813,85 @@ class TitleScene : public Scene {
 
     void openCharPicker();
     void renderCharPicker(SDL_Renderer* ren);
+
+    // ── Gamepad navigation ───────────────────────────────────────────────────
+    // Main menu: 2-column grid of 7 buttons
+    //   [0] Level Editor    [1] Play Level
+    //   [2] Create Player   [3] Tile Animator
+    //   [4] Create Enemy    [5] Tile Assets
+    //   [6] Choose Character (full width)
+    int   mPadFocus       = -1;    // -1 = mouse mode, 0-6 = focused button
+    int   mBrowserPadRow  = 0;     // focused row in level browser
+    bool  mDelPadOnYes    = false; // delete dialog: true=Delete, false=Cancel
+
+    void padNavigate(int dx, int dy) {
+        if (mPadFocus < 0) mPadFocus = 0;
+        int row = (mPadFocus >= 6) ? 3 : mPadFocus / 2;
+        int col = (mPadFocus >= 6) ? 0 : mPadFocus % 2;
+        row += dy;
+        col += dx;
+        if (row < 0) row = 3;
+        if (row > 3) row = 0;
+        if (row == 3) { mPadFocus = 6; return; }
+        col = std::clamp(col, 0, 1);
+        mPadFocus = row * 2 + col;
+    }
+
+    void padActivateFocus() {
+        switch (mPadFocus) {
+            case 0: mEditorPath = ""; mEditorForce = false; mEditorName = ""; openEditor = true; break;
+            case 1: mLevelBrowserOpen = true; mLevelBrowserScroll = 0; mBrowserPadRow = 0; break;
+            case 2: openPlayerCreator = true; break;
+            case 3: openTileAnimCreator = true; break;
+            case 4: openEnemyCreator = true; break;
+            case 5: openTileAssets = true; break;
+            case 6: openCharPicker(); break;
+            default: break;
+        }
+    }
+
+    SDL_Rect padFocusRect() const {
+        switch (mPadFocus) {
+            case 0: return editorBtnRect;
+            case 1: return viewLevelsBtnRect;
+            case 2: return createPlayerBtnRect;
+            case 3: return tileAnimBtnRect;
+            case 4: return createEnemyBtnRect;
+            case 5: return tileAssetsBtnRect;
+            case 6: return mChooseCharBtnRect;
+            default: return {};
+        }
+    }
+
+    bool handleGamepadNav(SDL_Event& e) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto btn = e.gbutton.button;
+            if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP)    { padNavigate(0, -1); return true; }
+            if (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN)  { padNavigate(0,  1); return true; }
+            if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT)  { padNavigate(-1, 0); return true; }
+            if (btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) { padNavigate( 1, 0); return true; }
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                if (mPadFocus >= 0) padActivateFocus();
+                return true;
+            }
+        }
+        if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+            constexpr Sint16 THRESH = 20000;
+            if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
+                if (e.gaxis.value < -THRESH)      padNavigate(0, -1);
+                else if (e.gaxis.value > THRESH)   padNavigate(0,  1);
+                return true;
+            }
+            if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX) {
+                if (e.gaxis.value < -THRESH)      padNavigate(-1, 0);
+                else if (e.gaxis.value > THRESH)   padNavigate( 1, 0);
+                return true;
+            }
+        }
+        if (e.type == SDL_EVENT_MOUSE_MOTION || e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            mPadFocus = -1;
+        return false;
+    }
 
     // ── State ─────────────────────────────────────────────────────────────────
     SDL_Window*   mSDLWindow           = nullptr;

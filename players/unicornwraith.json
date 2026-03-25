@@ -5,9 +5,9 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Idle",
             "fps": 0.0,
             "hitbox": {
-                "h": 93,
-                "w": 68,
-                "x": 53,
+                "h": 79,
+                "w": 49,
+                "x": 64,
                 "y": 25
             },
             "slot": 0
@@ -16,10 +16,10 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Walk",
             "fps": 0.0,
             "hitbox": {
-                "h": 86,
-                "w": 50,
+                "h": 79,
+                "w": 49,
                 "x": 64,
-                "y": 31
+                "y": 27
             },
             "slot": 1
         },
@@ -27,7 +27,7 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Crouch",
             "fps": 0.0,
             "hitbox": {
-                "h": 63,
+                "h": 49,
                 "w": 41,
                 "x": 72,
                 "y": 29
@@ -38,7 +38,7 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Jump",
             "fps": 0.0,
             "hitbox": {
-                "h": 77,
+                "h": 79,
                 "w": 44,
                 "x": 69,
                 "y": 36
@@ -49,8 +49,8 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Fall",
             "fps": 0.0,
             "hitbox": {
-                "h": 85,
-                "w": 70,
+                "h": 69,
+                "w": 65,
                 "x": 53,
                 "y": 35
             },
@@ -60,10 +60,10 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Slash",
             "fps": 0.0,
             "hitbox": {
-                "h": 104,
-                "w": 124,
-                "x": 56,
-                "y": 15
+                "h": 79,
+                "w": 121,
+                "x": 59,
+                "y": 18
             },
             "slot": 5
         },
@@ -71,9 +71,9 @@
             "folderPath": "game_assets/char_sprites/unicornwraith/Hurt",
             "fps": 0.0,
             "hitbox": {
-                "h": 91,
-                "w": 55,
-                "x": 56,
+                "h": 79,
+                "w": 53,
+                "x": 58,
                 "y": 24
             },
             "slot": 6

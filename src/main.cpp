@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC,  "1");
 
-    SDL_Init(SDL_INIT_VIDEO);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
     if (!TTF_Init()) {
         std::print("Error initializing SDL_ttf: {}\n", SDL_GetError());
         return 1;
@@ -26,6 +26,19 @@ int main(int argc, char** argv) {
 
     Window       GameWindow;
     SceneManager manager;
+
+    // Auto-open any gamepads already connected at startup.
+    // SDL3 also fires SDL_EVENT_GAMEPAD_ADDED for hot-plug so HandleEvent
+    // in GameScene picks up controllers connected after launch.
+    {
+        int count = 0;
+        SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        if (ids) {
+            for (int i = 0; i < count; ++i)
+                SDL_OpenGamepad(ids[i]);
+            SDL_free(ids);
+        }
+    }
 
     manager.SetScene(std::make_unique<TitleScene>(), GameWindow);
 

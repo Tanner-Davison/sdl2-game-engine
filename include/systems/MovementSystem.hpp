@@ -7,6 +7,24 @@
 inline void MovementSystem(entt::registry& reg, float dt, int windowW, float levelW = 0.0f) {
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
+    // ── Gamepad analog stick ─────────────────────────────────────────────
+    constexpr float PAD_DEAD_ZONE = 0.25f;
+    float padAxisX = 0.0f, padAxisY = 0.0f;
+    {
+        int count = 0;
+        SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        if (ids && count > 0) {
+            SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
+            if (pad) {
+                float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+                float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+                if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX = rx;
+                if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY = ry;
+            }
+        }
+        SDL_free(ids);
+    }
+
     // ── Dash tick ────────────────────────────────────────────────────────
     {
         auto dashView = reg.view<PlayerTag, Transform, DashState>();
@@ -26,8 +44,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         });
     }
 
-    auto playerView = reg.view<Transform, Velocity, GravityState, PlayerTag, ClimbState>();
-    playerView.each([&reg, dt, keys](entt::entity ent, Transform& t, Velocity& v, GravityState& g, const ClimbState& climb) {
+    auto playerView = reg.view<Transform, Velocity, GravityState, PlayerTag, ClimbState, Renderable>();
+    playerView.each([&reg, dt, keys, padAxisX, padAxisY](entt::entity ent, Transform& t, Velocity& v, GravityState& g, const ClimbState& climb, Renderable& r) {
         // While dashing, skip normal horizontal input — dash tick above owns t.x.
         // Gravity still applies so the player follows arcs / stays grounded.
         if (auto* dash = reg.try_get<DashState>(ent); dash && dash->active) {
@@ -50,8 +68,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
 
         if (!g.active) {
             if (climb.climbing || climb.atTop) {
-                bool leftHeld  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
-                bool rightHeld = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+                bool leftHeld  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT] || padAxisX < 0.0f;
+                bool rightHeld = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT] || padAxisX > 0.0f;
                 if (leftHeld && !rightHeld) {
                     v.dx = -CLIMB_STRAFE_SPEED;
                 } else if (rightHeld && !leftHeld) {
@@ -63,11 +81,15 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 t.x += v.dx * dt;
                 return;
             }
-            bool moving = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
-                          keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D] ||
-                          keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_DOWN] ||
-                          keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
-            if (!moving) {
+            bool kbMoving = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
+                            keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D] ||
+                            keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_DOWN] ||
+                            keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
+            bool padMoving = std::abs(padAxisX) > 0.0f || std::abs(padAxisY) > 0.0f;
+            if (padMoving) {
+                v.dx = padAxisX * v.speed;
+                v.dy = padAxisY * v.speed;
+            } else if (!kbMoving) {
                 v.dx -= v.dx * friction * dt;
                 v.dy -= v.dy * friction * dt;
                 if (std::abs(v.dx) < 0.5f)
@@ -97,12 +119,16 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             switch (g.direction) {
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
-                    if (keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT])
-                        v.dx = -effSpeed;
-                    if (keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT])
-                        v.dx = effSpeed;
-                    if (!keys[SDL_SCANCODE_A] && !keys[SDL_SCANCODE_D]
-                     && !keys[SDL_SCANCODE_LEFT] && !keys[SDL_SCANCODE_RIGHT]) {
+                    bool invertFlip = g.direction == GravityDir::UP;
+                    bool kbLeft  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
+                    bool kbRight = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+                    if (kbLeft)  v.dx = -effSpeed;
+                    if (kbRight) v.dx =  effSpeed;
+                    if (std::abs(padAxisX) > 0.0f) {
+                        v.dx = padAxisX * effSpeed;
+                        r.flipH = (padAxisX < 0.0f) ? !invertFlip : invertFlip;
+                    }
+                    if (!kbLeft && !kbRight && std::abs(padAxisX) == 0.0f) {
                         v.dx -= v.dx * friction * dt;
                         if (std::abs(v.dx) < 0.5f)
                             v.dx = 0.0f;
@@ -112,12 +138,13 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
                 case GravityDir::LEFT:
                 case GravityDir::RIGHT: {
-                    if (keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP])
-                        v.dy = -effSpeed;
-                    if (keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN])
-                        v.dy = effSpeed;
-                    if (!keys[SDL_SCANCODE_W] && !keys[SDL_SCANCODE_S]
-                     && !keys[SDL_SCANCODE_UP] && !keys[SDL_SCANCODE_DOWN]) {
+                    bool kbUp   = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
+                    bool kbDown = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+                    if (kbUp)   v.dy = -effSpeed;
+                    if (kbDown) v.dy =  effSpeed;
+                    if (std::abs(padAxisY) > 0.0f)
+                        v.dy = padAxisY * effSpeed;
+                    if (!kbUp && !kbDown && std::abs(padAxisY) == 0.0f) {
                         v.dy -= v.dy * friction * dt;
                         if (std::abs(v.dy) < 0.5f)
                             v.dy = 0.0f;

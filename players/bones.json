@@ -5,10 +5,10 @@
             "folderPath": "game_assets/char_sprites/bones/Idle",
             "fps": 20.0,
             "hitbox": {
-                "h": 106,
-                "w": 60,
+                "h": 80,
+                "w": 65,
                 "x": 38,
-                "y": 21
+                "y": 28
             },
             "slot": 0
         },
@@ -16,9 +16,9 @@
             "folderPath": "game_assets/char_sprites/bones/Walk",
             "fps": 28.0,
             "hitbox": {
-                "h": 96,
+                "h": 80,
                 "w": 58,
-                "x": 43,
+                "x": 42,
                 "y": 29
             },
             "slot": 1
@@ -38,10 +38,10 @@
             "folderPath": "game_assets/char_sprites/bones/Jump",
             "fps": 21.0,
             "hitbox": {
-                "h": 95,
-                "w": 53,
-                "x": 43,
-                "y": 29
+                "h": 79,
+                "w": 49,
+                "x": 47,
+                "y": 35
             },
             "slot": 3
         },
@@ -60,7 +60,7 @@
             "folderPath": "game_assets/char_sprites/bones/Slash",
             "fps": 48.0,
             "hitbox": {
-                "h": 97,
+                "h": 79,
                 "w": 86,
                 "x": 48,
                 "y": 29
@@ -71,7 +71,7 @@
             "folderPath": "game_assets/char_sprites/bones/Hurt",
             "fps": 0.0,
             "hitbox": {
-                "h": 94,
+                "h": 79,
                 "w": 61,
                 "x": 43,
                 "y": 29
@@ -82,10 +82,10 @@
             "folderPath": "game_assets/char_sprites/bones/Death",
             "fps": 0.0,
             "hitbox": {
-                "h": 101,
-                "w": 91,
+                "h": 53,
+                "w": 94,
                 "x": 10,
-                "y": 26
+                "y": 55
             },
             "slot": 7
         }
