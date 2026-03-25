@@ -18,10 +18,6 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                                                                        : "platformer";
     j["player"]      = {{"x", level.player.x}, {"y", level.player.y}};
 
-    j["coins"] = json::array();
-    for (const auto& c : level.coins)
-        j["coins"].push_back({{"x", c.x}, {"y", c.y}});
-
     j["enemies"] = json::array();
     for (const auto& e : level.enemies) {
         json ej = {{"x", e.x}, {"y", e.y}, {"speed", e.speed},
@@ -30,6 +26,15 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
         if (!e.enemyType.empty())
             ej["enemyType"] = e.enemyType;
         j["enemies"].push_back(std::move(ej));
+    }
+
+    j["parallaxLayers"] = json::array();
+    for (const auto& pl : level.parallaxLayers) {
+        j["parallaxLayers"].push_back({
+            {"img",          pl.imagePath},
+            {"scrollFactor", pl.scrollFactor},
+            {"yOffset",      pl.yOffset},
+        });
     }
 
     j["tiles"] = json::array();
@@ -48,11 +53,13 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
             {"ladder",      t.ladder},
             {"hazard",      t.hazard},
             {"antiGravity", t.antiGravity},
+            {"goal",        t.goal},
             // Action
             {"action",           t.HasAction()},
             {"actionGroup",      t.HasAction() ? t.action->group          : 0},
             {"actionHits",       t.HasAction() ? t.action->hitsRequired   : 1},
             {"actionDestroyAnim",t.HasAction() ? t.action->destroyAnimPath : std::string{}},
+            {"actionCamShake",   t.HasAction() ? t.action->cameraShake    : false},
             // Slope
             {"slope",            slopeStr},
             {"slopeHeightFrac",  t.HasSlope() ? t.slope->heightFrac : 1.0f},
@@ -120,10 +127,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         out.player.y = j["player"].value("y", 0.0f);
     }
 
-    out.coins.clear();
-    for (const auto& c : j.value("coins", json::array()))
-        out.coins.push_back({c.value("x", 0.0f), c.value("y", 0.0f)});
-
     out.enemies.clear();
     for (const auto& e : j.value("enemies", json::array())) {
         EnemySpawn es;
@@ -134,6 +137,16 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         es.startLeft   = e.value("startLeft", false);
         es.enemyType   = e.value("enemyType", std::string{});
         out.enemies.push_back(std::move(es));
+    }
+
+    out.parallaxLayers.clear();
+    for (const auto& pl : j.value("parallaxLayers", json::array())) {
+        ParallaxLayer layer;
+        layer.imagePath    = pl.value("img", std::string{});
+        layer.scrollFactor = pl.value("scrollFactor", 0.5f);
+        layer.yOffset      = pl.value("yOffset", 0.0f);
+        if (!layer.imagePath.empty())
+            out.parallaxLayers.push_back(std::move(layer));
     }
 
     out.tiles.clear();
@@ -149,6 +162,7 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         ts.ladder     = t.value("ladder", false);
         ts.hazard     = t.value("hazard", false);
         ts.antiGravity = t.value("antiGravity", false);
+        ts.goal        = t.value("goal", false);
 
         // Action
         if (t.value("action", false)) {
@@ -156,6 +170,7 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             ad.group          = t.value("actionGroup", 0);
             ad.hitsRequired   = t.value("actionHits", 1);
             ad.destroyAnimPath = t.value("actionDestroyAnim", std::string{});
+            ad.cameraShake     = t.value("actionCamShake", false);
             ts.action = ad;
         }
 
@@ -209,7 +224,7 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         out.tiles.push_back(std::move(ts));
     }
 
-    std::print("Level loaded: {} ({} coins, {} enemies)\n",
-               out.name, out.coins.size(), out.enemies.size());
+    std::print("Level loaded: {} ({} enemies, {} tiles)\n",
+               out.name, out.enemies.size(), out.tiles.size());
     return true;
 }

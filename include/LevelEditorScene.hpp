@@ -116,7 +116,7 @@ class LevelEditorScene : public Scene {
     // Map ToolId -> TBBtn for toolbar active-state highlighting
     static TBBtn ToolIdToBtn(ToolId id) {
         switch (id) {
-            case ToolId::Coin:        return TBBtn::Coin;
+            case ToolId::Goal:        return TBBtn::Goal;
             case ToolId::Enemy:       return TBBtn::Enemy;
             case ToolId::Tile:        return TBBtn::Tile;
             case ToolId::Erase:       return TBBtn::Erase;
@@ -158,7 +158,7 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Text> lblBottomHint;
     std::unique_ptr<Text> lblToolPrefix;
     int         mLastTileCount  = -1;
-    int         mLastCoinCount  = -1;
+
     int         mLastEnemyCount = -1;
     int         mLastCamX       = INT_MIN;
     int         mLastCamY       = INT_MIN;
@@ -207,8 +207,9 @@ class LevelEditorScene : public Scene {
     EditorPalette mPalette;
 
     // ── Assets ──────────────────────────────────────────────────────────────
-    std::unique_ptr<Image>       background;
-    std::unique_ptr<SpriteSheet> coinSheet;
+    std::unique_ptr<Image>                  background;
+    std::vector<std::unique_ptr<Image>>     mParallaxImages;
+    void RebuildParallaxImages();
     std::unique_ptr<SpriteSheet> enemySheet;
     SDL_Surface*                 mFolderIcon = nullptr;
 
@@ -239,15 +240,6 @@ class LevelEditorScene : public Scene {
         return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
     }
 
-    int HitCoin(int sx, int sy) const {
-        auto [wx, wy] = ScreenToWorld(sx, sy);
-        for (int i = 0; i < (int)mLevel.coins.size(); i++) {
-            SDL_Rect r = {(int)mLevel.coins[i].x, (int)mLevel.coins[i].y, GRID, GRID};
-            if (HitTest(r, wx, wy))
-                return i;
-        }
-        return -1;
-    }
     int HitEnemy(int sx, int sy) const {
         auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < (int)mLevel.enemies.size(); i++) {
@@ -311,7 +303,6 @@ class LevelEditorScene : public Scene {
     // Generic entity drag (used by Action/PowerUp/MovingPlat inline tools)
     bool mIsDragging  = false;
     int  mDragIndex   = -1;
-    bool mDragIsCoin  = false;
     bool mDragIsTile  = false;
 
     // Tile tool state (used by Render ghost preview, delegated to TileTool)

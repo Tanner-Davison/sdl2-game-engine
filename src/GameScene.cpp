@@ -57,12 +57,30 @@ static SDL_Texture* LoadScaledTexture(
         }
     }
 
-    // Upload at native resolution — the GPU scales to tw x th at render time
-    // using PIXELART mode for crisp pixel art. No CPU pre-scaling.
+    // Pre-scale on CPU to the target tile size so the texture is uploaded
+    // at exactly tw x th. This ensures renderW/renderH and the texture
+    // dimensions always agree — no surprise giant tiles.
+    if (tw > 0 && th > 0 && (final->w != tw || final->h != th)) {
+        SDL_Surface* scaled = SDL_CreateSurface(tw, th, SDL_PIXELFORMAT_ARGB8888);
+        if (scaled) {
+            SDL_SetSurfaceBlendMode(final, SDL_BLENDMODE_NONE);
+            SDL_BlitSurfaceScaled(final, nullptr, scaled, nullptr, SDL_SCALEMODE_NEAREST);
+            SDL_DestroySurface(final);
+            final = scaled;
+        }
+    }
+
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, final);
     SDL_DestroySurface(final);
-    if (tex)
-        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_PIXELART);
+    if (tex) {
+        // Native-res textures (tw/th==0) will be GPU-scaled at render time;
+        // use LINEAR for smooth downscaling (matches the editor). Pre-scaled
+        // textures are already at their target size so NEAREST keeps pixel
+        // edges crisp.
+        SDL_SetTextureScaleMode(tex, (tw <= 0 || th <= 0)
+                                         ? SDL_SCALEMODE_LINEAR
+                                         : SDL_SCALEMODE_NEAREST);
+    }
     return tex;
 }
 
@@ -82,6 +100,8 @@ GameScene::GameScene(const std::string& levelPath,
 void GameScene::Load(Window& window) {
     mWindow           = &window;
     gameOver          = false;
+    mPlayerDying      = false;
+    mDeathAnimTimer   = 0.0f;
     SDL_Renderer* ren = window.GetRenderer();
 
     if (!mLevelPath.empty())
@@ -157,6 +177,7 @@ void GameScene::Load(Window& window) {
         loadSlot(PlayerAnimSlot::Fall, "Falling Down", "0_Knight_Falling Down_", 6);
     knightSlideSheet = loadSlot(PlayerAnimSlot::Crouch, "Sliding", "0_Knight_Sliding_", 6);
     knightSlashSheet = loadSlot(PlayerAnimSlot::Slash, "Slashing", "0_Knight_Slashing_", 12);
+    knightDeathSheet = loadSlot(PlayerAnimSlot::Death, "Hurt", "0_Knight_Hurt_", 12);
 
     // Upload all sprite sheets to GPU then free the CPU surfaces — GameScene
     // only needs the GPU textures at runtime. PlayerCreatorScene skips FreeSurface()
@@ -175,6 +196,8 @@ void GameScene::Load(Window& window) {
     knightSlideSheet->FreeSurface();
     knightSlashSheet->CreateTexture(ren);
     knightSlashSheet->FreeSurface();
+    knightDeathSheet->CreateTexture(ren);
+    knightDeathSheet->FreeSurface();
 
     auto getFrames = [&](std::unique_ptr<SpriteSheet>& sheet,
                          PlayerAnimSlot                slot,
@@ -201,6 +224,7 @@ void GameScene::Load(Window& window) {
     duckFrames  = getFrames(knightSlideSheet, PlayerAnimSlot::Crouch, "0_Knight_Sliding_");
     frontFrames = getFrames(knightFallSheet, PlayerAnimSlot::Fall, "0_Knight_Falling Down_");
     slashFrames = getFrames(knightSlashSheet, PlayerAnimSlot::Slash, "0_Knight_Slashing_");
+    deathFrames = getFrames(knightDeathSheet, PlayerAnimSlot::Death, "0_Knight_Hurt_");
 
     // When a custom profile is active, redirect any unfilled slot (empty frames)
     // to idle frames so the character holds its idle pose instead of flashing
@@ -219,7 +243,12 @@ void GameScene::Load(Window& window) {
             frontFrames = idleFrames;
         if (!profile.HasSlot(PlayerAnimSlot::Slash) && slashFrames.empty())
             slashFrames = idleFrames;
+        if (!profile.HasSlot(PlayerAnimSlot::Death) && deathFrames.empty())
+            deathFrames = hurtFrames;
     }
+    // For non-profile characters, fall back death to hurt frames
+    if (deathFrames.empty())
+        deathFrames = hurtFrames;
 
     enemySheet = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
@@ -232,9 +261,20 @@ void GameScene::Load(Window& window) {
                              : "game_assets/backgrounds/deepspace_scene.png";
     background = std::make_unique<Image>(bgPath, FitModeFromString(mLevel.bgFitMode));
     background->SetRepeat(mLevel.bgRepeat);
+
+    mParallaxImages.clear();
+    mParallaxFactors.clear();
+    for (const auto& pl : mLevel.parallaxLayers) {
+        if (pl.imagePath.empty()) continue;
+        auto img = std::make_unique<Image>(pl.imagePath, FitMode::SCROLL);
+        img->SetRepeat(true);
+        mParallaxImages.push_back(std::move(img));
+        mParallaxFactors.push_back(pl.scrollFactor);
+    }
+
     locationText = std::make_unique<Text>("You are in space!!", 20, 20);
     actionText   = std::make_unique<Text>(
-        "Level 1: Collect ALL the coins!", SDL_Color{255, 255, 255, 0}, 20, 80, 20);
+        "Collect all goals to complete the level!", SDL_Color{255, 255, 255, 0}, 20, 80, 20);
 
     gameOverText = std::make_unique<Text>("Game Over!",
                                           SDL_Color{255, 0, 0, 255},
@@ -361,11 +401,32 @@ void GameScene::Update(float dt) {
     if (gameOver)
         return;
 
+    if (mPlayerDying) {
+        mDeathAnimTimer += dt;
+        AnimationSystem(reg, dt);
+        mCamera.TickShake(dt);
+
+        bool animDone = false;
+        auto pv = reg.view<PlayerTag, AnimationState>();
+        pv.each([&](const AnimationState& anim) {
+            if (!anim.looping && anim.currentFrame >= anim.totalFrames - 1)
+                animDone = true;
+        });
+
+        constexpr float MIN_DEATH_HOLD = 1.0f;
+        constexpr float MAX_DEATH_WAIT = 3.0f;
+        bool timeUp = mDeathAnimTimer >= MAX_DEATH_WAIT;
+        bool readyToEnd = animDone && mDeathAnimTimer >= MIN_DEATH_HOLD;
+        if (timeUp || readyToEnd)
+            gameOver = true;
+        return;
+    }
+
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
     PlayerStateSystem(reg);
-    MovementSystem(reg, dt, mWindow->GetWidth());
+    MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW);
     BoundsSystem(reg,
                  dt,
                  mWindow->GetWidth(),
@@ -398,6 +459,7 @@ void GameScene::Update(float dt) {
                 anim.totalFrames  = (int)ead.moveFrames.size();
                 anim.fps          = ead.moveFps;
                 anim.looping      = true;
+                ead.ApplyHitbox(ead.moveHitbox, reg, e);
             }
         });
 
@@ -420,6 +482,7 @@ void GameScene::Update(float dt) {
                     anim.totalFrames  = (int)ead.moveFrames.size();
                     anim.fps          = ead.moveFps;
                     anim.looping      = true;
+                    ead.ApplyHitbox(ead.moveHitbox, reg, e);
                 }
                 eas.attacking = false;
             }
@@ -468,6 +531,13 @@ void GameScene::Update(float dt) {
         for (entt::entity e : toDestroy) {
             tileAnimFrameMap.erase(e);
             if (reg.valid(e)) {
+                // Collect goal when the destroy animation finishes.
+                // GoalTag was intentionally kept alive during action-tile
+                // processing so the goal only counts after the anim plays.
+                if (reg.all_of<GoalTag>(e)) {
+                    goalsCollected++;
+                    reg.remove<GoalTag>(e);
+                }
                 if (reg.all_of<Renderable>(e))
                     reg.remove<Renderable>(e);
                 reg.destroy(e);
@@ -581,16 +651,113 @@ void GameScene::Update(float dt) {
         });
     }
 
-    coinCount += collision.coinsCollected;
+    // Process enemies killed by floating objects — run through the same
+    // death pipeline that CollisionSystem uses for stomps/slashes.
+    for (entt::entity e : floatResult.enemiesKilledByFloat) {
+        if (!reg.valid(e) || reg.all_of<DeadTag>(e)) continue;
+        if (reg.all_of<Velocity>(e)) {
+            auto& v = reg.get<Velocity>(e);
+            v.dx = v.dy = 0.0f;
+        }
+        if (reg.all_of<Renderable, AnimationState>(e)) {
+            auto& r    = reg.get<Renderable>(e);
+            auto& anim = reg.get<AnimationState>(e);
+            if (auto* ead = reg.try_get<EnemyAnimData>(e);
+                ead && ead->deadSheet && !ead->deadFrames.empty()) {
+                r.sheet         = ead->deadSheet;
+                r.frames        = ead->deadFrames;
+                r.renderW       = ead->spriteW;
+                r.renderH       = ead->spriteH;
+                anim.currentFrame = 0;
+                anim.totalFrames  = (int)ead->deadFrames.size();
+                anim.fps          = ead->deadFps;
+                anim.looping      = false;
+                ead->ApplyHitbox(ead->deadHitbox, reg, e);
+            } else {
+                anim.looping = false;
+            }
+        }
+        reg.emplace<DeadTag>(e);
+        stompCount++;
+    }
+
+    goalsCollected += collision.goalsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
-    if (collision.playerDied)
-        gameOver = true;
+    if (collision.playerDied && !mPlayerDying) {
+        mPlayerDying    = true;
+        mDeathAnimTimer = 0.0f;
+        auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
+        dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
+                   const AnimationSet& set) {
+            v.dx = 0.0f; v.dy = 0.0f;
+            const std::vector<SDL_Rect>* frames = nullptr;
+            SDL_Texture* sheet = nullptr;
+            float fps = 8.0f;
+            AnimationID id = AnimationID::DEATH;
+            if (!set.death.empty()) {
+                frames = &set.death;
+                sheet  = set.deathSheet;
+                fps    = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
+            } else if (!set.hurt.empty()) {
+                frames = &set.hurt;
+                sheet  = set.hurtSheet;
+                fps    = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
+                id     = AnimationID::HURT;
+            }
+            if (frames && sheet) {
+                r.sheet           = sheet;
+                r.frames          = *frames;
+                anim.currentFrame = 0;
+                anim.timer        = 0.0f;
+                anim.fps          = fps;
+                anim.looping      = false;
+                anim.totalFrames  = (int)frames->size();
+                anim.currentAnim  = id;
+            }
+        });
+    }
+
+    if (collision.playerHit)
+        mCamera.StartShake(4.0f, 0.12f);
+
+    if (collision.enemiesStomped > 0) {
+        float progress  = 1.0f - collision.lowestHitHpFrac;
+        float intensity = 3.0f + progress * 9.0f;
+        float duration  = 0.06f + progress * 0.06f;
+        mCamera.StartPunch(0.0f, 1.0f, intensity, duration);
+    }
+    if (collision.slashHits > 0) {
+        float punchDir = 1.0f;
+        auto pv = reg.view<PlayerTag, Velocity>();
+        pv.each([&](const Velocity& v) {
+            punchDir = (v.dx >= 0.0f) ? 1.0f : -1.0f;
+        });
+        float progress  = 1.0f - collision.lowestHitHpFrac;
+        float intensity = 3.0f + progress * 10.0f;
+        float duration  = 0.06f + progress * 0.07f;
+        mCamera.StartPunch(punchDir, -0.25f, intensity, duration);
+    }
 
     // Process triggered action tiles
     SDL_Renderer* ren = mWindow->GetRenderer();
     for (entt::entity e : collision.actionTilesTriggered) {
         if (!reg.valid(e))
             continue;
+
+        // If this action tile is also a goal, decide when to collect it:
+        //   - Has a destroy animation? Keep the GoalTag alive so it gets
+        //     collected when the animation finishes (see DestroyAnimTag cleanup).
+        //   - No destroy animation? Collect the goal immediately since the
+        //     entity will be stripped/destroyed right away.
+        const ActionTag* atagPeek = reg.try_get<ActionTag>(e);
+        bool hasDestroyAnim = atagPeek && !atagPeek->destroyAnimPath.empty();
+        if (reg.all_of<GoalTag>(e) && !hasDestroyAnim) {
+            goalsCollected++;
+            reg.remove<GoalTag>(e);
+        }
+        // GoalTag is intentionally kept for tiles WITH a destroy animation.
+        // It will be collected in the DestroyAnimTag cleanup block above.
+
         if (reg.all_of<TileTag>(e))
             reg.remove<TileTag>(e);
         if (reg.all_of<Collider>(e))
@@ -602,22 +769,21 @@ void GameScene::Update(float dt) {
             std::print("[DestroyAnim] tile triggered, path='{}' ", atag->destroyAnimPath);
             if (LoadAnimatedTileDef(atag->destroyAnimPath, def) && !def.framePaths.empty()) {
                 std::print("loaded {} frames at {}fps\n", def.framePaths.size(), def.fps);
-                int tw = 0, th = 0;
+
+                // Remember the original tile's display size for centering.
+                int tileW = 38, tileH = 38;
                 if (reg.all_of<Renderable>(e)) {
                     const auto& rend = reg.get<Renderable>(e);
-                    if (!rend.frames.empty()) {
-                        tw = rend.frames[0].w;
-                        th = rend.frames[0].h;
-                    }
-                }
-                if (tw <= 0 || th <= 0) {
-                    tw = 38;
-                    th = 38;
+                    if (rend.renderW > 0) tileW = rend.renderW;
+                    if (rend.renderH > 0) tileH = rend.renderH;
                 }
 
+                // Load frames at native resolution (0,0) so the GPU
+                // handles scaling at render time -- same approach as
+                // regular animated tiles.
                 std::vector<SDL_Texture*> frameTex;
                 for (const auto& fp : def.framePaths) {
-                    SDL_Texture* t = LoadScaledTexture(ren, fp, tw, th);
+                    SDL_Texture* t = LoadScaledTexture(ren, fp, 0, 0);
                     frameTex.push_back(t);
                     if (t)
                         tileScaledTextures.push_back(t);
@@ -626,11 +792,59 @@ void GameScene::Update(float dt) {
                 if (!frameTex.empty() && frameTex[0]) {
                     tileAnimFrameMap[e]        = std::move(frameTex);
                     auto&                 fvec = tileAnimFrameMap[e];
-                    std::vector<SDL_Rect> animRects((int)fvec.size(),
-                                                    SDL_Rect{0, 0, tw, th});
-                    if (reg.all_of<Renderable>(e))
-                        reg.remove<Renderable>(e);
-                    reg.emplace<Renderable>(e, fvec[0], std::move(animRects), false);
+
+                    // Build src rects from the native texture sizes.
+                    std::vector<SDL_Rect> animRects;
+                    animRects.reserve(fvec.size());
+                    for (auto* ft : fvec) {
+                        float fw = 0, fh = 0;
+                        if (ft) SDL_GetTextureSize(ft, &fw, &fh);
+                        animRects.push_back({0, 0, (int)fw, (int)fh});
+                    }
+
+                    // Centre the destroy animation on the original tile.
+                    // The animation renders at tileW x tileH (via renderW/H)
+                    // so offset the Transform so the anim's centre == the
+                    // tile's centre.
+                    if (reg.all_of<Transform>(e)) {
+                        auto& tr = reg.get<Transform>(e);
+                        tr.x += tileW * 0.5f - tileW * 0.5f;  // no-op for same size
+                        tr.y += tileH * 0.5f - tileH * 0.5f;
+                        // If the animation should render larger than the
+                        // original tile (e.g. an explosion), scale it up
+                        // and re-centre.  Use the native frame aspect ratio
+                        // to pick a render size that covers the tile.
+                        float nativeW = 0, nativeH = 0;
+                        SDL_GetTextureSize(fvec[0], &nativeW, &nativeH);
+                        // Render the destroy anim at its native aspect,
+                        // scaled so the larger axis matches the tile size
+                        // (at minimum). This keeps small tiles from
+                        // shrinking an explosion to nothing.
+                        int animRenderW = tileW;
+                        int animRenderH = tileH;
+                        if (nativeW > 0 && nativeH > 0) {
+                            float aspect = nativeW / nativeH;
+                            // Scale to fit at least the tile, preserving aspect
+                            animRenderW = std::max(tileW, (int)(tileH * aspect));
+                            animRenderH = std::max(tileH, (int)(tileW / aspect));
+                        }
+                        // Re-centre on the original tile midpoint
+                        float tileCX = tr.x + tileW * 0.5f;
+                        float tileCY = tr.y + tileH * 0.5f;
+                        tr.x = tileCX - animRenderW * 0.5f;
+                        tr.y = tileCY - animRenderH * 0.5f;
+
+                        if (reg.all_of<Renderable>(e))
+                            reg.remove<Renderable>(e);
+                        reg.emplace<Renderable>(e, fvec[0], std::move(animRects),
+                                                false, animRenderW, animRenderH);
+                    } else {
+                        if (reg.all_of<Renderable>(e))
+                            reg.remove<Renderable>(e);
+                        reg.emplace<Renderable>(e, fvec[0], std::move(animRects),
+                                                false, tileW, tileH);
+                    }
+
                     if (reg.all_of<AnimationState>(e))
                         reg.remove<AnimationState>(e);
                     reg.emplace<AnimationState>(
@@ -639,6 +853,10 @@ void GameScene::Update(float dt) {
                         reg.emplace<TileAnimTag>(e);
                     if (!reg.all_of<DestroyAnimTag>(e))
                         reg.emplace<DestroyAnimTag>(e, (int)fvec.size(), def.fps, false);
+
+                    if (atag->cameraShake)
+                        mCamera.StartShake(6.0f, 0.25f);
+
                     continue;
                 } else {
                     std::print("[DestroyAnim] frame texture load failed\n");
@@ -670,10 +888,40 @@ void GameScene::Update(float dt) {
                        const AnimationSet& set) {
             hz.active = collision.onHazard;
             if (hz.active) {
+                mCamera.StartShake(2.5f, 0.15f);
                 hp.current -= HAZARD_DAMAGE_PER_SEC * dt;
                 if (hp.current <= 0.0f) {
                     hp.current = 0.0f;
-                    gameOver   = true;
+                    if (!mPlayerDying) {
+                        mPlayerDying    = true;
+                        mDeathAnimTimer = 0.0f;
+                        auto dv = reg.view<PlayerTag, Velocity>();
+                        dv.each([](Velocity& v) { v.dx = 0.0f; v.dy = 0.0f; });
+                        const std::vector<SDL_Rect>* deathFr = nullptr;
+                        SDL_Texture* deathSh = nullptr;
+                        float deathFps = 8.0f;
+                        AnimationID deathId = AnimationID::DEATH;
+                        if (!set.death.empty()) {
+                            deathFr  = &set.death;
+                            deathSh  = set.deathSheet;
+                            deathFps = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
+                        } else if (!set.hurt.empty()) {
+                            deathFr  = &set.hurt;
+                            deathSh  = set.hurtSheet;
+                            deathFps = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
+                            deathId  = AnimationID::HURT;
+                        }
+                        if (deathFr && deathSh) {
+                            r.sheet           = deathSh;
+                            r.frames          = *deathFr;
+                            anim.currentFrame = 0;
+                            anim.timer        = 0.0f;
+                            anim.fps          = deathFps;
+                            anim.looping      = false;
+                            anim.totalFrames  = (int)deathFr->size();
+                            anim.currentAnim  = deathId;
+                        }
+                    }
                 }
                 hz.flashTimer += dt;
                 // Attack always takes priority — never stomp it while in lava.
@@ -722,7 +970,7 @@ void GameScene::Update(float dt) {
         });
     }
 
-    if (totalCoins > 0 && coinCount >= totalCoins)
+    if (totalGoals > 0 && goalsCollected >= totalGoals)
         levelComplete = true;
 
     {
@@ -733,17 +981,27 @@ void GameScene::Update(float dt) {
                 cx, cy, mWindow->GetWidth(), mWindow->GetHeight(), mLevelW, mLevelH, dt);
         });
     }
+    mCamera.TickShake(dt);
 }
 
 void GameScene::Render(Window& window, float alpha) {
     SDL_Renderer* ren = window.GetRenderer();
     window.Render(); // clear
+
+    float totalShakeX = mCamera.shakeOffX + mCamera.punchOffX;
+    float totalShakeY = mCamera.shakeOffY + mCamera.punchOffY;
+    mCamera.x += totalShakeX;
+    mCamera.y += totalShakeY;
+
     if (background->GetFitMode() == FitMode::SCROLL)
         background->RenderScrolling(ren, mCamera.x, (float)mLevelW);
     else if (background->GetFitMode() == FitMode::SCROLL_WIDE)
         background->RenderScrollingWide(ren, mCamera.x, (float)mLevelW);
     else
         background->Render(ren);
+
+    for (size_t i = 0; i < mParallaxImages.size(); ++i)
+        mParallaxImages[i]->RenderScrolling(ren, mCamera.x * mParallaxFactors[i], (float)mLevelW);
 
     const int W = window.GetWidth();
     const int H = window.GetHeight();
@@ -754,13 +1012,19 @@ void GameScene::Render(Window& window, float alpha) {
                   W,
                   healthText.get(),
                   gravityText.get(),
-                  coinText.get(),
-                  coinCount,
+                  goalText.get(),
+                  totalGoals - goalsCollected,
+                  totalGoals,
                   stompText.get(),
                   stompCount);
         if (levelCompleteText)
             levelCompleteText->Render(ren);
     } else if (gameOver) {
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 140);
+        SDL_FRect dimOverlay = {0, 0, (float)W, (float)H};
+        SDL_RenderFillRect(ren, &dimOverlay);
         gameOverText->Render(ren);
         retryButton->Render(ren);
         retryBtnText->Render(ren);
@@ -804,6 +1068,7 @@ void GameScene::Render(Window& window, float alpha) {
                         case AnimationID::DUCK:  animName = "DUCK";  break;
                         case AnimationID::FRONT: animName = "FALL";  break;
                         case AnimationID::SLASH: animName = "SLASH"; break;
+                        case AnimationID::DEATH: animName = "DEATH"; break;
                         case AnimationID::NONE:  animName = "NONE";  break;
                     }
                     std::string info = std::string(animName) + " "
@@ -882,11 +1147,15 @@ void GameScene::Render(Window& window, float alpha) {
                   W,
                   healthText.get(),
                   gravityText.get(),
-                  coinText.get(),
-                  coinCount,
+                  goalText.get(),
+                  totalGoals - goalsCollected,
+                  totalGoals,
                   stompText.get(),
                   stompCount);
     }
+
+    mCamera.x -= totalShakeX;
+    mCamera.y -= totalShakeY;
 
     if (mPaused)
         RenderPauseOverlay(window);
@@ -965,32 +1234,13 @@ void GameScene::Spawn() {
 
     healthText  = std::make_unique<Text>("100", SDL_Color{255, 255, 255, 255}, 0, 0, 16);
     gravityText = std::make_unique<Text>("", SDL_Color{100, 200, 255, 255}, 0, 0, 20);
-    coinText =
-        std::make_unique<Text>("Gold Collected: 0", SDL_Color{255, 215, 0, 255}, 0, 0, 16);
+    goalText =
+        std::make_unique<Text>("Goals: 0", SDL_Color{0, 255, 120, 255}, 0, 0, 16);
     stompText = std::make_unique<Text>(
         "Enemies Stomped: 0", SDL_Color{255, 100, 100, 255}, 0, 0, 16);
 
-    coinSheet =
-        std::make_unique<SpriteSheet>("game_assets/gold_coins/", "Gold_", 30, 40, 40);
-    coinSheet->CreateTexture(ren);
-    std::vector<SDL_Rect> coinFrames = coinSheet->GetAnimation("Gold_");
-
-    auto spawnCoin = [&](float cx, float cy) {
-        auto coin = reg.create();
-        reg.emplace<Transform>(coin, cx, cy);
-        reg.emplace<PrevTransform>(coin, cx, cy); // interpolation
-        reg.emplace<Renderable>(coin, coinSheet->GetTexture(), coinFrames, false);
-        reg.emplace<AnimationState>(coin, 0, (int)coinFrames.size(), 0.0f, 15.0f, true);
-        reg.emplace<Collider>(coin, COIN_SIZE, COIN_SIZE);
-        reg.emplace<CoinTag>(coin);
-    };
-
-    if (!mLevelPath.empty()) {
-        for (const auto& c : mLevel.coins)
-            spawnCoin(c.x, c.y);
-    }
-
-    totalCoins = (int)reg.view<CoinTag>().size();
+    // Coins removed — goal tiles are now the level completion mechanic.
+    // totalGoals is computed during the tile spawn loop below.
 
     mLevelW = (float)mWindow->GetWidth();
     mLevelH = (float)mWindow->GetHeight();
@@ -1120,6 +1370,7 @@ void GameScene::Spawn() {
             base.fall  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Fall).hitbox);
             base.slash = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Slash).hitbox);
             base.hurt  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Hurt).hitbox);
+            base.death = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Death).hitbox);
         }
 
         reg.emplace<PlayerBaseCollider>(player, base);
@@ -1138,6 +1389,7 @@ void GameScene::Spawn() {
     reg.emplace<ClimbState>(player);
     reg.emplace<HazardState>(player);
     reg.emplace<AttackState>(player);
+    reg.emplace<DashState>(player);
     auto slotFps = [&](PlayerAnimSlot slot) -> float {
         return mSlotFps[static_cast<int>(slot)];
     };
@@ -1205,6 +1457,17 @@ void GameScene::Spawn() {
             .slash      = slashFrames,
             .slashSheet = resolveSheet(knightSlashSheet->GetTexture(), PlayerAnimSlot::Slash),
             .slashFps   = slotFps(PlayerAnimSlot::Slash),
+            .death      = deathFrames,
+            .deathSheet = [&]() -> SDL_Texture* {
+                if (customSlots.count(static_cast<int>(PlayerAnimSlot::Death)))
+                    return knightDeathSheet->GetTexture();
+                if (customSlots.count(static_cast<int>(PlayerAnimSlot::Hurt)))
+                    return knightHurtSheet->GetTexture();
+                if (mHasProfile)
+                    return idleT;
+                return knightDeathSheet->GetTexture();
+            }(),
+            .deathFps   = slotFps(PlayerAnimSlot::Death),
         });
 
     // Cache-aware tile texture helper.
@@ -1225,6 +1488,7 @@ void GameScene::Spawn() {
     };
 
     // ── Spawn tiles ───────────────────────────────────────────────────────────
+    totalGoals = 0;
     for (const auto& ts : mLevel.tiles) {
         if (IsAnimatedTile(ts.imagePath)) {
             AnimatedTileDef def;
@@ -1233,11 +1497,20 @@ void GameScene::Spawn() {
                 continue;
             }
 
-            // Each animation frame gets its own cache entry so they're reused
-            // across Respawn() calls without hitting disk again.
+            // Use the tile's actual w/h from the level data so animated tiles
+            // render at the same size they appear in the editor.
+            int animW = (ts.w > 0) ? ts.w : 38;
+            int animH = (ts.h > 0) ? ts.h : 38;
+
+            // Upload each animation frame at NATIVE resolution so the GPU
+            // scales at render time via the dst rect. Pre-scaling to animW x
+            // animH with NEAREST destroyed detail (lava looked like a flat
+            // orange strip). Passing 0,0 skips the CPU blit in
+            // LoadScaledTexture. The Renderable's renderW/renderH (set to
+            // animW/animH below) tells RenderSystem what dst size to draw.
             std::vector<SDL_Texture*> frameTex;
             for (const auto& fp : def.framePaths)
-                frameTex.push_back(getCachedTex(fp, ts.w, ts.h, ts.rotation));
+                frameTex.push_back(getCachedTex(fp, 0, 0, ts.rotation));
             if (frameTex.empty() || !frameTex[0])
                 continue;
 
@@ -1254,8 +1527,8 @@ void GameScene::Spawn() {
             reg.emplace<Transform>(tile, ts.x, ts.y);
 
             bool hasCustomHitbox = ts.HasHitbox();
-            int  colW = hasCustomHitbox ? (ts.hitbox->w > 0 ? ts.hitbox->w : ts.w) : ts.w;
-            int  colH = hasCustomHitbox ? (ts.hitbox->h > 0 ? ts.hitbox->h : ts.h) : ts.h;
+            int  colW = hasCustomHitbox ? (ts.hitbox->w > 0 ? ts.hitbox->w : animW) : animW;
+            int  colH = hasCustomHitbox ? (ts.hitbox->h > 0 ? ts.hitbox->h : animH) : animH;
 
             if (ts.ladder)
                 reg.emplace<LadderTag>(tile);
@@ -1275,16 +1548,63 @@ void GameScene::Spawn() {
                                        ts.action->group,
                                        ts.action->hitsRequired,
                                        ts.action->hitsRequired,
-                                       ts.action->destroyAnimPath);
-            if (!ts.prop || ts.hazard)
+                                       ts.action->destroyAnimPath,
+                                       ts.action->cameraShake);
+            if (!ts.prop || ts.hazard || ts.goal)
                 reg.emplace<Collider>(tile, colW, colH);
             if (hasCustomHitbox)
                 reg.emplace<ColliderOffset>(tile, ts.hitbox->offX, ts.hitbox->offY);
 
             reg.emplace<TileAnimTag>(tile);
-            reg.emplace<Renderable>(tile, frameTex[0], std::move(frameRects), false, ts.w, ts.h);
+            reg.emplace<Renderable>(tile, frameTex[0], std::move(frameRects), false, animW, animH);
             reg.emplace<AnimationState>(tile, 0, (int)frameTex.size(), 0.0f, def.fps, true);
             tileAnimFrameMap[tile] = std::move(frameTex);
+            if (ts.goal) {
+                reg.emplace<GoalTag>(tile);
+                totalGoals++;
+            }
+            if (ts.antiGravity) {
+                reg.emplace<FloatTag>(tile);
+                FloatState fs;
+                fs.baseY    = ts.y;
+                fs.bobAmp   = 4.0f + (rand() % 50) * 0.08f;
+                fs.bobSpeed = 1.4f + (rand() % 80) * 0.01f;
+                fs.bobPhase = (rand() % 628) * 0.01f;
+                reg.emplace<FloatState>(tile, fs);
+            }
+            if (ts.HasMoving()) {
+                const auto& mp = *ts.moving;
+                if (!reg.all_of<PrevTransform>(tile))
+                    reg.emplace<PrevTransform>(tile, ts.x, ts.y);
+                reg.emplace<MovingPlatformTag>(tile);
+                MovingPlatformState mps;
+                mps.horiz     = mp.horiz;
+                mps.range     = mp.range;
+                mps.speed     = mp.speed;
+                mps.groupId   = mp.groupId;
+                mps.originX   = ts.x;
+                mps.originY   = ts.y;
+                mps.loop      = mp.loop;
+                mps.trigger   = mp.trigger;
+                mps.triggered = false;
+                if (mp.loop) {
+                    mps.phase   = mp.phase * mp.range;
+                    mps.loopDir = mp.loopDir;
+                    if (mp.horiz)
+                        reg.get<Transform>(tile).x = ts.x + mps.phase;
+                } else {
+                    mps.phase   = mp.phase * 6.28318f;
+                    mps.loopDir = 1;
+                }
+                reg.emplace<MovingPlatformState>(tile, mps);
+            }
+            if (ts.HasPowerUp() && !ts.powerUp->type.empty()) {
+                PowerUpType puType = PowerUpType::None;
+                if (ts.powerUp->type == "antigravity")
+                    puType = PowerUpType::AntiGravity;
+                if (puType != PowerUpType::None)
+                    reg.emplace<PowerUpTag>(tile, puType, ts.powerUp->duration);
+            }
             continue;
         }
 
@@ -1323,7 +1643,8 @@ void GameScene::Spawn() {
             reg.emplace<PropTag>(tile);
         if (ts.HasAction())
             reg.emplace<ActionTag>(
-                tile, ts.action->group, ts.action->hitsRequired, ts.action->hitsRequired, ts.action->destroyAnimPath);
+                tile, ts.action->group, ts.action->hitsRequired, ts.action->hitsRequired,
+                ts.action->destroyAnimPath, ts.action->cameraShake);
 
         if (ts.antiGravity) {
             reg.emplace<FloatTag>(tile);
@@ -1374,6 +1695,11 @@ void GameScene::Spawn() {
                 reg.emplace<PowerUpTag>(tile, puType, ts.powerUp->duration);
         }
 
+        if (ts.goal) {
+            reg.emplace<GoalTag>(tile);
+            totalGoals++;
+        }
+
         // Source rect covers the full native-resolution texture.
         // RenderSystem draws it into a dst rect of ts.w x ts.h — the GPU
         // handles the scale with PIXELART mode for crisp results.
@@ -1387,6 +1713,12 @@ void GameScene::Spawn() {
     // ── Spawn enemies ─────────────────────────────────────────────────────────
     // Cache loaded enemy profile sprite sheets by type name so multiple enemies
     // of the same type share the same GPU texture.
+    // Helper: convert profile hitbox to ECS hitbox
+    auto toEnemyHitbox = [](const EnemyAnimHitbox& hb) -> EnemyHitbox {
+        if (hb.IsDefault()) return {};
+        return {hb.w, hb.h, hb.x, hb.y, -hb.x, -hb.y};
+    };
+
     struct EnemyTypeCache {
         SpriteSheet* idleSheet = nullptr;
         std::vector<SDL_Rect> idleFrames;
@@ -1404,6 +1736,12 @@ void GameScene::Spawn() {
         float deadFps = 6.0f;
         int spriteW = 40, spriteH = 40;
         float health = 30.0f;
+        // Per-animation hitboxes from profile
+        EnemyHitbox idleHitbox;
+        EnemyHitbox moveHitbox;
+        EnemyHitbox attackHitbox;
+        EnemyHitbox hurtHitbox;
+        EnemyHitbox deadHitbox;
     };
     std::unordered_map<std::string, std::shared_ptr<EnemyTypeCache>> enemyTypeCache;
     mEnemySpriteSheets.clear();  // clear from previous Spawn (Respawn path)
@@ -1467,6 +1805,13 @@ void GameScene::Spawn() {
         if (prof.HasFps(EnemyAnimSlot::Hurt))   tc->hurtFps   = prof.Slot(EnemyAnimSlot::Hurt).fps;
         if (prof.HasFps(EnemyAnimSlot::Dead))   tc->deadFps   = prof.Slot(EnemyAnimSlot::Dead).fps;
 
+        // Read per-animation hitboxes from profile
+        tc->idleHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Idle).hitbox);
+        tc->moveHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Move).hitbox);
+        tc->attackHitbox = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Attack).hitbox);
+        tc->hurtHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Hurt).hitbox);
+        tc->deadHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Dead).hitbox);
+
         // If Move has no frames, fall back to Idle for movement animation
         if (tc->moveFrames.empty() && !tc->idleFrames.empty()) {
             tc->moveFrames = tc->idleFrames;
@@ -1527,19 +1872,38 @@ void GameScene::Spawn() {
                     ead.moveSheet    = tex;
                     ead.moveFrames   = frames;
                     ead.moveFps      = fps;
+                    ead.moveHitbox   = tc->moveHitbox;
+                    ead.idleHitbox   = tc->idleHitbox;
                     ead.attackSheet  = tc->attackSheet ? tc->attackSheet->GetTexture() : nullptr;
                     ead.attackFrames = tc->attackFrames;
                     ead.attackFps    = tc->attackFps;
+                    ead.attackHitbox = tc->attackHitbox;
                     ead.hurtSheet    = tc->hurtSheet ? tc->hurtSheet->GetTexture() : tex;
                     ead.hurtFrames   = tc->hurtFrames.empty() ? frames : tc->hurtFrames;
                     ead.hurtFps      = tc->hurtFps;
+                    ead.hurtHitbox   = tc->hurtHitbox;
                     ead.deadSheet    = tc->deadSheet ? tc->deadSheet->GetTexture() : tex;
                     ead.deadFrames   = tc->deadFrames.empty() ? frames : tc->deadFrames;
                     ead.deadFps      = tc->deadFps;
+                    ead.deadHitbox   = tc->deadHitbox;
                     ead.spriteW      = tc->spriteW;
                     ead.spriteH      = tc->spriteH;
                     reg.emplace<EnemyAnimData>(enemy, std::move(ead));
                     reg.emplace<EnemyAttackState>(enemy);
+                    reg.emplace<EnemyClimbState>(enemy);
+
+                    // Apply the initial move/idle hitbox from the profile.
+                    // Use move hitbox if set, else idle, else full sprite.
+                    // Uses ApplyHitbox which sets Collider + RenderOffset
+                    // (no ColliderOffset -- CollisionSystem ignores it for enemies).
+                    const EnemyHitbox& initHB = !tc->moveHitbox.IsDefault() ? tc->moveHitbox
+                                              : !tc->idleHitbox.IsDefault() ? tc->idleHitbox
+                                              : EnemyHitbox{};
+                    if (!initHB.IsDefault()) {
+                        // Need ead ref from the entity we just emplaced
+                        auto& eadRef = reg.get<EnemyAnimData>(enemy);
+                        eadRef.ApplyHitbox(initHB, reg, enemy);
+                    }
 
                     usedProfile = true;
                 }
@@ -1555,6 +1919,7 @@ void GameScene::Spawn() {
             eh.current = SLIME_MAX_HEALTH;
             eh.max     = SLIME_MAX_HEALTH;
             reg.emplace<Health>(enemy, eh);
+            reg.emplace<EnemyClimbState>(enemy);
         }
 
         if (es.antiGravity) {
@@ -1597,9 +1962,11 @@ void GameScene::Respawn() {
     // All tile textures are already uploaded to the GPU and can be reused as-is.
     // They are only freed in Unload() when the scene is torn down entirely.
     gameOver           = false;
+    mPlayerDying       = false;
+    mDeathAnimTimer    = 0.0f;
     levelComplete      = false;
     levelCompleteTimer = 2.0f;
-    coinCount          = 0;
+    goalsCollected    = 0;
     stompCount         = 0;
     mCamera            = Camera{};
     Spawn();

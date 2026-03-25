@@ -9,6 +9,7 @@
 #include "TitleScene.hpp"
 #include <SDL3_ttf/SDL_ttf.h>
 #include <climits>
+#include <cstdio>
 #include <print>
 
 namespace fs = std::filesystem;
@@ -104,6 +105,16 @@ void LevelEditorScene::ApplyBackground(int idx) {
     });
 }
 
+void LevelEditorScene::RebuildParallaxImages() {
+    mParallaxImages.clear();
+    for (const auto& pl : mLevel.parallaxLayers) {
+        if (pl.imagePath.empty()) { mParallaxImages.push_back(nullptr); continue; }
+        auto img = std::make_unique<Image>(pl.imagePath, FitMode::SCROLL);
+        img->SetRepeat(true);
+        mParallaxImages.push_back(std::move(img));
+    }
+}
+
 // ─── Load ─────────────────────────────────────────────────────────────────────
 void LevelEditorScene::Load(Window& window) {
     mWindow     = &window;
@@ -115,8 +126,6 @@ void LevelEditorScene::Load(Window& window) {
 
     background = std::make_unique<Image>("game_assets/backgrounds/deepspace_scene.png",
                                          FitModeFromString(mLevel.bgFitMode));
-    coinSheet  = std::make_unique<SpriteSheet>(
-        "game_assets/gold_coins/", "Gold_", 30, ICON_SIZE, ICON_SIZE);
     enemySheet = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
@@ -126,7 +135,7 @@ void LevelEditorScene::Load(Window& window) {
     //   mForceNew == true          → skip all loading, start blank
     //   mOpenPath non-empty        → load that specific file
     //   mOpenPath empty, no force  → auto-resume levels/level1.json if it exists
-    if (!mForceNew && mLevel.coins.empty() && mLevel.enemies.empty() &&
+    if (!mForceNew && mLevel.enemies.empty() &&
         mLevel.tiles.empty()) {
         std::string autoPath;
         if (!mOpenPath.empty()) {
@@ -144,6 +153,7 @@ void LevelEditorScene::Load(Window& window) {
                                                      FitModeFromString(mLevel.bgFitMode));
                 background->SetRepeat(mLevel.bgRepeat);
             }
+            RebuildParallaxImages();
         } else if (!mOpenPath.empty()) {
             // Path given but file doesn't exist yet — new level with that name
             SetStatus("New level: " + mLevelName);
@@ -201,6 +211,17 @@ void LevelEditorScene::Load(Window& window) {
     // Initialize popup subsystem
     mPopups.powerUpRegistry = &GetPowerUpRegistry();
     mPopups.movPlatGroupId  = mMovPlatCurGroupId;
+
+    // ── Centre camera on player spawn ─────────────────────────────────────
+    // Position the camera so the player spawn point sits 100px from the
+    // left edge of the canvas. Clamp to (0,0) so we never go negative.
+    {
+        float spawnCamX = mLevel.player.x - 100.0f;
+        float spawnCamY = mLevel.player.y - window.GetHeight() * 0.5f;
+        if (spawnCamX < 0.0f) spawnCamX = 0.0f;
+        if (spawnCamY < 0.0f) spawnCamY = 0.0f;
+        mCamera.SetPosition(spawnCamX, spawnCamY);
+    }
 
     // Initialize the default tool
     SwitchTool(ToolId::MoveCam);
@@ -490,8 +511,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 lblTool->CreateSurface("Select");
                 break;
             case SDLK_1:
-                SwitchTool(ToolId::Coin);
-                lblTool->CreateSurface("Coin");
+                SwitchTool(ToolId::Goal);
+                lblTool->CreateSurface("Goal");
                 break;
             case SDLK_2:
                 SwitchTool(ToolId::Enemy);
@@ -594,9 +615,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     if (!mLevel.tiles.empty()) {
                         mLevel.tiles.pop_back();
                         SetStatus("Undo tile");
-                    } else if (!mLevel.coins.empty()) {
-                        mLevel.coins.pop_back();
-                        SetStatus("Undo coin");
                     } else if (!mLevel.enemies.empty()) {
                         mLevel.enemies.pop_back();
                         SetStatus("Undo enemy");
@@ -868,9 +886,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (click.kind == EditorToolbar::ClickResult::Kind::Button) {
                 CloseAnimPicker();
                 switch (click.button) {
-                    case TBBtn::Coin:
-                        SwitchTool(ToolId::Coin);
-                        lblTool->CreateSurface("Coin");
+                    case TBBtn::Goal:
+                        SwitchTool(ToolId::Goal);
+                        lblTool->CreateSurface("Goal");
                         return true;
                     case TBBtn::Enemy:
                         SwitchTool(ToolId::Enemy);
@@ -982,6 +1000,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                             if (!mLevel.background.empty())
                                 background = std::make_unique<Image>(
                                     mLevel.background, FitModeFromString(mLevel.bgFitMode));
+                            RebuildParallaxImages();
                             LoadBgPalette();
                             mCamera.SetPosition(0.0f, 0.0f);
                         } else
@@ -989,7 +1008,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                         return true;
                     }
                     case TBBtn::Clear:
-                        mLevel.coins.clear();
                         mLevel.enemies.clear();
                         mLevel.tiles.clear();
                         SetStatus("Cleared");
@@ -1146,11 +1164,50 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     }
                 }
 
+                // ── Parallax layer controls ──────────────────────────────────
+                constexpr int PLX_ROW_H = 34;
+                constexpr int PLX_HDR_H = 28;
+                constexpr int BTN_SZ    = 20;
+                constexpr int BTN_GAP   = 4;
+                int plxCount = (int)mLevel.parallaxLayers.size();
+                int plxAreaH = PLX_HDR_H + std::max(plxCount, 1) * PLX_ROW_H + 6;
+                int plxY     = mWindow->GetHeight() - plxAreaH + PLX_HDR_H;
+
+                for (int li = 0; li < plxCount; ++li) {
+                    int ry   = plxY + li * PLX_ROW_H;
+                    int btnY = ry + (PLX_ROW_H - BTN_SZ) / 2;
+                    int minusX = CanvasW() + PALETTE_W - 3 * (BTN_SZ + BTN_GAP);
+                    int plusX  = CanvasW() + PALETTE_W - 2 * (BTN_SZ + BTN_GAP);
+                    int delX   = CanvasW() + PALETTE_W - 1 * (BTN_SZ + BTN_GAP);
+
+                    if (mx >= delX && mx < delX + BTN_SZ && my >= btnY && my < btnY + BTN_SZ) {
+                        std::string name = fs::path(mLevel.parallaxLayers[li].imagePath).filename().string();
+                        mLevel.parallaxLayers.erase(mLevel.parallaxLayers.begin() + li);
+                        RebuildParallaxImages();
+                        SetStatus("Removed parallax layer: " + name);
+                        return true;
+                    }
+                    if (mx >= minusX && mx < minusX + BTN_SZ && my >= btnY && my < btnY + BTN_SZ) {
+                        auto& f = mLevel.parallaxLayers[li].scrollFactor;
+                        f = std::max(0.0f, f - 0.05f);
+                        char buf[32]; std::snprintf(buf, sizeof(buf), "%.2f", f);
+                        SetStatus("Parallax scroll: " + std::string(buf));
+                        return true;
+                    }
+                    if (mx >= plusX && mx < plusX + BTN_SZ && my >= btnY && my < btnY + BTN_SZ) {
+                        auto& f = mLevel.parallaxLayers[li].scrollFactor;
+                        f = std::min(2.0f, f + 0.05f);
+                        char buf[32]; std::snprintf(buf, sizeof(buf), "%.2f", f);
+                        SetStatus("Parallax scroll: " + std::string(buf));
+                        return true;
+                    }
+                }
+
+                // ── Bg item click ───────────────────────────────────────────
                 int relY = my - TOOLBAR_H - TAB_H - 24 - PAD; // 24 = bg header strip
                 int row  = relY / itemH;
                 int idx  = mPalette.BgScroll() + row;
                 if (idx >= 0 && idx < (int)mPalette.BgItems().size()) {
-                    // Delete button?
                     if (mPalette.BgItems()[idx].delBtn.x >= 0 &&
                         HitTest(mPalette.BgItems()[idx].delBtn, mx, my)) {
                         mPopups.OpenDeleteConfirm(
@@ -1158,7 +1215,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                             false,
                             fs::path(mPalette.BgItems()[idx].path).filename().string());
                     } else {
-                        ApplyBackground(idx);
+                        bool shiftHeld = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
+                        if (shiftHeld) {
+                            ParallaxLayer pl;
+                            pl.imagePath    = mPalette.BgItems()[idx].path;
+                            pl.scrollFactor = 0.5f;
+                            pl.yOffset      = 0.0f;
+                            mLevel.parallaxLayers.push_back(std::move(pl));
+                            RebuildParallaxImages();
+                            SetStatus("Added parallax layer: " +
+                                      mPalette.BgItems()[idx].label + " (scroll: 0.50)");
+                        } else {
+                            ApplyBackground(idx);
+                        }
                     }
                 }
             }
@@ -1326,7 +1395,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         // Only start drag for inline tools that don't have their own entity-drag.
         // Extracted tools (Prop, Ladder, Slope, Hazard, AntiGrav, Select, Resize,
         // Hitbox) handle drag via mTool->OnMouseDown()/OnMouseMove()/OnMouseUp().
-        if (mActiveToolId != ToolId::Erase && mActiveToolId != ToolId::Coin &&
+        if (mActiveToolId != ToolId::Erase && mActiveToolId != ToolId::Goal &&
             mActiveToolId != ToolId::Enemy && mActiveToolId != ToolId::Tile &&
             mActiveToolId != ToolId::MoveCam && mActiveToolId != ToolId::PlayerStart &&
             mActiveToolId != ToolId::Prop && mActiveToolId != ToolId::Ladder &&
@@ -1338,22 +1407,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 mIsDragging = true;
                 mDragIndex  = ti;
                 mDragIsTile = true;
-                mDragIsCoin = false;
-                return true;
-            }
-            int ci = HitCoin(mx, my);
-            if (ci >= 0) {
-                mIsDragging = true;
-                mDragIndex  = ci;
-                mDragIsCoin = true;
-                mDragIsTile = false;
                 return true;
             }
             int ei = HitEnemy(mx, my);
             if (ei >= 0) {
                 mIsDragging = true;
                 mDragIndex  = ei;
-                mDragIsCoin = false;
                 mDragIsTile = false;
                 return true;
             }
@@ -1405,10 +1464,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             if (mDragIsTile && mDragIndex < (int)mLevel.tiles.size()) {
                 mLevel.tiles[mDragIndex].x = (float)sx;
                 mLevel.tiles[mDragIndex].y = (float)sy;
-            } else if (mDragIsCoin && mDragIndex < (int)mLevel.coins.size()) {
-                mLevel.coins[mDragIndex].x = (float)sx;
-                mLevel.coins[mDragIndex].y = (float)sy;
-            } else if (!mDragIsCoin && !mDragIsTile &&
+            } else if (!mDragIsTile &&
                        mDragIndex < (int)mLevel.enemies.size()) {
                 mLevel.enemies[mDragIndex].x = (float)sx;
                 mLevel.enemies[mDragIndex].y = (float)sy;
@@ -1460,6 +1516,12 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     mp.speedStr   = mPopups.movPlatSpeedStr;
     mp.popupRect  = mPopups.movPlatRect;
 
+    // Build parallax scroll factors from level data for the canvas renderer
+    std::vector<float> plxFactors;
+    plxFactors.reserve(mLevel.parallaxLayers.size());
+    for (const auto& pl : mLevel.parallaxLayers)
+        plxFactors.push_back(pl.scrollFactor);
+
     mCanvasRenderer.Render(window,
                            screen,
                            cw,
@@ -1470,13 +1532,14 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
                            mSurfaceCache,
                            mPalette,
                            background.get(),
-                           coinSheet.get(),
                            enemySheet.get(),
                            mActiveToolId,
                            mTool.get(),
                            MakeToolCtx(),
                            mActionAnimDropHover,
-                           mp);
+                           mp,
+                           &mParallaxImages,
+                           &plxFactors);
 
     // Sync back the popup rect (canvas renderer computes it when popup is open)
     mPopups.movPlatRect = mCanvasRenderer.MovPlatPopupRect();
@@ -1555,7 +1618,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
                        lblCamPos,
                        lblBottomHint,
                        mLastTileCount,
-                       mLastCoinCount,
                        mLastEnemyCount,
                        mLastCamX,
                        mLastCamY,
@@ -1566,12 +1628,17 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     // Sync back rects that HandleEvent needs
     mPopups.delYes         = mUIRenderer.DelConfirmYesRect();
     mPopups.delNo          = mUIRenderer.DelConfirmNoRect();
-    mPopups.animPickerRect = mUIRenderer.AnimPickerRect();
+    mPopups.animPickerRect       = mUIRenderer.AnimPickerRect();
+    mPopups.camShakeToggleRect   = mUIRenderer.CamShakeToggleRect();
 
-    // Upload completed surface to GPU and present
+    // Upload completed surface to GPU and present.
+    // Use LINEAR filtering — the surface contains anti-aliased text from
+    // TTF_RenderText_Blended. NEAREST would make text blocky, especially
+    // on Retina/HiDPI where the logical surface is upscaled 2x.
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, screen);
     SDL_DestroySurface(screen);
     if (tex) {
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
         SDL_RenderTexture(ren, tex, nullptr, nullptr);
         SDL_DestroyTexture(tex);
     }

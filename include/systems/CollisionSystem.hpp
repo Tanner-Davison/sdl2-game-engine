@@ -54,7 +54,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
 
     auto liveEnemyView = reg.view<EnemyTag, Transform, Collider>(entt::exclude<DeadTag>);
     auto deadEnemyView = reg.view<DeadTag, Transform, Collider>();
-    auto coinView      = reg.view<CoinTag, Transform, Collider>();
+    auto goalView      = reg.view<GoalTag, Transform, Collider>();
     auto playerView    = reg.view<PlayerTag, GravityState, Transform, Collider, Health, InvincibilityTimer>();
 
     std::vector<entt::entity> toKill;
@@ -85,13 +85,58 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         };
 
         // -- Live enemy collisions ---------------------------------------------
+        bool dashing = false;
+        if (auto* ds = reg.try_get<DashState>(playerEnt))
+            dashing = ds->active;
+
         liveEnemyView.each([&](entt::entity enemy, const Transform& et, const Collider& ec) {
+            // While dashing the player phases through enemies — no damage,
+            // no stomp, no push-out.
+            if (dashing) return;
+
             if (isStomp(et, ec)) {
-                toKill.push_back(enemy);
+                auto* eh = reg.try_get<Health>(enemy);
+                if (!eh) {
+                    toKill.push_back(enemy);
+                    result.lowestHitHpFrac = 0.0f;
+                } else {
+                    float dmg = eh->max * STOMP_DAMAGE_FRAC;
+                    eh->current -= dmg;
+                    {
+                        float frac = std::max(eh->current, 0.0f) / eh->max;
+                        if (frac < result.lowestHitHpFrac)
+                            result.lowestHitHpFrac = frac;
+                    }
+
+                    if (!reg.all_of<HitFlash>(enemy))
+                        reg.emplace<HitFlash>(enemy, 0.15f, 0.15f);
+                    else
+                        reg.get<HitFlash>(enemy).timer = 0.15f;
+
+                    if (auto* ead = reg.try_get<EnemyAnimData>(enemy);
+                        ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
+                        auto& r    = reg.get<Renderable>(enemy);
+                        auto& anim = reg.get<AnimationState>(enemy);
+                        r.sheet         = ead->hurtSheet;
+                        r.frames        = ead->hurtFrames;
+                        r.renderW       = ead->spriteW;
+                        r.renderH       = ead->spriteH;
+                        anim.currentFrame = 0;
+                        anim.totalFrames  = (int)ead->hurtFrames.size();
+                        anim.fps          = ead->hurtFps;
+                        anim.looping      = false;
+                        ead->ApplyHitbox(ead->hurtHitbox, reg, enemy);
+                    }
+
+                    if (eh->current <= 0.0f) {
+                        eh->current = 0.0f;
+                        toKill.push_back(enemy);
+                    }
+                }
                 result.enemiesStomped++;
                 g.velocity   = -JUMP_FORCE * 0.5f;
                 g.isGrounded = false;
-                return; // stomped — skip push-out
+                return;
             }
 
             if (!inv.isInvincible && aabb(et, ec)) {
@@ -100,10 +145,10 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     health.current    = 0.0f;
                     result.playerDied = true;
                 }
+                result.playerHit  = true;
                 inv.isInvincible  = true;
-                inv.remaining     = 0.15f; // just enough to prevent same-frame double-hit
+                inv.remaining     = 0.15f;
 
-                // Player knockback: push player away from enemy
                 {
                     float playerCX = pt.x + pw * 0.5f;
                     float enemyCX  = et.x + ec.w * 0.5f;
@@ -111,7 +156,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     pt.x += kbDir * 24.0f;
                 }
 
-                // Play enemy attack animation
                 auto* eas = reg.try_get<EnemyAttackState>(enemy);
                 auto* ead = reg.try_get<EnemyAnimData>(enemy);
                 if (eas && ead && !eas->attacking &&
@@ -127,22 +171,19 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     anim.fps          = ead->attackFps;
                     anim.looping      = false;
                     eas->attacking    = true;
-                    eas->cooldown     = 0.8f; // seconds before can attack again
+                    eas->cooldown     = 0.8f;
+                    ead->ApplyHitbox(ead->attackHitbox, reg, enemy);
                 }
             }
 
-            // -- Solid enemy push-out (horizontal only) --
-            // Only push left/right so the player can't walk through enemies.
-            // Never push vertically — that causes the teleport-to-top glitch.
-            // Stomping and landing-on-top are handled separately.
             if (aabb(et, ec)) {
                 float oLeft  = (pt.x + pw) - et.x;
                 float oRight = (et.x + ec.w) - pt.x;
                 if (oLeft <= 0 || oRight <= 0) return;
                 if (oLeft < oRight)
-                    pt.x = et.x - pw;      // push left
+                    pt.x = et.x - pw;
                 else
-                    pt.x = et.x + ec.w;    // push right
+                    pt.x = et.x + ec.w;
             }
         });
 
@@ -231,11 +272,12 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 }
             });
 
-            // Coin collection
-            coinView.each([&](entt::entity coin, const Transform& ct, const Collider& cc) {
+            // Goal collection — skip goals that require an action to be completed first
+            goalView.each([&](entt::entity goal, const Transform& ct, const Collider& cc) {
+                if (reg.all_of<ActionTag>(goal)) return;
                 if (aabb(ct, cc)) {
-                    toDestroy.push_back(coin);
-                    result.coinsCollected++;
+                    toDestroy.push_back(goal);
+                    result.goalsCollected++;
                 }
             });
             return; // skip all gravity-based collision logic
@@ -322,20 +364,31 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 // SLOPE_JUMP_THRESHOLD gives a small tolerance: gentle upward
                 // corrections from SLOPE_STICK_VELOCITY (walking uphill) are
                 // still treated as grounded, but a real jump (-JUMP_FORCE) is not.
-                constexpr float SLOPE_JUMP_THRESHOLD = -80.0f; // px/s — below this = real jump
+                // [SLOPE FIX] Any upward velocity = jumping, slope should not interfere.
+                constexpr float SLOPE_JUMP_THRESHOLD = 0.0f; // px/s — below this = real jump
                 bool risingFast = (g.velocity < SLOPE_JUMP_THRESHOLD);
 
                 if (!risingFast) {
-                    // Descending, stationary, or barely rising (walk-uphill correction):
-                    // snap to slope and mark grounded.
-                    pt.y         = bestSurface - pc.h;
-                    g.velocity   = 0.0f;
-                    g.isGrounded = true;
+                    // Descending or stationary: snap to slope only if feet
+                    // are close to the surface. Prevents teleporting down
+                    // from far above after a high jump over a slope tile.
+                    float feetToSurface = bestSurface - pFeet;
+                    if (feetToSurface >= -SLOPE_SNAP_LOOKAHEAD &&
+                        feetToSurface <=  SLOPE_SNAP_LOOKAHEAD) {
+                        pt.y         = bestSurface - pc.h;
+                        g.velocity   = 0.0f;
+                        g.isGrounded = true;
+                        // Only suppress flat-tile corrections when actually
+                        // grounded on the slope, not when airborne above it.
+                        onSlopeThisFrame = true;
+                    }
                 }
-                // Always set onSlopeThisFrame so Pass 1/2 flat-tile corrections
-                // are suppressed — we don’t want flat tiles fighting the slope
+                // When rising or too far above, onSlopeThisFrame stays false
+                // so flat-tile Pass 1/2 corrections work normally.
+                // Old code unconditionally set onSlopeThisFrame = true here,
+                // which suppressed flat-tile collisions while jumping over slopes.
+                // Now onSlopeThisFrame is only set when grounded on the slope. — we don’t want flat tiles fighting the slope
                 // geometry even while the player is jumping off it.
-                onSlopeThisFrame = true;
             }
         }
 
@@ -582,12 +635,19 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 // Apply slash damage to the enemy's health
                 auto* eh = reg.try_get<Health>(enemy);
                 if (!eh) {
-                    // No health component — one-shot kill (legacy behaviour)
                     toKill.push_back(enemy);
                     result.enemiesSlashed++;
+                    result.slashHits++;
+                    result.lowestHitHpFrac = 0.0f;
                     return;
                 }
                 eh->current -= SLASH_DAMAGE;
+                result.slashHits++;
+                {
+                    float frac = std::max(eh->current, 0.0f) / eh->max;
+                    if (frac < result.lowestHitHpFrac)
+                        result.lowestHitHpFrac = frac;
+                }
 
                 // Knockback: small positional nudge away from the player.
                 // Only moves position — does NOT override velocity, so the
@@ -619,6 +679,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     anim.totalFrames  = (int)ead->hurtFrames.size();
                     anim.fps          = ead->hurtFps;
                     anim.looping      = false;
+                    ead->ApplyHitbox(ead->hurtHitbox, reg, enemy);
                 }
                 if (eh->current <= 0.0f) {
                     eh->current = 0.0f;
@@ -628,15 +689,14 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             });
         }
 
-        // -- Coin collection --------------------------------------------------
-        if (g.active) {
-            coinView.each([&](entt::entity coin, const Transform& ct, const Collider& cc) {
-                if (aabb(ct, cc)) {
-                    toDestroy.push_back(coin);
-                    result.coinsCollected++;
-                }
-            });
-        }
+        // -- Goal collection (skip goals guarded by an action) ----------------
+        goalView.each([&](entt::entity goal, const Transform& gt, const Collider& gc) {
+            if (reg.all_of<ActionTag>(goal)) return;
+            if (aabb(gt, gc)) {
+                toDestroy.push_back(goal);
+                result.goalsCollected++;
+            }
+        });
     });
 
     // -- Commit deferred mutations --------------------------------------------
@@ -668,6 +728,7 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 anim.totalFrames  = (int)ead->deadFrames.size();
                 anim.fps          = ead->deadFps;
                 anim.looping      = false;
+                ead->ApplyHitbox(ead->deadHitbox, reg, e);
             } else if (reg.all_of<FaceRightTag>(e)) {
                 // Custom enemy without dead frames: freeze
                 anim.looping = false;

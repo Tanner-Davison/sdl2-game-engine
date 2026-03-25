@@ -78,6 +78,7 @@ class EditorPopups {
     // ── Destroy-anim picker ───────────────────────────────────────────────────
     int                      animPickerTile = -1;  // -1 = closed
     SDL_Rect                 animPickerRect{};
+    SDL_Rect                 camShakeToggleRect{};
     std::vector<AnimPickerEntry> animPickerEntries;
 
     void OpenAnimPicker(int tileIdx, Ctx& ctx);

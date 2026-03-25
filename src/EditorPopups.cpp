@@ -198,6 +198,17 @@ bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
         return false; // let click propagate to canvas
     }
 
+    if (HitTest(camShakeToggleRect, mx, my)) {
+        if (animPickerTile < (int)ctx.level.tiles.size() &&
+            ctx.level.tiles[animPickerTile].HasAction()) {
+            auto& shake = ctx.level.tiles[animPickerTile].action->cameraShake;
+            shake = !shake;
+            ctx.setStatus("Tile " + std::to_string(animPickerTile) +
+                          ": camera shake " + (shake ? "ON" : "OFF"));
+        }
+        return true;
+    }
+
     // Re-derive cell geometry (must match EditorUIRenderer exactly)
     const int THUMB   = 48;
     const int ROW_H   = THUMB + 10;

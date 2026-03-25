@@ -43,7 +43,7 @@ class EditorToolbar {
     // The ordering within each group is significant for layout.
     enum class ButtonId : uint8_t {
         // Group 1 - Place tools
-        Coin,
+        Goal,
         Enemy,
         Tile,
         Erase,

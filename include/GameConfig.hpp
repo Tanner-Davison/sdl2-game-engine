@@ -1,5 +1,7 @@
 #pragma once
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 // -- Player stats -------------------------------------------------------------
 inline constexpr float PLAYER_HIT_DAMAGE = 15.0f;
@@ -41,6 +43,7 @@ inline constexpr int PLAYER_DUCK_ROFF_Y  = -(PLAYER_SPRITE_HEIGHT - PLAYER_DUCK_
 // -- Enemy stats -------------------------------------------------------------
 inline constexpr float SLIME_MAX_HEALTH = 30.0f;
 inline constexpr float SLASH_DAMAGE     = 30.0f; // damage dealt per sword swing
+inline constexpr float STOMP_DAMAGE_FRAC = 0.15f; // fraction of enemy max HP dealt per stomp
 
 // -- Sword / attack hitbox ---------------------------------------------------
 inline constexpr float SWORD_REACH  = 56.0f; // px the hitbox extends in front of the player
@@ -58,8 +61,15 @@ inline constexpr float MAX_FALL_SPEED     = 1500.0f;
 inline constexpr float PLAYER_SPEED       = 250.0f;
 inline constexpr float CLIMB_SPEED        = 350.0f;
 inline constexpr float CLIMB_STRAFE_SPEED = 220.0f;
-inline constexpr float SPRINT_MULTIPLIER   = 1.2f;   // Shift held = 20% faster
-inline constexpr float CROUCH_FRICTION     = 6.0f;   // how fast you decelerate while crouching (higher = quicker stop)
+inline constexpr float SPRINT_MULTIPLIER  = 1.2f; // Shift held = 20% faster
+inline constexpr float CROUCH_FRICTION =
+    6.0f; // how fast you decelerate while crouching (higher = quicker stop)
+
+// -- Dash (double-tap) --------------------------------------------------------
+inline constexpr float DASH_SPEED      = 800.0f; // px/s during dash
+inline constexpr float DASH_DURATION   = 0.35f;  // seconds the dash lasts
+inline constexpr float DASH_COOLDOWN   = 0.45f;  // seconds between dashes
+inline constexpr float DASH_TAP_WINDOW = 0.25f;  // max seconds between taps to trigger
 
 // -- Tile step-up -------------------------------------------------------------
 // Matches the editor grid size so the player can walk onto a single tile
@@ -70,11 +80,9 @@ inline constexpr float STEP_UP_HEIGHT = 48.0f;
 inline constexpr float SLOPE_SNAP_LOOKAHEAD = 40.0f;
 inline constexpr float SLOPE_STICK_VELOCITY = 16.0f;
 
-// -- World / spawn counts -----------------------------------------------------
-inline constexpr int COIN_SIZE = 40;
-
 // -- Camera -------------------------------------------------------------------
-inline constexpr float CAM_LERP_SPEED = 12.0f; // higher = snappier follow; stable now that physics runs at fixed 120 Hz
+inline constexpr float CAM_LERP_SPEED =
+    12.0f; // higher = snappier follow; stable now that physics runs at fixed 120 Hz
 inline constexpr float CAM_DEADZONE_X =
     80.0f; // px from center before camera moves horizontally
 inline constexpr float CAM_DEADZONE_Y =
@@ -83,6 +91,62 @@ inline constexpr float CAM_DEADZONE_Y =
 struct Camera {
     float x = 0.0f; // current top-left world position shown at screen origin
     float y = 0.0f;
+
+    // ── Screen shake (random noise -- damage, hazards, explosions) ──────────
+    float shakeTimer     = 0.0f;
+    float shakeDuration  = 0.0f;
+    float shakeIntensity = 0.0f;
+    float shakeOffX      = 0.0f;
+    float shakeOffY      = 0.0f;
+
+    void StartShake(float intensity, float duration) {
+        if (intensity >= shakeIntensity || shakeTimer <= 0.0f) {
+            shakeIntensity = intensity;
+            shakeTimer     = duration;
+            shakeDuration  = duration;
+        }
+    }
+
+    // ── Hit punch (directional jolt -- stomps, slashes, satisfying hits) ──
+    float punchTimer     = 0.0f;
+    float punchDuration  = 0.0f;
+    float punchIntensity = 0.0f;
+    float punchDirX      = 0.0f;
+    float punchDirY      = 0.0f;
+    float punchOffX      = 0.0f;
+    float punchOffY      = 0.0f;
+
+    void StartPunch(float dirX, float dirY, float intensity, float duration) {
+        punchDirX      = dirX;
+        punchDirY      = dirY;
+        punchIntensity = intensity;
+        punchTimer     = duration;
+        punchDuration  = duration;
+    }
+
+    void TickShake(float dt) {
+        if (shakeTimer > 0.0f) {
+            shakeTimer -= dt;
+            float factor = std::max(shakeTimer, 0.0f) / shakeDuration;
+            float amp    = shakeIntensity * factor;
+            shakeOffX = ((rand() % 201 - 100) / 100.0f) * amp;
+            shakeOffY = ((rand() % 201 - 100) / 100.0f) * amp;
+        } else {
+            shakeOffX = 0.0f;
+            shakeOffY = 0.0f;
+        }
+
+        if (punchTimer > 0.0f) {
+            punchTimer -= dt;
+            float t   = std::max(punchTimer, 0.0f) / punchDuration;
+            float amp = punchIntensity * t;
+            punchOffX = punchDirX * amp;
+            punchOffY = punchDirY * amp;
+        } else {
+            punchOffX = 0.0f;
+            punchOffY = 0.0f;
+        }
+    }
 
     // Call once per frame after the player has moved.
     // playerCX/CY: centre of the player collider in world space.

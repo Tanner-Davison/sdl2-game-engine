@@ -75,6 +75,8 @@ void Image::UploadSurface(SDL_Renderer* renderer) {
     mTexture = SDL_CreateTextureFromSurface(renderer, mPendingSurface);
     if (!mTexture)
         std::print("Image: failed to create texture: {}\n", SDL_GetError());
+    else
+        SDL_SetTextureBlendMode(mTexture, SDL_BLENDMODE_BLEND);
     SDL_DestroySurface(mPendingSurface);
     mPendingSurface = nullptr;
 }

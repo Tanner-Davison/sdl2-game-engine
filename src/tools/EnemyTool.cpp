@@ -179,6 +179,14 @@ ToolResult EnemyTool::OnKeyDown(EditorToolContext& ctx, SDL_Keycode key,
 // the F-key toggle is handled in OnMouseDown (right-click) for existing
 // enemies and via the overlay button for new placements.
 
+// ── Mouse move: track cursor for ghost outline ───────────────────────────────
+ToolResult EnemyTool::OnMouseMove(EditorToolContext& ctx, int mx, int my) {
+    cursorScreenX  = mx;
+    cursorScreenY  = my;
+    cursorOnCanvas = (my >= ctx.ToolbarH() && mx < ctx.CanvasW());
+    return ToolResult::Ignored;
+}
+
 // ── Scroll: adjust placement speed ───────────────────────────────────────────
 ToolResult EnemyTool::OnScroll(EditorToolContext& ctx, float wheelY,
                                int mx, int my, SDL_Keymod /*mods*/) {
@@ -343,6 +351,52 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
         if (valBadge) {
             SDL_Rect vd = {fieldRect.x + 4, fieldRect.y + 4, valBadge->w, valBadge->h};
             SDL_BlitSurface(valBadge, nullptr, screen, &vd);
+        }
+    }
+
+    // ── Ghost outline at cursor ──────────────────────────────────────────────
+    if (cursorOnCanvas && !speedPopupOpen) {
+        int sprW = ctx.Grid(), sprH = ctx.Grid();
+        EnemyProfile ghostProf;
+        bool hasProf = false;
+        if (!selectedType.empty())
+            hasProf = LoadEnemyProfile(EnemyProfilePath(selectedType), ghostProf);
+        if (hasProf) {
+            sprW = (ghostProf.spriteW > 0) ? ghostProf.spriteW : sprW;
+            sprH = (ghostProf.spriteH > 0) ? ghostProf.spriteH : sprH;
+        }
+
+        auto [sx, sy] = ctx.SnapToGrid(cursorScreenX, cursorScreenY);
+        auto sp = ctx.WorldToScreen((float)sx, (float)sy);
+
+        SDL_Rect ghostRect = {sp.x, sp.y, (int)(sprW * ctx.Zoom()), (int)(sprH * ctx.Zoom())};
+
+        // Semi-transparent fill
+        ctx.DrawRectAlpha(screen, ghostRect, {255, 100, 60, 45});
+
+        // Sprite thumbnail inside the ghost
+        if (hasProf) {
+            std::string preview = EnemyPreviewImagePath(ghostProf);
+            if (!preview.empty()) {
+                SDL_Surface* thumb = ctx.surfaceCache.FindTileSurface(preview);
+                if (!thumb) thumb = ctx.surfaceCache.LoadAndCache(preview);
+                if (thumb) {
+                    SDL_SetSurfaceAlphaMod(thumb, 120);
+                    SDL_BlitSurfaceScaled(thumb, nullptr, screen, &ghostRect, SDL_SCALEMODE_PIXELART);
+                    SDL_SetSurfaceAlphaMod(thumb, 255);
+                }
+            }
+        }
+
+        // Outline
+        ctx.DrawOutline(screen, ghostRect, {255, 140, 80, 200}, 2);
+
+        // Size label above the ghost
+        std::string sizeStr = std::to_string(sprW) + "x" + std::to_string(sprH);
+        SDL_Surface* sizeBadge = ctx.GetBadge(sizeStr, {255, 200, 140, 220});
+        if (sizeBadge) {
+            SDL_Rect sd = {ghostRect.x, ghostRect.y - sizeBadge->h - 2, sizeBadge->w, sizeBadge->h};
+            SDL_BlitSurface(sizeBadge, nullptr, screen, &sd);
         }
     }
 }

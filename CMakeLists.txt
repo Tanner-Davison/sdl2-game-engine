@@ -54,6 +54,7 @@ set(SOURCES
     src/PlayerCreatorScene.cpp
     src/EnemyCreatorScene.cpp
     src/TileAnimCreatorScene.cpp
+    src/TileAssetScene.cpp
     src/tools/EnemyTool.cpp
 )
 

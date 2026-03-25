@@ -20,7 +20,7 @@
 // to keep handling them inline.
 inline std::unique_ptr<EditorTool> MakeEditorTool(ToolId id) {
     switch (id) {
-        case ToolId::Coin:        return std::make_unique<CoinTool>();
+        case ToolId::Goal:        return std::make_unique<GoalTool>();
         case ToolId::Enemy:       return std::make_unique<EnemyTool>();
         case ToolId::Tile:        return std::make_unique<TileTool>();
         case ToolId::Erase:       return std::make_unique<EraseTool>();

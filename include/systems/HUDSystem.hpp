@@ -12,12 +12,13 @@ inline void HUDSystem(entt::registry& reg,
                       int             windowW,
                       Text*           healthText,
                       Text*           gravityText,
-                      Text*           coinText,
-                      int             coinCount,
+                      Text*           goalText,
+                      int             goalsRemaining,
+                      int             totalGoals,
                       Text*           stompText,
                       int             stompCount) {
     static int prevHealth   = -1;
-    static int prevCoin     = -1;
+    static int prevGoal     = -1;
     static int prevStomp    = -1;
     static int prevGravSecs = -1;
 
@@ -53,13 +54,14 @@ inline void HUDSystem(entt::registry& reg,
         }
         if (healthText) healthText->Render(renderer);
 
-        if (coinText) {
-            if (coinCount != prevCoin) {
-                coinText->SetPosition(barX, barY + barH + 10);
-                coinText->CreateSurface("Gold Collected: " + std::to_string(coinCount));
-                prevCoin = coinCount;
+        if (goalText && totalGoals > 0) {
+            if (goalsRemaining != prevGoal) {
+                goalText->SetPosition(barX, barY + barH + 10);
+                goalText->CreateSurface("Goals: " + std::to_string(totalGoals - goalsRemaining) +
+                                        " / " + std::to_string(totalGoals));
+                prevGoal = goalsRemaining;
             }
-            coinText->Render(renderer);
+            goalText->Render(renderer);
         }
 
         if (stompText) {

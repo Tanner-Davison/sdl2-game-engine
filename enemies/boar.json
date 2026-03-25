@@ -1,0 +1,64 @@
+{
+    "health": 80.0,
+    "name": "boar",
+    "slots": [
+        {
+            "folderPath": "game_assets/enemy_sprites/boar/Idle",
+            "fps": 29.0,
+            "hitbox": {
+                "h": 63,
+                "w": 92,
+                "x": 18,
+                "y": 10
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/boar/Move",
+            "fps": 16.0,
+            "hitbox": {
+                "h": 60,
+                "w": 102,
+                "x": 10,
+                "y": 10
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/boar/Attack",
+            "fps": 42.0,
+            "hitbox": {
+                "h": 61,
+                "w": 105,
+                "x": 10,
+                "y": 10
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/boar/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 60,
+                "w": 97,
+                "x": 10,
+                "y": 10
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/boar/Dead",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 32,
+                "w": 110,
+                "x": 10,
+                "y": 38
+            },
+            "slot": 4
+        }
+    ],
+    "speed": 80.0,
+    "spriteH": 80,
+    "spriteW": 120
+}

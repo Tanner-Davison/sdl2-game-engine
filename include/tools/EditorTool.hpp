@@ -22,7 +22,7 @@
 // buttons and hotkeys to these values. Tools themselves don't need to know
 // their own enum -- the orchestrator picks the right subclass.
 enum class ToolId {
-    Coin,
+    Goal,
     Enemy,
     Erase,
     PlayerStart,
@@ -108,7 +108,6 @@ class EditorTool {
     // their own specialized drag (e.g. Prop, Ladder, Hazard, AntiGrav).
     bool mIsDragging  = false;
     int  mDragIndex   = -1;
-    bool mDragIsCoin  = false;
     bool mDragIsTile  = false;
 
     // Start dragging the entity at screen coords (mx, my). Returns Consumed
@@ -117,19 +116,13 @@ class EditorTool {
         int ti = ctx.HitTile(mx, my);
         if (ti >= 0) {
             mIsDragging = true; mDragIndex = ti;
-            mDragIsTile = true; mDragIsCoin = false;
-            return ToolResult::Consumed;
-        }
-        int ci = ctx.HitCoin(mx, my);
-        if (ci >= 0) {
-            mIsDragging = true; mDragIndex = ci;
-            mDragIsCoin = true; mDragIsTile = false;
+            mDragIsTile = true;
             return ToolResult::Consumed;
         }
         int ei = ctx.HitEnemy(mx, my);
         if (ei >= 0) {
             mIsDragging = true; mDragIndex = ei;
-            mDragIsCoin = false; mDragIsTile = false;
+            mDragIsTile = false;
             return ToolResult::Consumed;
         }
         return ToolResult::Ignored;
@@ -142,10 +135,7 @@ class EditorTool {
         if (mDragIsTile && mDragIndex < static_cast<int>(ctx.level.tiles.size())) {
             ctx.level.tiles[mDragIndex].x = static_cast<float>(sx);
             ctx.level.tiles[mDragIndex].y = static_cast<float>(sy);
-        } else if (mDragIsCoin && mDragIndex < static_cast<int>(ctx.level.coins.size())) {
-            ctx.level.coins[mDragIndex].x = static_cast<float>(sx);
-            ctx.level.coins[mDragIndex].y = static_cast<float>(sy);
-        } else if (!mDragIsCoin && !mDragIsTile &&
+        } else if (!mDragIsTile &&
                    mDragIndex < static_cast<int>(ctx.level.enemies.size())) {
             ctx.level.enemies[mDragIndex].x = static_cast<float>(sx);
             ctx.level.enemies[mDragIndex].y = static_cast<float>(sy);

@@ -69,13 +69,14 @@ void EditorCanvasRenderer::Render(
     EditorSurfaceCache&  cache,
     const EditorPalette& palette,
     Image*               background,
-    SpriteSheet*         coinSheet,
     SpriteSheet*         enemySheet,
     ToolId               activeToolId,
     EditorTool*          activeTool,
     EditorToolContext    toolCtx,
     int                  actionAnimDropHover,
-    const MovPlatState&  movPlat)
+    const MovPlatState&  movPlat,
+    const std::vector<std::unique_ptr<Image>>* parallaxImages,
+    const std::vector<float>* parallaxFactors)
 {
     SDL_Renderer* ren  = window.GetRenderer();
     int           winH = window.GetHeight();
@@ -88,6 +89,15 @@ void EditorCanvasRenderer::Render(
             background->RenderScrollingWide(ren, camera.X(), 0.0f);
         else
             background->Render(ren);
+    }
+
+    if (parallaxImages && parallaxFactors) {
+        for (size_t i = 0; i < parallaxImages->size(); ++i) {
+            auto& img = (*parallaxImages)[i];
+            if (!img) continue;
+            float factor = (i < parallaxFactors->size()) ? (*parallaxFactors)[i] : 0.5f;
+            img->RenderScrolling(ren, camera.X() * factor, 0.0f);
+        }
     }
 
     RenderGrid(screen, canvasW, toolbarH, winH, camera, grid);
@@ -115,7 +125,7 @@ void EditorCanvasRenderer::Render(
         }
     }
 
-    RenderEntities(screen, canvasW, toolbarH, winH, level, camera, cache, coinSheet, enemySheet, grid);
+    RenderEntities(screen, canvasW, toolbarH, winH, level, camera, cache, enemySheet, grid);
     RenderPlayerMarker(screen, level, camera);
 
     // ── Tool overlay (Select marquee, Resize/Hitbox handles, etc.) ───────────
@@ -256,6 +266,7 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
                 blitBadge(badge(sb, {255, 255, 255, 255}), bx + 2, tsy + 2);
                 bx += bw + GAP;
             }
+            if (t.goal)  drawBadge("G", {0, 200, 80, 220},     {255, 255, 255, 255});
             (void)bx;
         }
 
@@ -575,27 +586,12 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
                                           int winH, const Level& level,
                                           const EditorCamera& cam,
                                           EditorSurfaceCache& cache,
-                                          SpriteSheet* coinSheet, SpriteSheet* enemySheet,
+                                          SpriteSheet* enemySheet,
                                           int grid)
 {
     const float zoom  = cam.Zoom();
     const float camX  = cam.X();
     const float camY  = cam.Y();
-    const int   iconS = std::max(4, (int)(40 * zoom));
-
-    if (coinSheet) {
-        auto frames = coinSheet->GetAnimation("Gold_");
-        if (!frames.empty())
-            for (const auto& c : level.coins) {
-                int cx = (int)((c.x - camX) * zoom), cy = (int)((c.y - camY) * zoom);
-                if (cx+iconS<=0||cx>=canvasW||cy+iconS<=toolbarH||cy>=winH) continue;
-                SDL_Rect s = frames[0], d = {cx, cy, iconS, iconS};
-                SDL_ScaleMode csm = (d.w < s.w || d.h < s.h)
-                                   ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_PIXELART;
-                SDL_BlitSurfaceScaled(coinSheet->GetSurface(), &s, screen, &d, csm);
-                DrawOutline(screen, d, {255,215,0,255});
-            }
-    }
 
     // Enemies: render each enemy with its profile sprite if available,
     // otherwise fall back to the generic slime sheet.

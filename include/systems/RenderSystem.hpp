@@ -224,4 +224,41 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         if (colorModded)
             SDL_SetTextureColorMod(r.sheet, 255, 255, 255);
     });
+
+    // Pass 3: enemy health bars (drawn on top of all sprites)
+    {
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+        auto hpView = reg.view<EnemyTag, Transform, Health, Collider>(
+            entt::exclude<DeadTag>);
+
+        hpView.each([&](entt::entity e, const Transform& t, const Health& hp,
+                        const Collider& c) {
+            if (hp.current >= hp.max) return;
+            if (culled(t.x, t.y, c.w, c.h)) return;
+
+            auto [ix, iy] = interpPos(e, t);
+
+            float frac   = std::clamp(hp.current / hp.max, 0.0f, 1.0f);
+            int   barW   = std::max((int)(c.w * 0.8f), 24);
+            int   barH   = 4;
+            int   padY   = 6;
+            float barX   = (ix - camX) + c.w * 0.5f - barW * 0.5f;
+            float barY   = (iy - camY) - padY - barH;
+
+            SDL_FRect bg   = {barX - 1, barY - 1, (float)(barW + 2), (float)(barH + 2)};
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, 160);
+            SDL_RenderFillRect(renderer, &bg);
+
+            Uint8 r = (Uint8)((1.0f - frac) * 220);
+            Uint8 g = (Uint8)(frac * 200);
+            SDL_FRect fill = {barX, barY, barW * frac, (float)barH};
+            SDL_SetRenderDrawColor(renderer, r, g, 40, 230);
+            SDL_RenderFillRect(renderer, &fill);
+
+            SDL_FRect border = {barX - 1, barY - 1, (float)(barW + 2), (float)(barH + 2)};
+            SDL_SetRenderDrawColor(renderer, 20, 20, 20, 200);
+            SDL_RenderRect(renderer, &border);
+        });
+    }
 }

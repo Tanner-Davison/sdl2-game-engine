@@ -39,6 +39,10 @@ inline void PlayerStateSystem(entt::registry& reg) {
         const int duckH      = base->duckH;
         const int duckRoffX  = base->duckRoffX;
         const int duckRoffY  = base->duckRoffY;
+
+        if (anim.currentAnim == AnimationID::DEATH)
+            return;
+
         // ── Attack state: start or continue slash ──────────────────────────
         // Attack ALWAYS takes priority over hurt/invincibility visuals.
         // Rules:
@@ -269,6 +273,7 @@ inline void PlayerStateSystem(entt::registry& reg) {
             case AnimationID::DUCK:  sheet = set.duckSheet;  break;
             case AnimationID::FRONT: sheet = set.frontSheet; break;
             case AnimationID::SLASH: sheet = set.slashSheet; break;
+            case AnimationID::DEATH: sheet = set.deathSheet; break;
             default: break;
         }
         // Always set sheet and frames together atomically — a mismatched

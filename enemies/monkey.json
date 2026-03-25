@@ -1,0 +1,64 @@
+{
+    "health": 150.0,
+    "name": "monkey",
+    "slots": [
+        {
+            "folderPath": "game_assets/enemy_sprites/monkey/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 57,
+                "w": 55,
+                "x": 13,
+                "y": 17
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/monkey/Move",
+            "fps": 23.0,
+            "hitbox": {
+                "h": 58,
+                "w": 53,
+                "x": 18,
+                "y": 18
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/monkey/Attack",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 62,
+                "w": 58,
+                "x": 14,
+                "y": 17
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/monkey/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 60,
+                "w": 60,
+                "x": 11,
+                "y": 18
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/monkey/Dead",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 27,
+                "w": 60,
+                "x": 14,
+                "y": 50
+            },
+            "slot": 4
+        }
+    ],
+    "speed": 150.0,
+    "spriteH": 80,
+    "spriteW": 80
+}

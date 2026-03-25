@@ -6,7 +6,7 @@
 //   - Grid lines
 //   - Placed tiles (with rotation, color-mod, badges, slope lines, overlays)
 //   - Moving-platform overlay (paths, ghost tiles, config popup)
-//   - Coins / enemies / player marker
+//   - Enemies / player marker
 //   - Tool overlay dispatch (SelectTool marquee, ResizeTool/HitboxTool handles)
 //   - Tile ghost (placement preview under cursor)
 //
@@ -59,13 +59,14 @@ class EditorCanvasRenderer {
                 EditorSurfaceCache&  cache,
                 const EditorPalette& palette,
                 Image*               background,
-                SpriteSheet*         coinSheet,
                 SpriteSheet*         enemySheet,
                 ToolId               activeToolId,
                 EditorTool*          activeTool,
                 EditorToolContext    toolCtx,
                 int                  actionAnimDropHover,
-                const MovPlatState&  movPlat);
+                const MovPlatState&  movPlat,
+                const std::vector<std::unique_ptr<Image>>* parallaxImages = nullptr,
+                const std::vector<float>* parallaxFactors = nullptr);
 
     // Returns the updated popup rect (computed each frame when popup is open)
     [[nodiscard]] SDL_Rect MovPlatPopupRect() const { return mMovPlatPopupRect; }
@@ -98,7 +99,7 @@ class EditorCanvasRenderer {
     void RenderEntities(SDL_Surface* screen, int canvasW, int toolbarH, int winH,
                         const Level& level, const EditorCamera& cam,
                         EditorSurfaceCache& cache,
-                        SpriteSheet* coins, SpriteSheet* enemies, int grid);
+                        SpriteSheet* enemies, int grid);
 
     void RenderPlayerMarker(SDL_Surface* screen, const Level& level,
                             const EditorCamera& cam);

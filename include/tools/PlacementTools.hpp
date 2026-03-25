@@ -20,23 +20,8 @@ struct TilePlacementInfo {
     std::string label;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// CoinTool
-// ═══════════════════════════════════════════════════════════════════════════════
-class CoinTool final : public EditorTool {
-  public:
-    [[nodiscard]] const char* Name() const override { return "Coin"; }
-
-    ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
-                           Uint8 button, SDL_Keymod /*mods*/) override {
-        if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
-        if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
-        auto [sx, sy] = ctx.SnapToGrid(mx, my);
-        ctx.level.coins.push_back({static_cast<float>(sx), static_cast<float>(sy)});
-        ctx.SetStatus("Coin at " + std::to_string(sx) + "," + std::to_string(sy));
-        return ToolResult::Consumed;
-    }
-};
+// CoinTool removed -- coins are no longer standalone entities.
+// Goals are placed via GoalTool in ModifierTools.hpp.
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // EnemyTool — places enemies with type selection and per-instance speed control
@@ -105,6 +90,8 @@ class EnemyTool final : public EditorTool {
         return ToolResult::Ignored;
     }
 
+    ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override;
+
     ToolResult OnKeyDown(EditorToolContext& ctx, SDL_Keycode key,
                          SDL_Keymod mods) override;
 
@@ -113,6 +100,11 @@ class EnemyTool final : public EditorTool {
 
     void RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
                        int canvasW) override;
+
+  private:
+    int  cursorScreenX = 0;
+    int  cursorScreenY = 0;
+    bool cursorOnCanvas = false;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -127,12 +119,6 @@ class EraseTool final : public EditorTool {
         if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
         if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
 
-        int ci = ctx.HitCoin(mx, my);
-        if (ci >= 0) {
-            ctx.level.coins.erase(ctx.level.coins.begin() + ci);
-            ctx.SetStatus("Erased coin");
-            return ToolResult::Consumed;
-        }
         int ei = ctx.HitEnemy(mx, my);
         if (ei >= 0) {
             ctx.level.enemies.erase(ctx.level.enemies.begin() + ei);

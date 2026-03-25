@@ -80,6 +80,15 @@ class TitleScene : public Scene {
                                                      SDL_Color{255, 255, 255, 255},
                                                      cebx, ceby, 20);
 
+        tileAssetsBtnRect = {cx + gap / 2, row3Y, btnW, btnH};
+        tileAssetsButton  = std::make_unique<Rectangle>(tileAssetsBtnRect);
+        tileAssetsButton->SetColor({120, 100, 40, 255});
+        tileAssetsButton->SetHoverColor({160, 140, 60, 255});
+        auto [tabx2, taby2] = Text::CenterInRect("Tile Assets", 20, tileAssetsBtnRect);
+        tileAssetsBtnText = std::make_unique<Text>("Tile Assets",
+                                                    SDL_Color{255, 255, 255, 255},
+                                                    tabx2, taby2, 20);
+
         mRow2BottomY = row3Y + btnH;
 
         mProfileSelectorBaseY = mRow2BottomY;
@@ -267,6 +276,7 @@ class TitleScene : public Scene {
             if (hit(createPlayerBtnRect, mx, my))  { openPlayerCreator  = true; return true; }
             if (hit(tileAnimBtnRect, mx, my))       { openTileAnimCreator = true; return true; }
             if (hit(createEnemyBtnRect, mx, my))    { openEnemyCreator   = true; return true; }
+            if (hit(tileAssetsBtnRect, mx, my))      { openTileAssets      = true; return true; }
             if (hit(viewLevelsBtnRect, mx, my))     { mLevelBrowserOpen = true; mLevelBrowserScroll = 0; return true; }
             if (hit(mChooseCharBtnRect, mx, my))    { openCharPicker(); return true; }
         }
@@ -275,6 +285,7 @@ class TitleScene : public Scene {
         if (createPlayerButton) createPlayerButton->HandleEvent(e);
         if (tileAnimButton)     tileAnimButton->HandleEvent(e);
         if (createEnemyButton)  createEnemyButton->HandleEvent(e);
+        if (tileAssetsButton)   tileAssetsButton->HandleEvent(e);
         if (viewLevelsButton)   viewLevelsButton->HandleEvent(e);
         return true;
     }
@@ -338,6 +349,7 @@ class TitleScene : public Scene {
         if (createPlayerButton) { createPlayerButton->Render(ren); createPlayerBtnText->Render(ren); }
         if (tileAnimButton)     { tileAnimButton->Render(ren);     tileAnimBtnText->Render(ren); }
         if (createEnemyButton)  { createEnemyButton->Render(ren);  createEnemyBtnText->Render(ren); }
+        if (tileAssetsButton)   { tileAssetsButton->Render(ren);   tileAssetsBtnText->Render(ren); }
 
         // Character selector — single "Choose Character" button
         if (mProfileSelectorBg.w > 0) {
@@ -711,6 +723,7 @@ class TitleScene : public Scene {
     bool          openPlayerCreator    = false;
     bool          openTileAnimCreator  = false;
     bool          openEnemyCreator     = false;
+    bool          openTileAssets       = false;
     int           mRow2BottomY         = 0;
     int           mProfileSelectorBaseY = 0;
     std::string   mChosenLevel;
@@ -753,6 +766,9 @@ class TitleScene : public Scene {
     std::unique_ptr<Text>      createEnemyBtnText;
     std::unique_ptr<Rectangle> createEnemyButton;
     SDL_Rect                   createEnemyBtnRect{};
+    std::unique_ptr<Text>      tileAssetsBtnText;
+    std::unique_ptr<Rectangle> tileAssetsButton;
+    SDL_Rect                   tileAssetsBtnRect{};
     std::unique_ptr<Rectangle> viewLevelsButton;
     std::unique_ptr<Text>      viewLevelsBtnText;
     SDL_Rect                   viewLevelsBtnRect{};

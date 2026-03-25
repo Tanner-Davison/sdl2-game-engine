@@ -799,10 +799,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Upload the completed surface to a texture and render it
+    // Upload the completed surface to a texture and render it.
+    // LINEAR keeps anti-aliased text smooth on Retina/HiDPI displays.
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
     SDL_DestroySurface(s);
     if (tex) {
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
         SDL_RenderTexture(ren, tex, nullptr, nullptr);
         SDL_DestroyTexture(tex);
     }

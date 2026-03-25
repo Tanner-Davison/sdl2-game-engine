@@ -25,7 +25,7 @@ struct Transform {
 // RenderSystem lerps between PrevTransform and Transform using the sub-step
 // alpha so motion appears smooth at any render frame rate, regardless of the
 // fixed physics tick rate. Attached to every moving entity (player, enemies,
-// coins, moving platforms). Static tiles do not need this component.
+// moving platforms). Static tiles do not need this component.
 struct PrevTransform {
     float x = 0.0f;
     float y = 0.0f;
@@ -40,7 +40,7 @@ struct Velocity {
 
 // ── Animation ─────────────────────────────────────────────────────────────────
 
-enum class AnimationID { IDLE, WALK, JUMP, HURT, DUCK, FRONT, SLASH, NONE };
+enum class AnimationID { IDLE, WALK, JUMP, HURT, DUCK, FRONT, SLASH, DEATH, NONE };
 
 struct AnimationState {
     int         currentFrame = 0;
@@ -75,6 +75,9 @@ struct AnimationSet {
     std::vector<SDL_Rect> slash;
     SDL_Texture*          slashSheet = nullptr;
     float                 slashFps   = 0.0f;
+    std::vector<SDL_Rect> death;
+    SDL_Texture*          deathSheet = nullptr;
+    float                 deathFps   = 0.0f;
 };
 
 // ── Rendering ─────────────────────────────────────────────────────────────────
@@ -162,11 +165,23 @@ struct AttackState {
     std::unordered_set<entt::entity> hitEntities;
 };
 
+// ── Dash state (double-tap dodge) ─────────────────────────────────────────────
+struct DashState {
+    bool  active         = false;
+    float remaining      = 0.0f;  // time left in current dash
+    float cooldown       = 0.0f;  // time until next dash allowed
+    float direction      = 0.0f;  // +1 right, -1 left
+    float tapTimerLeft   = 0.0f;  // countdown window for second left tap
+    float tapTimerRight  = 0.0f;  // countdown window for second right tap
+    bool  releasedLeft   = true;  // key must be released between taps
+    bool  releasedRight  = true;
+};
+
 // ── Tags (marker components — no data) ───────────────────────────────────────
 
 struct PlayerTag {};      // marks the player entity
 struct EnemyTag {};       // marks a live enemy entity
-struct CoinTag {};        // marks a collectible coin
+struct GoalTag {};        // marks a goal tile — player collects all to complete the level
 struct DeadTag {};        // marks a stomped enemy
 struct FaceRightTag {};   // sprite art faces right by default (flip when moving left)
 
@@ -177,29 +192,99 @@ struct EnemyAttackState {
     float cooldown  = 0.0f;   // seconds remaining before can attack again
 };
 
+// Enemy ladder climbing state. Enemies autonomously use ladders when they
+// encounter one during patrol or when chasing the player.
+struct EnemyClimbState {
+    bool  climbing    = false;
+    bool  goingUp     = true;
+    bool  steppingOff = false;  // walking horizontally off ladder onto platform
+    float columnTop   = 0.0f;  // top Y of the current ladder column
+    float columnBot   = 0.0f;  // bottom Y of the current ladder column
+    float ladderCX    = 0.0f;  // ladder center X (enemy is centered here while climbing)
+    float ladderW     = 0.0f;  // ladder column width
+};
+
 // ── Enemy animation data (custom enemies only) ──────────────────────────────
 // Holds non-owning pointers to Hurt/Dead sprite sheets and frames so the
 // collision system can swap the enemy's Renderable when hit or killed.
 // The actual SpriteSheet objects are owned by GameScene::mEnemySpriteSheets.
+// Per-animation hitbox for enemies: collider dimensions + offsets from sprite top-left.
+// If w == 0, the system falls back to spriteW x spriteH with no offset.
+struct EnemyHitbox {
+    int w = 0, h = 0;   // collider size (0 = use spriteW/spriteH)
+    int offX = 0, offY = 0; // ColliderOffset (from sprite top-left)
+    int roffX = 0, roffY = 0; // RenderOffset (sprite drawn offset from collider)
+    bool IsDefault() const { return w == 0 && h == 0; }
+};
+
 struct EnemyAnimData {
     // Attack animation (played when enemy hits the player)
     SDL_Texture*          attackSheet = nullptr;
     std::vector<SDL_Rect> attackFrames;
     float                 attackFps   = 10.0f;
+    EnemyHitbox           attackHitbox;
     // Hurt animation (played when taking damage)
     SDL_Texture*          hurtSheet   = nullptr;
     std::vector<SDL_Rect> hurtFrames;
     float                 hurtFps     = 8.0f;
+    EnemyHitbox           hurtHitbox;
     // Dead animation (played when killed)
     SDL_Texture*          deadSheet   = nullptr;
     std::vector<SDL_Rect> deadFrames;
     float                 deadFps     = 6.0f;
+    EnemyHitbox           deadHitbox;
     // Move animation (to restore after hurt/attack finishes)
     SDL_Texture*          moveSheet   = nullptr;
     std::vector<SDL_Rect> moveFrames;
     float                 moveFps     = 7.0f;
+    EnemyHitbox           moveHitbox;
+    // Idle animation hitbox (used as default when no move hitbox set)
+    EnemyHitbox           idleHitbox;
     // Sprite dimensions
     int spriteW = 40, spriteH = 40;
+
+    // Apply the hitbox for a given animation to the entity's Collider
+    // and RenderOffset. Falls back to spriteW x spriteH.
+    //
+    // For enemies, Transform is the COLLIDER position (top-left of hitbox).
+    // RenderOffset shifts the sprite relative to the collider so the art
+    // lines up. CollisionSystem does NOT use ColliderOffset for enemies,
+    // so we only set RenderOffset here.
+    void ApplyHitbox(const EnemyHitbox& hb, entt::registry& reg, entt::entity e) const {
+        int cw = hb.IsDefault() ? spriteW : hb.w;
+        int ch = hb.IsDefault() ? spriteH : hb.h;
+
+        // Adjust Transform so the collider BOTTOM stays at the same Y.
+        // This keeps the enemy's feet on the ground when the hitbox
+        // changes size between animations (e.g. move -> dead).
+        if (reg.all_of<Collider>(e) && reg.all_of<Transform>(e)) {
+            auto& col = reg.get<Collider>(e);
+            auto& tr  = reg.get<Transform>(e);
+            float oldBottom = tr.y + col.h;
+            col.w = cw;
+            col.h = ch;
+            tr.y = oldBottom - ch; // keep feet pinned
+        } else if (reg.all_of<Collider>(e)) {
+            auto& col = reg.get<Collider>(e);
+            col.w = cw; col.h = ch;
+        }
+
+        if (!hb.IsDefault()) {
+            // RenderOffset = negative of the hitbox origin so the sprite
+            // draws with its top-left at (transform - offset), placing the
+            // hitbox region at exactly the Transform position.
+            int rox = -hb.offX;
+            int roy = -hb.offY;
+            if (reg.all_of<RenderOffset>(e))
+                reg.get<RenderOffset>(e) = {rox, roy};
+            else
+                reg.emplace<RenderOffset>(e, rox, roy);
+        } else {
+            // Default: no offset
+            if (reg.all_of<RenderOffset>(e))
+                reg.get<RenderOffset>(e) = {0, 0};
+        }
+    }
 };
 struct TileTag {};   // marks a solid tile — blocks movement
 struct LadderTag {};    // marks a ladder tile — passthrough, player can climb with W/S
@@ -304,6 +389,7 @@ struct ActionTag {   // marks an action tile — rendered + collidable until the
     int         hitsRequired    = 1; // total slashes needed to destroy (set from editor)
     int         hitsRemaining   = 1; // current hits left — decremented each slash
     std::string destroyAnimPath;     // optional animated tile JSON to play on destruction
+    bool        cameraShake     = false; // trigger camera shake on destruction
 };
 
 // Attached to an action tile the frame it is destroyed (hitsRemaining hits 0).
@@ -406,6 +492,7 @@ struct PlayerBaseCollider {
     AnimCollider fall;
     AnimCollider slash;
     AnimCollider hurt;
+    AnimCollider death;
 
     // Resolve the correct collider for a given animation ID.
     // Returns stand dims if the animation has no custom override.
@@ -418,6 +505,7 @@ struct PlayerBaseCollider {
             case AnimationID::FRONT: ac = &fall;  break;
             case AnimationID::SLASH: ac = &slash; break;
             case AnimationID::HURT:  ac = &hurt;  break;
+            case AnimationID::DEATH: ac = &death; break;
             default: break;
         }
         if (ac && !ac->IsDefault()) {

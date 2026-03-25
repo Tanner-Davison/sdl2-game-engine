@@ -57,6 +57,47 @@ class PropTool final : public EditorTool {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// GoalTool
+// Click a tile to toggle its goal flag. Goal tiles must be collected by
+// the player to complete the level. Any tile type can be a goal.
+// ═══════════════════════════════════════════════════════════════════════════════
+class GoalTool final : public EditorTool {
+  public:
+    [[nodiscard]] const char* Name() const override { return "Goal"; }
+
+    ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
+                           Uint8 button, SDL_Keymod /*mods*/) override {
+        if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
+        if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
+        int ti = ctx.HitTile(mx, my);
+        if (ti >= 0) {
+            auto& t     = ctx.level.tiles[ti];
+            bool nowGoal = !t.goal;
+            t.goal       = nowGoal;
+            ctx.SetStatus(std::string("Tile ") + std::to_string(ti) +
+                          (nowGoal ? " -> goal (collect to complete level)"
+                                   : " -> goal removed"));
+            return ToolResult::Consumed;
+        }
+        return StartEntityDrag(ctx, mx, my);
+    }
+
+    ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override {
+        if (mIsDragging && my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
+            UpdateEntityDrag(ctx, mx, my);
+            return ToolResult::Consumed;
+        }
+        return ToolResult::Ignored;
+    }
+
+    ToolResult OnMouseUp(EditorToolContext& /*ctx*/, int /*mx*/, int /*my*/,
+                         Uint8 /*button*/, SDL_Keymod /*mods*/) override {
+        StopEntityDrag();
+        return ToolResult::Consumed;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // LadderTool
 // ═══════════════════════════════════════════════════════════════════════════════
 class LadderTool final : public EditorTool {

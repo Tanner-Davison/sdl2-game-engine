@@ -81,16 +81,6 @@ struct EditorToolContext {
         return -1;
     }
 
-    [[nodiscard]] int HitCoin(int sx, int sy) const {
-        auto [wx, wy] = ScreenToWorld(sx, sy);
-        for (int i = 0; i < static_cast<int>(level.coins.size()); ++i) {
-            SDL_Rect r = {static_cast<int>(level.coins[i].x),
-                          static_cast<int>(level.coins[i].y), grid, grid};
-            if (HitTest(r, wx, wy)) return i;
-        }
-        return -1;
-    }
-
     [[nodiscard]] int HitEnemy(int sx, int sy) const {
         auto [wx, wy] = ScreenToWorld(sx, sy);
         for (int i = 0; i < static_cast<int>(level.enemies.size()); ++i) {

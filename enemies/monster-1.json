@@ -50,10 +50,10 @@
             "folderPath": "game_assets/enemy_sprites/monster-1/Dead",
             "fps": 0.0,
             "hitbox": {
-                "h": 90,
-                "w": 90,
-                "x": 15,
-                "y": 15
+                "h": 53,
+                "w": 68,
+                "x": 30,
+                "y": 55
             },
             "slot": 4
         }

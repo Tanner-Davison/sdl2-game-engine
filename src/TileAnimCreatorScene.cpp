@@ -504,10 +504,12 @@ void TileAnimCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Upload the completed surface to GPU and present
+    // Upload the completed surface to GPU and present.
+    // LINEAR keeps anti-aliased text smooth on Retina/HiDPI displays.
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
     SDL_DestroySurface(s);
     if (tex) {
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
         SDL_RenderTexture(ren, tex, nullptr, nullptr);
         SDL_DestroyTexture(tex);
     }

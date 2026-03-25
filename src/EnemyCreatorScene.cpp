@@ -62,14 +62,14 @@ void EnemyCreatorScene::computeLayout() {
     // Name field
     mNameFieldRect = {mCenterPanel.x, mCenterPanel.y + 40, MID_W - 2, 36};
 
-    // Sprite size fields
+    // Sprite size fields (with room for labels above)
     const int sfW = (MID_W - 6) / 2;
-    mWidthRect  = {mCenterPanel.x,           mCenterPanel.y + 84, sfW, 32};
-    mHeightRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 84, sfW, 32};
+    mWidthRect  = {mCenterPanel.x,           mCenterPanel.y + 96, sfW, 32};
+    mHeightRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 96, sfW, 32};
 
-    // Speed and Health fields — row below sprite size
-    mSpeedRect  = {mCenterPanel.x,           mCenterPanel.y + 124, sfW, 32};
-    mHealthRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 124, sfW, 32};
+    // Speed and Health fields — row below sprite size (with room for labels above)
+    mSpeedRect  = {mCenterPanel.x,           mCenterPanel.y + 148, sfW, 32};
+    mHealthRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 148, sfW, 32};
 
     // Save & Back buttons
     mSaveBtnRect = {mCenterPanel.x,                mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
@@ -544,32 +544,32 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
     {
         bool wActive = (mNumFieldActive == NumField::Width);
         bool hActive = (mNumFieldActive == NumField::Height);
-        drawText(s, "W:", mWidthRect.x + 4,  mWidthRect.y + 8, 13, {220, 160, 140, 255});
-        drawText(s, "H:", mHeightRect.x + 4, mHeightRect.y + 8, 13, {220, 160, 140, 255});
+        drawText(s, "Sprite Width", mWidthRect.x + 2, mWidthRect.y - 16, 11, {180, 140, 120, 255});
+        drawText(s, "Sprite Height", mHeightRect.x + 2, mHeightRect.y - 16, 11, {180, 140, 120, 255});
         fillRect(s, mWidthRect, {18, 18, 32, 255});
         outlineRect(s, mWidthRect, wActive ? SDL_Color{255, 120, 100, 255} : PANEL_OUT, 2);
-        std::string wDisplay = (wActive ? mWidthStr : std::to_string(mProfile.spriteW)) + (wActive ? "|" : "");
-        drawText(s, wDisplay, mWidthRect.x + 22, mWidthRect.y + 8, 14);
+        std::string wDisplay = (wActive ? mWidthStr : std::to_string(mProfile.spriteW)) + (wActive ? "|" : " px");
+        drawText(s, wDisplay, mWidthRect.x + 8, mWidthRect.y + 8, 14);
         fillRect(s, mHeightRect, {18, 18, 32, 255});
         outlineRect(s, mHeightRect, hActive ? SDL_Color{255, 120, 100, 255} : PANEL_OUT, 2);
-        std::string hDisplay = (hActive ? mHeightStr : std::to_string(mProfile.spriteH)) + (hActive ? "|" : "");
-        drawText(s, hDisplay, mHeightRect.x + 22, mHeightRect.y + 8, 14);
+        std::string hDisplay = (hActive ? mHeightStr : std::to_string(mProfile.spriteH)) + (hActive ? "|" : " px");
+        drawText(s, hDisplay, mHeightRect.x + 8, mHeightRect.y + 8, 14);
     }
 
     // Speed and Health fields
     {
         bool sActive = (mNumFieldActive == NumField::Speed);
         bool hlActive = (mNumFieldActive == NumField::Health);
-        drawText(s, "Speed:", mSpeedRect.x + 4, mSpeedRect.y + 8, 13, {220, 160, 140, 255});
-        drawText(s, "HP:", mHealthRect.x + 4, mHealthRect.y + 8, 13, {220, 160, 140, 255});
+        drawText(s, "Move Speed (px/s)", mSpeedRect.x + 2, mSpeedRect.y - 16, 11, {180, 140, 120, 255});
+        drawText(s, "Health (HP)", mHealthRect.x + 2, mHealthRect.y - 16, 11, {180, 140, 120, 255});
         fillRect(s, mSpeedRect, {18, 18, 32, 255});
         outlineRect(s, mSpeedRect, sActive ? SDL_Color{255, 120, 100, 255} : PANEL_OUT, 2);
         std::string sDisplay = (sActive ? mSpeedStr : std::to_string((int)mProfile.speed)) + (sActive ? "|" : "");
-        drawText(s, sDisplay, mSpeedRect.x + 50, mSpeedRect.y + 8, 14);
+        drawText(s, sDisplay, mSpeedRect.x + 8, mSpeedRect.y + 8, 14);
         fillRect(s, mHealthRect, {18, 18, 32, 255});
         outlineRect(s, mHealthRect, hlActive ? SDL_Color{255, 120, 100, 255} : PANEL_OUT, 2);
         std::string hlDisplay = (hlActive ? mHealthStr : std::to_string((int)mProfile.health)) + (hlActive ? "|" : "");
-        drawText(s, hlDisplay, mHealthRect.x + 30, mHealthRect.y + 8, 14);
+        drawText(s, hlDisplay, mHealthRect.x + 8, mHealthRect.y + 8, 14);
     }
 
     // Slot label above preview
@@ -687,10 +687,12 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Upload surface to texture and render
+    // Upload surface to texture and render.
+    // LINEAR keeps anti-aliased text smooth on Retina/HiDPI displays.
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
     SDL_DestroySurface(s);
     if (tex) {
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
         SDL_RenderTexture(ren, tex, nullptr, nullptr);
         SDL_DestroyTexture(tex);
     }
@@ -821,7 +823,7 @@ void EnemyCreatorScene::recomputePreviewRect() {
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
 
     // Preview top anchored below speed/health fields
-    const int previewTop = mCenterPanel.y + 166;
+    const int previewTop = mCenterPanel.y + 192;
     const int MID_W      = mCenterPanel.w;
 
     const int cellW = srcW + PREVIEW_PAD * 2;

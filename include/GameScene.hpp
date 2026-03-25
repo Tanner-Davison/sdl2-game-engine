@@ -51,10 +51,12 @@ class GameScene : public Scene {
     float          mLevelW            = 0.0f; // computed from tile extents on Spawn
     float          mLevelH            = 0.0f;
     bool           gameOver           = false;
+    bool           mPlayerDying       = false;
+    float          mDeathAnimTimer    = 0.0f;
     bool           levelComplete      = false;
     float          levelCompleteTimer = 2.0f;
-    int            totalCoins         = 0;
-    int            coinCount          = 0;
+    int            totalGoals         = 0;
+    int            goalsCollected     = 0;
     int            stompCount         = 0;
     Window*        mWindow            = nullptr;
     std::string    mLevelPath;
@@ -90,8 +92,8 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> knightFallSheet;
     std::unique_ptr<SpriteSheet> knightSlideSheet;
     std::unique_ptr<SpriteSheet> knightSlashSheet;
+    std::unique_ptr<SpriteSheet> knightDeathSheet;
     std::unique_ptr<SpriteSheet> enemySheet;
-    std::unique_ptr<SpriteSheet> coinSheet;
     // Custom enemy type sprite sheets — kept alive so GPU textures remain valid
     std::vector<std::unique_ptr<SpriteSheet>> mEnemySpriteSheets;
     std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload only
@@ -111,9 +113,12 @@ class GameScene : public Scene {
     std::vector<SDL_Rect>        duckFrames;
     std::vector<SDL_Rect>        frontFrames;
     std::vector<SDL_Rect>        slashFrames;
+    std::vector<SDL_Rect>        deathFrames;
     std::vector<SDL_Rect>        enemyWalkFrames;
 
     std::unique_ptr<Image>     background;
+    std::vector<std::unique_ptr<Image>> mParallaxImages;
+    std::vector<float>                  mParallaxFactors;
     std::unique_ptr<Text>      locationText;
     std::unique_ptr<Text>      actionText;
     std::unique_ptr<Text>      gameOverText;
@@ -122,7 +127,7 @@ class GameScene : public Scene {
     std::unique_ptr<Rectangle> retryButton;
     std::unique_ptr<Text>      healthText;
     std::unique_ptr<Text>      gravityText;
-    std::unique_ptr<Text>      coinText;
+    std::unique_ptr<Text>      goalText;
     std::unique_ptr<Text>      stompText;
     std::unique_ptr<Text>      levelCompleteText;
 

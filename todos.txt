@@ -32,7 +32,9 @@ Editor Polish
 Undo/redo stack (currently only one-step undo)
 Copy/paste tiles
 Level thumbnail preview in the browser
-Grid snapping options (half-grid, free placement)
+Grid snapping options (half-grid, free placement) mb
+animated tiles cpu prescaling to  full gpu native sizing without gaining size
+
 
 Shipping / Business
 --------------------------
@@ -40,3 +42,8 @@ A shipped demo level or short game to prove the engine out
 README and basic documentation for the engine
 A trailer or GIF showcasing the editor + gameplay
 Itch.io page
+
+
+
+
+

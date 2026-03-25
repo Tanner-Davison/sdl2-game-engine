@@ -12,6 +12,55 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         });
     }
 
+    // ── Double-tap dash detection ───────────────────────────────────────
+    if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
+        auto dashView = reg.view<PlayerTag, DashState, GravityState, ClimbState>();
+        dashView.each([&e](DashState& dash, const GravityState& g, const ClimbState& climb) {
+            if (dash.active || dash.cooldown > 0.0f) return;
+            if (climb.climbing || climb.atTop) return;
+            if (g.isCrouching) return;
+
+            bool isLeft  = (e.key.key == SDLK_A || e.key.key == SDLK_LEFT);
+            bool isRight = (e.key.key == SDLK_D || e.key.key == SDLK_RIGHT);
+
+            if (isLeft) {
+                if (dash.tapTimerLeft > 0.0f && dash.releasedLeft) {
+                    dash.active    = true;
+                    dash.remaining = DASH_DURATION;
+                    dash.cooldown  = DASH_COOLDOWN;
+                    dash.direction = -1.0f;
+                    dash.tapTimerLeft = 0.0f;
+                } else {
+                    dash.tapTimerLeft  = DASH_TAP_WINDOW;
+                    dash.releasedLeft  = false;
+                }
+                dash.tapTimerRight = 0.0f;
+            }
+            if (isRight) {
+                if (dash.tapTimerRight > 0.0f && dash.releasedRight) {
+                    dash.active    = true;
+                    dash.remaining = DASH_DURATION;
+                    dash.cooldown  = DASH_COOLDOWN;
+                    dash.direction = 1.0f;
+                    dash.tapTimerRight = 0.0f;
+                } else {
+                    dash.tapTimerRight = DASH_TAP_WINDOW;
+                    dash.releasedRight = false;
+                }
+                dash.tapTimerLeft = 0.0f;
+            }
+        });
+    }
+    if (e.type == SDL_EVENT_KEY_UP) {
+        auto dashView = reg.view<PlayerTag, DashState>();
+        dashView.each([&e](DashState& dash) {
+            if (e.key.key == SDLK_A || e.key.key == SDLK_LEFT)
+                dash.releasedLeft = true;
+            if (e.key.key == SDLK_D || e.key.key == SDLK_RIGHT)
+                dash.releasedRight = true;
+        });
+    }
+
     auto view = reg.view<PlayerTag, Velocity, Renderable, GravityState, ClimbState>();
     view.each([&e](Velocity& v, Renderable& r, GravityState& g, ClimbState& climb) {
         // On the top wall the sprite is rotated 180 so left/right facing is inverted

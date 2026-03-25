@@ -1,24 +1,18 @@
 {
-    "name": "EvilPlants",
-    "fps": 9.0,
+    "fps": 12.0,
     "frames": [
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_0.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_1.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_10.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_11.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_12.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_13.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_14.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_15.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_16.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_17.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_2.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_3.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_4.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_5.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_6.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_7.png",
         "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_8.png",
-        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_9.png"
-    ]
+        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_10.png",
+        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_11.png",
+        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_15.png",
+        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_16.png",
+        "game_assets/tiles/animated_tiles/EvilPlants/skeleton-animation_17.png"
+    ],
+    "name": "EvilPlants"
 }

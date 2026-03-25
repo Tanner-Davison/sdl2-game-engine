@@ -116,7 +116,6 @@ class EditorUIRenderer {
                 std::unique_ptr<Text>&        lblBottomHint,
                 // dirty flags (updated by Render when stale)
                 int&  lastTileCount,
-                int&  lastCoinCount,
                 int&  lastEnemyCount,
                 int&  lastCamX,
                 int&  lastCamY,
@@ -130,6 +129,7 @@ class EditorUIRenderer {
     [[nodiscard]] SDL_Rect DelConfirmNoRect()  const { return mDelNo;  }
     // Updated anim picker rect (computed each frame)
     [[nodiscard]] SDL_Rect AnimPickerRect() const { return mAnimPickerRect; }
+    [[nodiscard]] SDL_Rect CamShakeToggleRect() const { return mCamShakeToggleRect; }
 
   private:
     // ── Internal helpers ─────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ class EditorUIRenderer {
                          std::unique_ptr<Text>& lblStatusBar,
                          std::unique_ptr<Text>& lblCamPos,
                          std::unique_ptr<Text>& lblBottomHint,
-                         int& lastTileCount, int& lastCoinCount, int& lastEnemyCount,
+                         int& lastTileCount, int& lastEnemyCount,
                          int& lastCamX, int& lastCamY);
 
     void RenderAnimPicker(SDL_Surface* screen, int canvasW, int toolbarH, int winH,
@@ -195,4 +195,5 @@ class EditorUIRenderer {
     SDL_Rect mDelYes{};
     SDL_Rect mDelNo{};
     SDL_Rect mAnimPickerRect{};
+    SDL_Rect mCamShakeToggleRect{};
 };

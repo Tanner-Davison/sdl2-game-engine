@@ -1,6 +1,5 @@
 {
-    "name": "LavaSprite",
-    "fps": 8.0,
+    "fps": 6.0,
     "frames": [
         "game_assets/tiles/animated_tiles/LavaSprite/1.png",
         "game_assets/tiles/animated_tiles/LavaSprite/2.png",
@@ -8,5 +7,6 @@
         "game_assets/tiles/animated_tiles/LavaSprite/4.png",
         "game_assets/tiles/animated_tiles/LavaSprite/5.png",
         "game_assets/tiles/animated_tiles/LavaSprite/6.png"
-    ]
+    ],
+    "name": "LavaSprite"
 }

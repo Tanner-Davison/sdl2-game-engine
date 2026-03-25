@@ -6,10 +6,6 @@
 
 // ── Plain data — one entry per entity type in the level ──────────────────────
 
-struct CoinSpawn {
-    float x, y;
-};
-
 struct EnemySpawn {
     float x, y;
     float speed;
@@ -30,6 +26,7 @@ struct ActionData {
     int         group          = 0;   // 0 = standalone; non-zero groups trigger together
     int         hitsRequired   = 1;   // total slashes to destroy
     std::string destroyAnimPath;      // animated tile JSON for death anim (empty = none)
+    bool        cameraShake    = false; // trigger camera shake when destroy anim plays
 };
 
 struct SlopeData {
@@ -74,6 +71,7 @@ struct TileSpawn {
     bool ladder      = false; // rendered, no solid collision — player can climb
     bool hazard      = false; // solid tile that drains HP while player overlaps
     bool antiGravity = false; // floats — bobs in place, no gravity, pushable
+    bool goal        = false; // collectible goal — player must collect all to complete level
 
     // Optional feature groups — present only when the feature is active
     std::optional<ActionData>          action;
@@ -88,10 +86,19 @@ struct TileSpawn {
     bool HasHitbox()   const { return hitbox.has_value(); }
     bool HasMoving()   const { return moving.has_value(); }
     bool HasPowerUp()  const { return powerUp.has_value(); }
+    bool HasGoal()    const { return goal; }
 
     SlopeType GetSlopeType() const {
         return slope ? slope->type : SlopeType::None;
     }
+};
+
+// ── Parallax background layer ────────────────────────────────────────────────
+
+struct ParallaxLayer {
+    std::string imagePath;
+    float       scrollFactor = 0.5f;  // 0 = static, 1 = moves 1:1 with camera
+    float       yOffset      = 0.0f;  // vertical pixel offset (positive = down)
 };
 
 // ── Level-wide settings ──────────────────────────────────────────────────────
@@ -105,7 +112,7 @@ struct Level {
     bool                    bgRepeat    = false;
     GravityMode             gravityMode = GravityMode::Platformer;
     PlayerSpawn             player      = {0.0f, 0.0f};
-    std::vector<CoinSpawn>  coins;
     std::vector<EnemySpawn> enemies;
     std::vector<TileSpawn>  tiles;
+    std::vector<ParallaxLayer> parallaxLayers;
 };

@@ -4,6 +4,7 @@
 #include "LevelEditorScene.hpp"
 #include "PlayerCreatorScene.hpp"
 #include "TileAnimCreatorScene.hpp"
+#include "TileAssetScene.hpp"
 #include <SDL3_image/SDL_image.h>
 
 std::unique_ptr<Scene> TitleScene::NextScene() {
@@ -30,6 +31,10 @@ std::unique_ptr<Scene> TitleScene::NextScene() {
     if (openEnemyCreator) {
         openEnemyCreator = false;
         return std::make_unique<EnemyCreatorScene>();
+    }
+    if (openTileAssets) {
+        openTileAssets = false;
+        return std::make_unique<TileAssetScene>();
     }
     return nullptr;
 }

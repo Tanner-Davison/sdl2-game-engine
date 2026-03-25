@@ -31,21 +31,76 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         constexpr float ENEMY_GRAVITY  = 800.0f;
         constexpr float ENEMY_MAX_FALL = 900.0f;
 
-        auto tileView  = reg.view<TileTag, Transform, Collider>();
+        auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag>);
+        auto slopeView = reg.view<SlopeCollider, TileTag, Transform, Collider>();
         auto enemyView = reg.view<EnemyTag, Transform, Collider, Velocity>(
             entt::exclude<DeadTag, FloatTag>);
 
-        enemyView.each([&](Transform& et, const Collider& ec, Velocity& ev) {
+        enemyView.each([&](entt::entity ent, Transform& et, const Collider& ec, Velocity& ev) {
+            // Skip gravity while climbing or stepping off a ladder
+            if (auto* cs = reg.try_get<EnemyClimbState>(ent);
+                cs && (cs->climbing || cs->steppingOff)) {
+                ev.dy = 0.0f;
+                return;
+            }
             ev.dy = std::min(ev.dy + ENEMY_GRAVITY * dt, ENEMY_MAX_FALL);
             et.y += ev.dy * dt;
 
-            tileView.each([&](const Transform& tt, const Collider& tc) {
-                if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
-                if (et.y + ec.h >= tt.y && et.y + ec.h <= tt.y + tc.h + ev.dy * dt + 2.0f) {
-                    et.y  = tt.y - ec.h;
-                    ev.dy = 0.0f;
+            // ── Slope pass (runs before flat tile snap) ──────────────────
+            bool onSlopeThisFrame = false;
+            {
+                float eFeet       = et.y + ec.h;
+                float eLeft       = et.x;
+                float eRight      = et.x + ec.w;
+                float bestSurface = eFeet + SLOPE_SNAP_LOOKAHEAD;
+                bool  foundSlope  = false;
+
+                slopeView.each([&](const SlopeCollider& sc, const Transform& tt, const Collider& tc) {
+                    if (eRight <= tt.x || eLeft >= tt.x + tc.w) return;
+
+                    float riseH  = tc.h * sc.heightFrac;
+                    float ratio  = riseH / (float)tc.w;
+                    float highY  = (float)tt.y;
+                    float centerX = eLeft + ec.w * 0.5f;
+
+                    float surface;
+                    if (sc.slopeType == SlopeType::DiagUpLeft)
+                        surface = highY + (tt.x + tc.w - centerX) * ratio;
+                    else
+                        surface = highY + (centerX - tt.x) * ratio;
+
+                    if (surface < tt.y || surface > tt.y + tc.h) return;
+                    if (eFeet < surface - SLOPE_SNAP_LOOKAHEAD) return;
+                    if (et.y  > tt.y + tc.h + SLOPE_SNAP_LOOKAHEAD) return;
+                    if (surface < et.y) return;
+
+                    if (surface < bestSurface) {
+                        bestSurface = surface;
+                        foundSlope  = true;
+                    }
+                });
+
+                if (foundSlope && ev.dy >= 0.0f) {
+                    float feetToSurface = bestSurface - eFeet;
+                    if (feetToSurface >= -SLOPE_SNAP_LOOKAHEAD &&
+                        feetToSurface <=  SLOPE_SNAP_LOOKAHEAD) {
+                        et.y  = bestSurface - ec.h;
+                        ev.dy = 0.0f;
+                        onSlopeThisFrame = true;
+                    }
                 }
-            });
+            }
+
+            // ── Flat tile snap (suppressed while grounded on a slope) ────
+            if (!onSlopeThisFrame) {
+                tileView.each([&](const Transform& tt, const Collider& tc) {
+                    if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
+                    if (et.y + ec.h >= tt.y && et.y + ec.h <= tt.y + tc.h + ev.dy * dt + 2.0f) {
+                        et.y  = tt.y - ec.h;
+                        ev.dy = 0.0f;
+                    }
+                });
+            }
         });
     }
 
@@ -485,6 +540,86 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                     fsB.spinSpeed -= hDir * FLOAT_SPIN_HIT * 0.5f;
                 }
             }
+        }
+    }
+
+    // ── 5. Floating-object vs enemy collisions ─────────────────────────────
+    // When a floating object is moving fast enough and overlaps a live enemy,
+    // deal damage to the enemy (same as a player slash). This lets the player
+    // hit barrels/crates toward enemies as an attack.
+    {
+        constexpr float HIT_SPEED_THRESHOLD = 80.0f;  // min drift speed to deal damage
+        constexpr float HIT_DAMAGE          = SLASH_DAMAGE; // same as player slash
+        constexpr float HIT_COOLDOWN        = 0.3f;   // seconds between hits from same object
+
+        auto liveEnemies = reg.view<EnemyTag, Transform, Collider, Health>(
+            entt::exclude<DeadTag, FloatTag>);
+
+        for (auto fEnt : floatView) {
+            auto& fs       = floatView.get<FloatState>(fEnt);
+            auto& ft       = floatView.get<Transform>(fEnt);
+            const auto& fc = floatView.get<Collider>(fEnt);
+
+            float speed = std::abs(fs.driftVx) + std::abs(fs.driftVy);
+            if (speed < HIT_SPEED_THRESHOLD) continue;
+
+            liveEnemies.each([&](entt::entity enemy, const Transform& et,
+                                 const Collider& ec, Health& eh) {
+                // Apply ColliderOffset if present
+                float ex = et.x, ey = et.y;
+                if (const auto* co = reg.try_get<ColliderOffset>(enemy)) {
+                    ex += co->x; ey += co->y;
+                }
+                // AABB overlap
+                if (ft.x + fc.w <= ex || ft.x >= ex + ec.w) return;
+                if (ft.y + fc.h <= ey || ft.y >= ey + ec.h) return;
+
+                // Cooldown: use HitFlash to prevent multi-frame damage stacking
+                if (reg.all_of<HitFlash>(enemy) &&
+                    reg.get<HitFlash>(enemy).timer > HIT_COOLDOWN * 0.5f)
+                    return;
+
+                // Deal damage
+                eh.current -= HIT_DAMAGE;
+
+                // Knockback enemy away from the floating object
+                float fCx = ft.x + fc.w * 0.5f;
+                float eCx = ex + ec.w * 0.5f;
+                float kbDir = (eCx >= fCx) ? 1.0f : -1.0f;
+                if (auto* et2 = reg.try_get<Transform>(enemy))
+                    et2->x += kbDir * 24.0f;
+
+                // Flash red
+                if (!reg.all_of<HitFlash>(enemy))
+                    reg.emplace<HitFlash>(enemy, HIT_COOLDOWN, HIT_COOLDOWN);
+                else
+                    reg.get<HitFlash>(enemy).timer = HIT_COOLDOWN;
+
+                // Swap to hurt animation
+                if (auto* ead = reg.try_get<EnemyAnimData>(enemy);
+                    ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
+                    auto& r    = reg.get<Renderable>(enemy);
+                    auto& anim = reg.get<AnimationState>(enemy);
+                    r.sheet         = ead->hurtSheet;
+                    r.frames        = ead->hurtFrames;
+                    r.renderW       = ead->spriteW;
+                    r.renderH       = ead->spriteH;
+                    anim.currentFrame = 0;
+                    anim.totalFrames  = (int)ead->hurtFrames.size();
+                    anim.fps          = ead->hurtFps;
+                    anim.looping      = false;
+                    ead->ApplyHitbox(ead->hurtHitbox, reg, enemy);
+                }
+
+                if (eh.current <= 0.0f) {
+                    eh.current = 0.0f;
+                    result.enemiesKilledByFloat.push_back(enemy);
+                }
+
+                // Slow down the floating object on impact
+                fs.driftVx *= 0.5f;
+                fs.driftVy *= 0.5f;
+            });
         }
     }
 

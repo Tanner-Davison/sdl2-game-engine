@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <filesystem>
 #include <string>
 
 namespace {
@@ -77,7 +79,7 @@ void EditorUIRenderer::Render(
     std::unique_ptr<Text>&        lblStatusBar,
     std::unique_ptr<Text>&        lblCamPos,
     std::unique_ptr<Text>&        lblBottomHint,
-    int&  lastTileCount, int& lastCoinCount, int& lastEnemyCount,
+    int&  lastTileCount, int& lastEnemyCount,
     int&  lastCamX,      int& lastCamY,
     int&  lastTileSizeW, std::string& lastPalHeaderPath,
     int                           curTileW)
@@ -94,7 +96,7 @@ void EditorUIRenderer::Render(
 
     RenderBottomBar(screen, window, canvasW, level, camera, activeToolId, cache,
                     lblStatusBar, lblCamPos, lblBottomHint,
-                    lastTileCount, lastCoinCount, lastEnemyCount, lastCamX, lastCamY);
+                    lastTileCount, lastEnemyCount, lastCamX, lastCamY);
 
     if (animPickerTile >= 0 && animPickerTile < (int)level.tiles.size()
         && !animPickerEntries.empty()) {
@@ -137,7 +139,7 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
     // Map ToolId to active button for highlight
     auto toolToBtn = [](ToolId t) -> TBBtn {
         switch (t) {
-            case ToolId::Coin:        return TBBtn::Coin;
+            case ToolId::Goal:        return TBBtn::Goal;
             case ToolId::Enemy:       return TBBtn::Enemy;
             case ToolId::Tile:        return TBBtn::Tile;
             case ToolId::Erase:       return TBBtn::Erase;
@@ -476,9 +478,15 @@ void EditorUIRenderer::RenderPalettePanel(
         const int thumbW = PALETTE_W - PAD*2;
         const int thumbH = thumbW / 2;
         const int itemH  = thumbH + LBL_H + PAD;
-        int vis    = (H-palY)/itemH;
-        int startI = palette.BgScroll();
-        int endI   = std::min(startI+vis+1, (int)palette.BgItems().size());
+
+        constexpr int PLX_ROW_H = 34;
+        constexpr int PLX_HDR_H = 28;
+        int plxCount  = (int)level.parallaxLayers.size();
+        int plxAreaH  = PLX_HDR_H + std::max(plxCount, 1) * PLX_ROW_H + 6;
+        int bgAreaH   = H - palY - plxAreaH;
+        int vis       = std::max(1, bgAreaH / itemH);
+        int startI    = palette.BgScroll();
+        int endI      = std::min(startI+vis+1, (int)palette.BgItems().size());
 
         for (int i = startI; i < endI; i++) {
             int      iy   = palY+PAD+(i-startI)*itemH;
@@ -509,9 +517,105 @@ void EditorUIRenderer::RenderPalettePanel(
 
         if ((int)palette.BgItems().size()>vis) {
             float pct=(float)palette.BgScroll()/std::max(1,(int)palette.BgItems().size()-vis);
-            int sh=std::max(20,(int)((H-palY)*vis/(float)palette.BgItems().size()));
-            int sy=palY+(int)((H-palY-sh)*pct);
+            int sh=std::max(20,(int)(bgAreaH*vis/(float)palette.BgItems().size()));
+            int sy=palY+(int)((bgAreaH-sh)*pct);
             DrawRect(screen, {canvasW+PALETTE_W-4,sy,3,sh},{100,150,255,180});
+        }
+
+        // ── Parallax Layers section ──────────────────────────────────────────
+        {
+            int plxY = H - plxAreaH;
+
+            // Header bar
+            DrawRect(screen, {canvasW, plxY, PALETTE_W, PLX_HDR_H}, {20,30,60,255});
+            DrawOutline(screen, {canvasW, plxY, PALETTE_W, PLX_HDR_H}, {80,140,220,255}, 2);
+            {
+                Text hdr("PARALLAX LAYERS (" + std::to_string(plxCount) + ")",
+                         {140,200,255,255}, canvasW+6, plxY+3, 12);
+                hdr.RenderToSurface(screen);
+                Text hint("Shift+click bg = add layer",
+                          {100,130,170,255}, canvasW+6, plxY+16, 9);
+                hint.RenderToSurface(screen);
+            }
+            plxY += PLX_HDR_H;
+
+            constexpr int BTN_SZ = 20;
+            constexpr int BTN_GAP = 4;
+
+            for (int li = 0; li < plxCount; ++li) {
+                const auto& pl = level.parallaxLayers[li];
+                int ry = plxY + li * PLX_ROW_H;
+                SDL_Color rowBg  = (li % 2 == 0) ? SDL_Color{28,28,48,245} : SDL_Color{35,35,58,245};
+                SDL_Color rowBdr = {60,80,130,255};
+                DrawRect(screen, {canvasW, ry, PALETTE_W, PLX_ROW_H}, rowBg);
+                DrawOutline(screen, {canvasW, ry, PALETTE_W, PLX_ROW_H}, rowBdr);
+
+                // Layer number badge
+                {
+                    std::string numStr = std::to_string(li + 1);
+                    int numW = 18, numH = 18;
+                    int nx = canvasW + 4, ny = ry + (PLX_ROW_H - numH) / 2;
+                    DrawRect(screen, {nx, ny, numW, numH}, {50,70,120,230});
+                    DrawOutline(screen, {nx, ny, numW, numH}, {90,130,200,255});
+                    Text numTxt(numStr, {200,220,255,255}, nx+5, ny+2, 11);
+                    numTxt.RenderToSurface(screen);
+                }
+
+                // Filename
+                namespace fs2 = std::filesystem;
+                std::string fname = fs2::path(pl.imagePath).stem().string();
+                if ((int)fname.size() > 12) fname = fname.substr(0, 11) + "~";
+                {
+                    Text nameTxt(fname, {200,200,220,255}, canvasW+26, ry+4, 11);
+                    nameTxt.RenderToSurface(screen);
+                }
+
+                // Scroll factor display
+                {
+                    char factorBuf[24];
+                    std::snprintf(factorBuf, sizeof(factorBuf), "spd: %.2f", pl.scrollFactor);
+                    Text factTxt(factorBuf, {100,220,160,255}, canvasW+26, ry+18, 10);
+                    factTxt.RenderToSurface(screen);
+                }
+
+                // [-] button
+                int btnY = ry + (PLX_ROW_H - BTN_SZ) / 2;
+                int minusX = canvasW + PALETTE_W - 3 * (BTN_SZ + BTN_GAP);
+                {
+                    SDL_Rect r = {minusX, btnY, BTN_SZ, BTN_SZ};
+                    DrawRect(screen, r, {70,40,40,240});
+                    DrawOutline(screen, r, {180,80,80,255});
+                    Text t("-", {255,160,160,255}, minusX+7, btnY+3, 12);
+                    t.RenderToSurface(screen);
+                }
+
+                // [+] button
+                int plusX = canvasW + PALETTE_W - 2 * (BTN_SZ + BTN_GAP);
+                {
+                    SDL_Rect r = {plusX, btnY, BTN_SZ, BTN_SZ};
+                    DrawRect(screen, r, {40,70,40,240});
+                    DrawOutline(screen, r, {80,200,80,255});
+                    Text t("+", {160,255,160,255}, plusX+5, btnY+3, 12);
+                    t.RenderToSurface(screen);
+                }
+
+                // [x] delete button
+                int delX = canvasW + PALETTE_W - 1 * (BTN_SZ + BTN_GAP);
+                {
+                    SDL_Rect r = {delX, btnY, BTN_SZ, BTN_SZ};
+                    DrawRect(screen, r, {130,30,30,240});
+                    DrawOutline(screen, r, {220,60,60,255});
+                    Text t("x", {255,200,200,255}, delX+6, btnY+3, 12);
+                    t.RenderToSurface(screen);
+                }
+            }
+
+            if (plxCount == 0) {
+                int ry = plxY;
+                DrawRect(screen, {canvasW, ry, PALETTE_W, PLX_ROW_H}, {28,28,42,200});
+                Text empty("No layers yet", {80,80,110,255}, canvasW+30, ry+10, 11);
+                empty.RenderToSurface(screen);
+            }
         }
     }
 }
@@ -523,18 +627,22 @@ void EditorUIRenderer::RenderBottomBar(
     EditorSurfaceCache& cache,
     std::unique_ptr<Text>& lblStatusBar, std::unique_ptr<Text>& lblCamPos,
     std::unique_ptr<Text>& lblBottomHint,
-    int& lastTileCount, int& lastCoinCount, int& lastEnemyCount,
+    int& lastTileCount, int& lastEnemyCount,
     int& lastCamX, int& lastCamY)
 {
     int W = window.GetWidth(), H = window.GetHeight();
     DrawRect(screen, {0, H-22, canvasW, 22}, {16,16,24,220});
 
-    int tc=(int)level.tiles.size(), cc=(int)level.coins.size(), ec=(int)level.enemies.size();
-    if (tc!=lastTileCount||cc!=lastCoinCount||ec!=lastEnemyCount) {
-        lastTileCount=tc; lastCoinCount=cc; lastEnemyCount=ec;
+    int tc=(int)level.tiles.size(), ec=(int)level.enemies.size();
+    if (tc!=lastTileCount||ec!=lastEnemyCount) {
+        lastTileCount=tc; lastEnemyCount=ec;
+        // Count goal tiles
+        int goals = 0;
+        for (const auto& t : level.tiles) if (t.goal) goals++;
+        std::string info = std::to_string(ec)+" enemies  "+std::to_string(tc)+" tiles";
+        if (goals > 0) info += "  "+std::to_string(goals)+" goals";
         lblStatusBar = std::make_unique<Text>(
-            std::to_string(cc)+" coins  "+std::to_string(ec)+" enemies  "+std::to_string(tc)+" tiles",
-            SDL_Color{120,120,150,255}, 8, H-18, 11);
+            info, SDL_Color{120,120,150,255}, 8, H-18, 11);
     }
     if (lblStatusBar) lblStatusBar->RenderToSurface(screen);
 
@@ -568,12 +676,12 @@ void EditorUIRenderer::RenderAnimPicker(
 {
     const auto& tgt   = level.tiles[animPickerTile];
     constexpr int THUMB   = 48, PAD = 8, COL_W = THUMB+PAD*2, COLS = 4;
-    constexpr int TITLE_H = 28, HINT_H = 16;
+    constexpr int TITLE_H = 28, HINT_H = 16, TOGGLE_H = 22;
     int ROW_H  = THUMB + 10;
     int nEnt   = (int)entries.size();
     int ROWS   = (nEnt + COLS - 1) / COLS;
     int PW     = COL_W * COLS + PAD;
-    int PH     = TITLE_H + ROWS*(ROW_H+PAD) + PAD + HINT_H;
+    int PH     = TITLE_H + ROWS*(ROW_H+PAD) + PAD + TOGGLE_H + PAD + HINT_H;
 
     int tileSx = (int)((tgt.x - cam.X()) * cam.Zoom());
     int tileSy = (int)((tgt.y - cam.Y()) * cam.Zoom());
@@ -637,6 +745,30 @@ void EditorUIRenderer::RenderAnimPicker(
                       cell.x+cell.w-12, cell.y+2);
         }
     }
+    {
+        bool shakeOn = tgt.HasAction() && tgt.action->cameraShake;
+        int  tbx     = px + PAD;
+        int  tby     = py + PH - HINT_H - TOGGLE_H - PAD + 4;
+        int  tbw     = PW - PAD * 2;
+
+        SDL_Color boxBg  = shakeOn ? SDL_Color{60, 20, 100, 230} : SDL_Color{30, 24, 45, 200};
+        SDL_Color boxBrd = shakeOn ? SDL_Color{200, 100, 255, 255} : SDL_Color{80, 60, 110, 200};
+        mCamShakeToggleRect = {tbx, tby, tbw, TOGGLE_H};
+        DrawRect(screen, mCamShakeToggleRect, boxBg);
+        DrawOutline(screen, mCamShakeToggleRect, boxBrd);
+
+        int checkSz = 12;
+        int cx = tbx + 6, cy = tby + (TOGGLE_H - checkSz) / 2;
+        DrawRect(screen, {cx, cy, checkSz, checkSz}, {20, 16, 30, 255});
+        DrawOutline(screen, {cx, cy, checkSz, checkSz}, boxBrd);
+        if (shakeOn)
+            BlitBadge(screen, cache.GetBadge("\xe2\x9c\x93", {200, 100, 255, 255}), cx + 1, cy);
+
+        SDL_Color lblCol = shakeOn ? SDL_Color{220, 180, 255, 255} : SDL_Color{140, 120, 160, 255};
+        BlitBadge(screen, cache.GetBadge("Camera Shake on Destroy", lblCol),
+                  cx + checkSz + 8, tby + 5);
+    }
+
     BlitBadge(screen,
         cache.GetBadge("Click to assign  •  RClick tile = remove action  •  Esc to close",
                        {100,80,130,255}),
