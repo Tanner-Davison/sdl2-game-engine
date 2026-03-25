@@ -24,14 +24,52 @@ Forge2D is a self-contained 2D game engine powered by SDL3, EnTT ECS, and modern
 - **Floating objects** — Anti-gravity bob, drift, spin, player push, sword-slash push, object-to-object collision, and tile bounce.
 - **Parallax backgrounds** — Multi-layered scrolling backgrounds with per-layer scroll factors, infinite repeat, and full editor integration.
 - **Power-up system** — Anti-gravity power-ups with extensible type registry and timed duration.
-- **Player death sequence** — Dedicated death animation slot with timed hold, camera shake, dimmed overlay, and graceful transition to the game-over screen.
+- **Audio engine** — SDL3_mixer-based audio subsystem with per-animation SFX, dual-track playback (managed looping track + dedicated one-shot track), optional time-stretch matching, per-slot volume control, background music with fade-in/out, and automatic PCM16 WAV conversion for non-standard audio files.
+- **Player death sequence** — Dedicated death animation slot with timed hold, camera shake, dimmed overlay, death sound effect, and graceful transition to the game-over screen. Hazard deaths play the full death animation and SFX identically to enemy-caused deaths.
 - **Health bars** — Enemy HP rendered as color-graded bars above each sprite, fading from green to red as health drops.
 - **Dash mechanic** — Double-tap directional dash with invulnerability window.
+
+### Audio Engine
+
+The audio subsystem is built on SDL3_mixer and injected into scenes through `SceneManager`. It is **not** a singleton — the `AudioEngine` is owned by `SceneManager` and passed to scenes via `Scene::SetAudio()`.
+
+**Architecture:**
+
+| Component | Role |
+|-----------|------|
+| `AudioDevice` | Opens the SDL3_mixer device and creates the mixer. RAII — closes on destruction. |
+| `SoundBank` | Loads WAV/OGG/MP3 files (pre-decoded to RAM), keyed by string ID. Three playback modes: fire-and-forget (`Play`), one-shot with gain (`mOneShotTrack`), and looping/time-stretched (`mSfxTrack`). |
+| `MusicPlayer` | Streams background music with fade-in/out and track switching. |
+| `AudioEngine` | Facade that composes all three and provides convenience methods (`PlayAnimSFX`, `StopAnimSFX`, `StartLevelMusic`). |
+| `AudioEvents` | Pure data header — canonical SFX IDs (`player_idle`, `player_slash`, etc.) and `AnimationID` → SFX ID mapping functions. |
+
+**Per-animation SFX workflow:**
+
+1. In the **Character Creator**, drag a WAV/OGG file onto any animation slot's SFX drop zone.
+2. Adjust per-slot **volume** with the +/- buttons.
+3. Toggle **TS** (time-stretch) to match audio playback speed to the animation cycle duration, or leave it off to play the sound at its natural speed.
+4. The profile saves `sfxPath`, `sfxVolume`, and `sfxTimeStretch` per slot in JSON.
+5. At runtime, `GameScene` loads each slot's SFX into the `SoundBank` and triggers playback on animation transitions.
+
+**Playback behavior:**
+
+| Scenario | Track used | Behavior |
+|----------|-----------|----------|
+| One-shot, TS off (slash, hurt, jump, death) | `mOneShotTrack` | Plays at natural speed with per-slot gain. Sound finishes even after the animation transitions away. |
+| Looping, TS off (idle, walk) | `mSfxTrack` | Loops at natural speed. Stopped when animation changes. |
+| Any animation, TS on | `mSfxTrack` | Frequency ratio adjusted so one audio cycle matches the animation cycle. Looping anims loop the audio; one-shots play once at the adjusted speed. |
+
+**SFX trigger logic** — runs once per frame after all animation-changing systems (PlayerStateSystem, hazard code):
+- Fires on **animation transitions** (ID changed from previous frame).
+- Fires on **cycle restarts** (same non-looping animation, frame jumped back to 0) — ensures hurt SFX replays on each hazard damage cycle.
+- Calls `StopAnimSFX()` (stops the looping track only) before starting the new sound.
+
+**Auto-conversion** — If `MIX_LoadAudio` fails on a WAV file, `SoundBank` automatically attempts to convert it to standard 16-bit PCM WAV using `afconvert` (macOS) or `ffmpeg`, caching the result next to the original with a `_pcm16` suffix.
 
 ### Editor Tools
 
 - **Level Editor** — Full-featured tile-based editor with palette browser, multi-tool workflow, grid snapping, undo, camera pan/zoom, play-test, and save/load.
-- **Character Creator** — 8 animation slots (Idle, Walk, Crouch, Jump, Fall, Slash, Hurt, Death) with drag-and-drop sprite folders, per-slot FPS, and interactive hitbox handles.
+- **Character Creator** — 8 animation slots (Idle, Walk, Crouch, Jump, Fall, Slash, Hurt, Death) with drag-and-drop sprite folders, per-slot FPS, interactive hitbox handles, and per-slot SFX assignment with volume control and a time-stretch toggle that matches audio playback to animation cycle duration.
 - **Enemy Designer** — 5 animation slots (Idle, Move, Attack, Hurt, Dead) with sprite size configuration, custom hitboxes, speed, health, and a live animation preview.
 - **Tile Animation Creator** — Build animated tile sequences from PNG folders, preview playback, and export manifest JSON.
 - **Backgrounds Panel** — Browse and assign base backgrounds, add parallax layers with adjustable scroll factors, and toggle infinite repeat.
@@ -54,7 +92,7 @@ Components are plain data structs defined in `Components.hpp`. Systems are free 
 |--------|----------------|
 | `InputSystem` | Keyboard input — WASD/arrows, space, ctrl, F (slash), W/S on ladders, dash |
 | `MovementSystem` | Velocity integration, friction, gravity, jump hold boost, enemy patrol with ledge reversal |
-| `PlayerStateSystem` | Animation priority state machine (death > attack > hurt > crouch > airborne > walk > idle) with per-character collider enforcement |
+| `PlayerStateSystem` | Animation priority state machine (death > attack > hazard hurt > invincibility hurt > crouch > airborne > walk > idle) with per-character collider enforcement and hazard-aware hurt cycling |
 | `AnimationSystem` | Delta-time frame advancement with looping and non-looping support |
 | `CollisionSystem` | Multi-pass AABB (slopes, gravity snap, lateral push-out, step-up), enemy stomp/slash, goal collection, hazard overlap, action tile triggers |
 | `BoundsSystem` | Level-edge clamping, wall-run gravity flip, open-world bounds |
@@ -63,6 +101,7 @@ Components are plain data structs defined in `Components.hpp`. Systems are free 
 | `LadderSystem` | Ladder column detection, climb/descend/top-lock, jump-off, side walk-off |
 | `RenderSystem` | GPU-rendered sprites with camera offset, flip, rotation, invincibility flash, hazard flash, hit flash, health bars, and pre-sorted tile draw order |
 | `HUDSystem` | Health bar, gravity indicator, goal count, stomp count |
+| Audio SFX trigger | Detects animation transitions and cycle restarts, fires per-slot SFX with volume and optional time-stretch |
 
 ### Scene System
 
@@ -100,11 +139,16 @@ The editor uses a tool abstraction (`EditorTool` base) with a shared `EditorTool
 | `SpriteSheet` | Texture atlas parser (text, XML, or path list) with named animation lookup and GPU upload |
 | `Text` | SDL3_ttf rendering with centering helpers and font cache |
 | `LevelSerializer` | JSON save/load for levels (tiles, enemies, player spawn, backgrounds, parallax layers, gravity mode) |
-| `PlayerProfile` | JSON save/load for character profiles (name, dimensions, per-slot sprites, hitboxes, FPS) |
+| `PlayerProfile` | JSON save/load for character profiles (name, dimensions, per-slot sprites, hitboxes, FPS, per-slot SFX path/volume/time-stretch) |
 | `EnemyProfile` | JSON save/load for enemy types (name, dimensions, speed, health, per-slot sprites, hitboxes) |
 | `AnimatedTile` | JSON manifest loader for tile animation sequences |
 | `GameConfig` | Compile-time gameplay constants (player stats, physics, enemy stats, camera) |
 | `GameEvents` | Lightweight result structs returned by systems (`CollisionResult`, `FloatingResult`) |
+| `AudioEngine` | High-level audio facade composing AudioDevice, SoundBank, and MusicPlayer — injected into scenes via `Scene::SetAudio()` |
+| `AudioDevice` | RAII SDL3_mixer device and mixer initialization |
+| `SoundBank` | Named SFX resource manager with fire-and-forget playback, dual managed tracks (looping + one-shot), per-sound gain, and frequency-ratio time-stretch |
+| `MusicPlayer` | Background music streaming with fade-in/out and track switching |
+| `AudioEvents` | Canonical SFX ID constants and AnimationID → SFX ID mapping helpers |
 
 ---
 
@@ -119,6 +163,7 @@ Dependencies are managed via [vcpkg](https://github.com/microsoft/vcpkg):
 | SDL3 | Windowing, rendering, input |
 | SDL3_image | PNG sprite loading |
 | SDL3_ttf | Font rendering |
+| SDL3_mixer | Audio mixing, SFX playback, music streaming |
 | EnTT | Entity Component System |
 | nlohmann_json | Level/profile serialization |
 
@@ -132,13 +177,13 @@ cd ~/tools/vcpkg && ./bootstrap-vcpkg.sh
 
 ```bash
 # Linux
-vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf entt nlohmann-json
+vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf sdl3-mixer entt nlohmann-json
 
 # macOS Apple Silicon
-vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf entt nlohmann-json --triplet arm64-osx
+vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf sdl3-mixer entt nlohmann-json --triplet arm64-osx
 
 # macOS Intel
-vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf entt nlohmann-json --triplet x64-osx
+vcpkg install sdl3 "sdl3-image[png]" sdl3-ttf sdl3-mixer entt nlohmann-json --triplet x64-osx
 ```
 
 ### Build & Run
@@ -181,8 +226,19 @@ forge2d/
 │   ├── EnemyCreatorScene.cpp      # Enemy type designer
 │   ├── TileAnimCreatorScene.cpp   # Tile animation creator
 │   ├── TitleScene.cpp             # Title screen
+│   ├── audio/                     # Audio subsystem implementations
+│   │   ├── AudioDevice.cpp        # SDL3_mixer device init
+│   │   ├── AudioEngine.cpp        # High-level facade (music start/stop)
+│   │   ├── MusicPlayer.cpp        # Background music streaming
+│   │   └── SoundBank.cpp          # SFX loading, dual-track playback
 │   └── tools/                     # Editor tool implementations
 ├── include/
+│   ├── audio/                     # Audio subsystem headers
+│   │   ├── AudioDevice.hpp        # RAII mixer device
+│   │   ├── AudioEngine.hpp        # Facade composing device + SFX + music
+│   │   ├── AudioEvents.hpp        # SFX ID constants and AnimationID mapping
+│   │   ├── MusicPlayer.hpp        # Music streaming with fade
+│   │   └── SoundBank.hpp          # Named SFX manager (looping + one-shot tracks)
 │   ├── systems/                   # ECS system headers (one per system)
 │   ├── tools/                     # Editor tool class headers
 │   ├── engine/                    # Scene, SceneManager base classes
@@ -197,7 +253,11 @@ forge2d/
 │   ├── AnimatedTile.hpp           # Animated tile manifest loader
 │   ├── GameConfig.hpp             # Gameplay constants
 │   └── GameEvents.hpp             # System result structs
-├── game_assets/                   # Sprites, backgrounds, tilesets
+├── game_assets/                   # Sprites, backgrounds, tilesets, audio
+│   ├── audio/                     # Sound effects and music
+│   │   ├── music/                 # Background music tracks (OGG)
+│   │   └── sfx/                   # Per-entity sound effects (WAV)
+│   │       └── player/            # Player animation SFX (footsteps, slash, hurt, etc.)
 │   ├── backgrounds/               # Parallax and base background PNGs
 │   ├── char_sprites/              # Player character sprite folders
 │   ├── enemy_sprites/             # Enemy type sprite folders
