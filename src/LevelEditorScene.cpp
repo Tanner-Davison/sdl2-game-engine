@@ -269,6 +269,20 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         mDropActive      = false;
         std::string path = e.drop.data ? std::string(e.drop.data) : "";
         if (!path.empty()) {
+            // Audio file drop: assign as level music
+            {
+                fs::path p(path);
+                auto ext = p.extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") {
+                    mLevel.musicPath = path;
+                    mLevel.musicVolume = 1.0f;
+                    SetStatus("Level music: " + p.filename().string()
+                              + "  (drop another to replace, M to remove)");
+                    return true;
+                }
+            }
+
             // If Action tool is active and the dropped file is an animated tile JSON,
             // assign it as the destroy animation for whatever action tile the cursor
             // is over. Don't import it into the palette.
@@ -585,16 +599,22 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                                    : (mLevel.gravityMode == GravityMode::OpenWorld)
                                        ? "Open World"
                                        : "Platform";
-                std::string gStatus = (mLevel.gravityMode == GravityMode::WallRun)
-                                          ? "Mode: Wall Run"
-                                      : (mLevel.gravityMode == GravityMode::OpenWorld)
-                                          ? "Mode: Open World (top-down)"
-                                          : "Mode: Platformer";
                 mToolbar.SetGravityLabel(gLbl);
-                SetStatus(gStatus);
+                SetStatus("Gravity: " + gLbl);
                 break;
             }
-
+            case SDLK_M: {
+                // Toggle level music: M clears music, status shows current state
+                if (!mLevel.musicPath.empty()) {
+                    std::string old = fs::path(mLevel.musicPath).filename().string();
+                    mLevel.musicPath.clear();
+                    mLevel.musicVolume = 1.0f;
+                    SetStatus("Music removed (was: " + old + ")  Drop audio file to set new");
+                } else {
+                    SetStatus("No music set. Drop a .wav/.ogg/.mp3 file to assign level music");
+                }
+                break;
+            }
             case SDLK_I: {
                 auto pctx2 = MakePopupCtx();
                 mPopups.OpenImportInput(

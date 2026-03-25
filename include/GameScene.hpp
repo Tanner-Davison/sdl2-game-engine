@@ -63,7 +63,9 @@ class GameScene : public Scene {
     std::string    mProfilePath;               // path to PlayerProfile JSON (empty = frost knight)
     int            mPlayerSpriteW = 0;         // resolved sprite width  (set in Load, used in Spawn)
     int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
-    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};  // per-slot fps from profile (0 = engine default)
+    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};     // per-slot fps from profile (0 = engine default)
+    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotSfxVol{};        // per-slot SFX volume (1.0 = full, from profile)
+    std::array<bool,  PLAYER_ANIM_SLOT_COUNT> mSlotSfxStretch{};    // per-slot time-stretch toggle
     bool           mHasProfile        = false;  // true = a valid PlayerProfile was loaded
     bool           mFromEditor        = false;  // true = launched via editor Play button
     bool           mPaused            = false;  // true = pause overlay active, simulation frozen

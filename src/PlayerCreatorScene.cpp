@@ -104,6 +104,23 @@ void PlayerCreatorScene::computeLayout() {
         const int BY = ry + (SLOT_ROW_H - 4 - BH) / 2;  // vertically centred
         mFpsBtns[i].plusRect  = {mSlotPanel.x + LEFT_W - 8 - BW,      BY, BW, BH};
         mFpsBtns[i].minusRect = {mSlotPanel.x + LEFT_W - 8 - BW*2 - 2, BY, BW, BH};
+
+        // SFX drop zone: thin strip at the bottom of each slot row
+        const int SFX_H  = 16;
+        const int sfxY   = ry + SLOT_ROW_H - 4 - SFX_H - 2; // 2px above row bottom
+        const int sfxW   = LEFT_W - 16;
+        const int clearW = 16;
+        const int volBW  = 14; // volume button width
+        const int tsW    = 16; // time-stretch toggle width
+        // Layout: [drop zone] [TS] [vol-] [vol+] [x]
+        const int btnsW  = clearW + volBW * 2 + tsW + 6; // total button area width
+        int bx = mSlotPanel.x + 8 + sfxW - btnsW;
+        mSfxUI[i].dropRect    = {mSlotPanel.x + 8, sfxY, sfxW - btnsW - 2, SFX_H};
+        mSfxUI[i].stretchRect = {bx, sfxY, tsW, SFX_H}; bx += tsW + 1;
+        mSfxUI[i].volDownRect = {bx, sfxY, volBW, SFX_H}; bx += volBW + 1;
+        mSfxUI[i].volUpRect   = {bx, sfxY, volBW, SFX_H};
+        mSfxUI[i].clearRect   = {mSlotPanel.x + 8 + sfxW - clearW, sfxY, clearW, SFX_H};
+
         ry += SLOT_ROW_H;
     }
 }
@@ -128,13 +145,33 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     // ── File / directory drop ─────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_FILE || e.type == SDL_EVENT_DROP_TEXT) {
         mDropHover = false;
+        mSfxDropHoverSlot = -1;
         std::string dropped = e.drop.data ? e.drop.data : "";
 
         if (!dropped.empty()) {
             fs::path p(dropped);
-            std::string dir;
 
-            // If it's a file, use its parent directory
+            // Audio file drop: assign to SFX slot
+            if (fs::is_regular_file(p) && isAudioFile(p)) {
+                float fmx, fmy;
+                SDL_GetMouseState(&fmx, &fmy);
+                int mx2 = (int)fmx, my2 = (int)fmy;
+                int targetSlot = mSelectedSlot;
+                for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+                    if (hit(mSfxUI[i].dropRect, mx2, my2) ||
+                        hit(mSlotRowRects[i], mx2, my2)) {
+                        targetSlot = i;
+                        break;
+                    }
+                }
+                mProfile.slots[targetSlot].sfxPath = dropped;
+                auto slotName = PlayerAnimSlotName(static_cast<PlayerAnimSlot>(targetSlot));
+                mDropMsg = std::string(slotName) + " SFX: " + p.filename().string();
+                return true;
+            }
+
+            // Folder / PNG drop: existing sprite folder logic
+            std::string dir;
             if (fs::is_directory(p))      dir = dropped;
             else if (fs::is_regular_file(p)) dir = p.parent_path().string();
 
@@ -262,6 +299,40 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx = (int)e.button.x;
         int my = (int)e.button.y;
+
+        // SFX volume +/- and clear buttons (check before slot rows)
+        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+            if (!mProfile.slots[i].sfxPath.empty()) {
+                if (hit(mSfxUI[i].stretchRect, mx, my)) {
+                    mProfile.slots[i].sfxTimeStretch = !mProfile.slots[i].sfxTimeStretch;
+                    auto sn = PlayerAnimSlotName(static_cast<PlayerAnimSlot>(i));
+                    mDropMsg = std::string(sn) + " time-stretch: "
+                              + (mProfile.slots[i].sfxTimeStretch ? "ON" : "OFF");
+                    return true;
+                }
+                if (hit(mSfxUI[i].volDownRect, mx, my)) {
+                    mProfile.slots[i].sfxVolume = std::max(0.0f, mProfile.slots[i].sfxVolume - 0.1f);
+                    int pct = (int)(mProfile.slots[i].sfxVolume * 100.0f + 0.5f);
+                    mDropMsg = std::string(PlayerAnimSlotName(static_cast<PlayerAnimSlot>(i)))
+                              + " vol: " + std::to_string(pct) + "%";
+                    return true;
+                }
+                if (hit(mSfxUI[i].volUpRect, mx, my)) {
+                    mProfile.slots[i].sfxVolume = std::min(1.0f, mProfile.slots[i].sfxVolume + 0.1f);
+                    int pct = (int)(mProfile.slots[i].sfxVolume * 100.0f + 0.5f);
+                    mDropMsg = std::string(PlayerAnimSlotName(static_cast<PlayerAnimSlot>(i)))
+                              + " vol: " + std::to_string(pct) + "%";
+                    return true;
+                }
+                if (hit(mSfxUI[i].clearRect, mx, my)) {
+                    auto slotName = PlayerAnimSlotName(static_cast<PlayerAnimSlot>(i));
+                    mProfile.slots[i].sfxPath.clear();
+                    mProfile.slots[i].sfxVolume = 1.0f;
+                    mDropMsg = std::string(slotName) + " SFX cleared";
+                    return true;
+                }
+            }
+        }
 
         // FPS +/- buttons (check before slot row so they don't also select)
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
@@ -531,6 +602,80 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             int labelX = mFpsBtns[i].minusRect.x - 2 - (int)fpsStr.size() * 6;
             drawText(s, fpsStr, labelX,
                      mFpsBtns[i].minusRect.y + 2, 10, {160, 170, 200, 255});
+        }
+
+        // SFX drop zone strip at bottom of row
+        {
+            const auto& sfxPath = mProfile.slots[i].sfxPath;
+            bool hasSfx = !sfxPath.empty();
+            bool sfxHover = (mSfxDropHoverSlot == i);
+
+            SDL_Color sfxBg  = hasSfx   ? SDL_Color{35, 55, 80, 255}
+                             : sfxHover ? SDL_Color{40, 60, 120, 255}
+                                        : SDL_Color{25, 30, 45, 255};
+            SDL_Color sfxOut = hasSfx   ? SDL_Color{60, 120, 180, 255}
+                             : sfxHover ? SDL_Color{80, 130, 220, 255}
+                                        : SDL_Color{45, 50, 70, 255};
+
+            fillRect(s, mSfxUI[i].dropRect, sfxBg);
+            outlineRect(s, mSfxUI[i].dropRect, sfxOut);
+
+            if (hasSfx) {
+                // Show filename + volume
+                std::string fname = fs::path(sfxPath).filename().string();
+                int volPct = (int)(mProfile.slots[i].sfxVolume * 100.0f + 0.5f);
+                std::string display = fname + " " + std::to_string(volPct) + "%";
+                if ((int)display.size() > 28) {
+                    fname = fname.substr(0, 18) + "..";
+                    display = fname + " " + std::to_string(volPct) + "%";
+                }
+                drawText(s, display,
+                         mSfxUI[i].dropRect.x + 3,
+                         mSfxUI[i].dropRect.y + 2,
+                         9, {120, 190, 255, 255});
+
+                // Time-stretch toggle button
+                {
+                    bool ts = mProfile.slots[i].sfxTimeStretch;
+                    SDL_Color tsBg  = ts ? SDL_Color{40, 80, 50, 255}
+                                        : SDL_Color{40, 35, 55, 255};
+                    SDL_Color tsOut = ts ? SDL_Color{80, 180, 100, 255}
+                                        : SDL_Color{60, 55, 80, 255};
+                    SDL_Color tsFg  = ts ? SDL_Color{140, 255, 160, 255}
+                                        : SDL_Color{100, 90, 130, 255};
+                    fillRect(s, mSfxUI[i].stretchRect, tsBg);
+                    outlineRect(s, mSfxUI[i].stretchRect, tsOut);
+                    drawTextCentered(s, "TS", mSfxUI[i].stretchRect, 7, tsFg);
+                }
+
+                // Volume percentage label + buttons (only when SFX assigned)
+                int pct = (int)(mProfile.slots[i].sfxVolume * 100.0f + 0.5f);
+                std::string volStr = std::to_string(pct) + "%";
+
+                // "-" button
+                SDL_Color vdBg = (pct <= 0) ? SDL_Color{30, 30, 40, 255}
+                                            : SDL_Color{50, 40, 70, 255};
+                fillRect(s, mSfxUI[i].volDownRect, vdBg);
+                outlineRect(s, mSfxUI[i].volDownRect, {80, 60, 120, 255});
+                drawTextCentered(s, "-", mSfxUI[i].volDownRect, 9, {180, 160, 220, 255});
+
+                // "+" button
+                SDL_Color vuBg = (pct >= 100) ? SDL_Color{30, 30, 40, 255}
+                                              : SDL_Color{50, 40, 70, 255};
+                fillRect(s, mSfxUI[i].volUpRect, vuBg);
+                outlineRect(s, mSfxUI[i].volUpRect, {80, 60, 120, 255});
+                drawTextCentered(s, "+", mSfxUI[i].volUpRect, 9, {180, 160, 220, 255});
+
+                // Clear button
+                fillRect(s, mSfxUI[i].clearRect, {120, 40, 40, 255});
+                outlineRect(s, mSfxUI[i].clearRect, {180, 60, 60, 255});
+                drawTextCentered(s, "x", mSfxUI[i].clearRect, 9, {255, 180, 180, 255});
+            } else {
+                drawText(s, "drop audio file",
+                         mSfxUI[i].dropRect.x + 3,
+                         mSfxUI[i].dropRect.y + 2,
+                         9, {70, 80, 100, 255});
+            }
         }
     }
 

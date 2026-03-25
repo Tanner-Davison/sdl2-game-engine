@@ -27,6 +27,7 @@ set(SDL3_STATIC OFF)
 find_package(SDL3 CONFIG REQUIRED)
 find_package(SDL3_image CONFIG REQUIRED)
 find_package(SDL3_ttf CONFIG REQUIRED)
+find_package(SDL3_mixer CONFIG REQUIRED)
 find_package(EnTT CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(PNG REQUIRED)
@@ -56,6 +57,10 @@ set(SOURCES
     src/TileAnimCreatorScene.cpp
     src/TileAssetScene.cpp
     src/tools/EnemyTool.cpp
+    src/audio/AudioDevice.cpp
+    src/audio/SoundBank.cpp
+    src/audio/MusicPlayer.cpp
+    src/audio/AudioEngine.cpp
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
@@ -65,6 +70,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include/engine   # engine/Scene.hpp, engine/SceneManager.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/include/game     # game/GameConfig.hpp, game/GameEvents.hpp
     # systems/ is reachable as <systems/Foo.hpp> via the include/ root above
+    # audio/ is reachable as <audio/Foo.hpp> via the include/ root above
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
@@ -72,6 +78,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     SDL3::SDL3
     SDL3_image::SDL3_image
     SDL3_ttf::SDL3_ttf
+    SDL3_mixer::SDL3_mixer
     EnTT::EnTT
     nlohmann_json::nlohmann_json
     PNG::PNG

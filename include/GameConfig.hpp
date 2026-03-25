@@ -41,8 +41,8 @@ inline constexpr int PLAYER_DUCK_ROFF_X  = -PLAYER_BODY_INSET_X;
 inline constexpr int PLAYER_DUCK_ROFF_Y  = -(PLAYER_SPRITE_HEIGHT - PLAYER_DUCK_HEIGHT);
 
 // -- Enemy stats -------------------------------------------------------------
-inline constexpr float SLIME_MAX_HEALTH = 30.0f;
-inline constexpr float SLASH_DAMAGE     = 30.0f; // damage dealt per sword swing
+inline constexpr float SLIME_MAX_HEALTH  = 30.0f;
+inline constexpr float SLASH_DAMAGE      = 30.0f; // damage dealt per sword swing
 inline constexpr float STOMP_DAMAGE_FRAC = 0.15f; // fraction of enemy max HP dealt per stomp
 
 // -- Sword / attack hitbox ---------------------------------------------------
@@ -63,7 +63,7 @@ inline constexpr float CLIMB_SPEED        = 350.0f;
 inline constexpr float CLIMB_STRAFE_SPEED = 220.0f;
 inline constexpr float SPRINT_MULTIPLIER  = 1.2f; // Shift held = 20% faster
 inline constexpr float CROUCH_FRICTION =
-    6.0f; // how fast you decelerate while crouching (higher = quicker stop)
+    3.0f; // how fast you decelerate while crouching (higher = quicker stop)
 
 // -- Dash (double-tap) --------------------------------------------------------
 inline constexpr float DASH_SPEED      = 800.0f; // px/s during dash
@@ -129,8 +129,8 @@ struct Camera {
             shakeTimer -= dt;
             float factor = std::max(shakeTimer, 0.0f) / shakeDuration;
             float amp    = shakeIntensity * factor;
-            shakeOffX = ((rand() % 201 - 100) / 100.0f) * amp;
-            shakeOffY = ((rand() % 201 - 100) / 100.0f) * amp;
+            shakeOffX    = ((rand() % 201 - 100) / 100.0f) * amp;
+            shakeOffY    = ((rand() % 201 - 100) / 100.0f) * amp;
         } else {
             shakeOffX = 0.0f;
             shakeOffY = 0.0f;

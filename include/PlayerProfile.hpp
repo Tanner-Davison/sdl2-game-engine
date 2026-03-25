@@ -65,6 +65,9 @@ struct PlayerProfile {
         std::string folderPath; // absolute or relative path to a directory of PNGs
         AnimHitbox  hitbox;     // custom hitbox for this animation (zeros = use default)
         float       fps = 0.0f; // playback speed in frames/sec (0 = use engine default)
+        std::string sfxPath;    // relative path to WAV/OGG sound effect (empty = none)
+        float       sfxVolume = 1.0f; // 0.0 .. 1.0 per-animation SFX volume
+        bool        sfxTimeStretch = false; // true = stretch/compress SFX to match anim duration
     };
 
     std::array<SlotData, PLAYER_ANIM_SLOT_COUNT> slots;
@@ -84,6 +87,9 @@ struct PlayerProfile {
     }
     bool HasFps(PlayerAnimSlot s) const {
         return Slot(s).fps > 0.0f;
+    }
+    bool HasSFX(PlayerAnimSlot s) const {
+        return !Slot(s).sfxPath.empty();
     }
 };
 
@@ -175,7 +181,7 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
             }
         }
 
-        j["slots"].push_back({
+        json slotJson = {
             {"slot",        i},
             {"folderPath",  savePath},
             {"fps",         s.fps},
@@ -185,7 +191,13 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
                 {"w", s.hitbox.w},
                 {"h", s.hitbox.h}
             }}
-        });
+        };
+        if (!s.sfxPath.empty()) {
+            slotJson["sfxPath"]        = s.sfxPath;
+            slotJson["sfxVolume"]      = s.sfxVolume;
+            slotJson["sfxTimeStretch"] = s.sfxTimeStretch;
+        }
+        j["slots"].push_back(std::move(slotJson));
     }
 
     std::ofstream f(path);
@@ -220,6 +232,9 @@ inline bool LoadPlayerProfile(const std::string& path, PlayerProfile& out) {
         // ResolveFolderPath silently drops stale absolute paths from other machines
         s.folderPath = ResolveFolderPath(entry.value("folderPath", ""));
         s.fps        = entry.value("fps", 0.0f);
+        s.sfxPath    = entry.value("sfxPath", std::string{});
+        s.sfxVolume      = entry.value("sfxVolume", 1.0f);
+        s.sfxTimeStretch = entry.value("sfxTimeStretch", false);
         if (entry.contains("hitbox")) {
             s.hitbox.x = entry["hitbox"].value("x", 0);
             s.hitbox.y = entry["hitbox"].value("y", 0);

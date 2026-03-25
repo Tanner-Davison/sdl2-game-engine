@@ -1,4 +1,4 @@
-// engine/Scene.hpp — canonical location.
+// engine/Scene.hpp -- canonical location.
 // The root include/Scene.hpp forwards here for backward compatibility.
 #pragma once
 #include <SDL3/SDL.h>
@@ -6,6 +6,7 @@
 #include <memory>
 
 class Window;
+namespace audio { class AudioEngine; }
 
 class Scene {
   public:
@@ -17,14 +18,14 @@ class Scene {
     // Called once when the scene is replaced or popped
     virtual void Unload() = 0;
 
-    // Handle a single SDL event — return false to quit the app
+    // Handle a single SDL event -- return false to quit the app
     virtual bool HandleEvent(SDL_Event& e) = 0;
 
     // Update game logic (fixed dt from accumulator loop)
     virtual void Update(float dt) = 0;
 
     // Render to window.
-    // alpha: sub-step interpolation factor in [0,1) — passed down to
+    // alpha: sub-step interpolation factor in [0,1) -- passed down to
     // RenderSystem so it can lerp between PrevTransform and Transform.
     virtual void Render(Window& window, float alpha = 1.0f) = 0;
 
@@ -38,4 +39,13 @@ class Scene {
 
     // If this returns true, SceneManager will quit the app
     virtual bool ShouldQuit() const { return false; }
+
+    // ── Audio engine access ──────────────────────────────────────────────
+    // Non-owning pointer injected by SceneManager before Load().
+    // Scenes that don't use audio can ignore it (remains nullptr).
+    void SetAudio(audio::AudioEngine* engine) { mAudio = engine; }
+    audio::AudioEngine* Audio() const { return mAudio; }
+
+  private:
+    audio::AudioEngine* mAudio = nullptr;
 };

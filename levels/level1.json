@@ -2,6 +2,8 @@
     "background": "game_assets/backgrounds/Background_01.png",
     "bgFitMode": "scroll_wide",
     "bgRepeat": true,
+    "music": "game_assets/audio/music/dungeon.ogg",
+    "musicVolume": 1.0,
     "enemies": [
         {
             "antiGravity": false,
@@ -29,6 +31,7 @@
         }
     ],
     "gravityMode": "platformer",
+    "music": "/Users/tanner.davison/Downloads/dungeon-2026-03-08-20-06-13-utc/Dungeon.mp3",
     "name": "level1",
     "parallaxLayers": [
         {
@@ -38,8 +41,8 @@
         }
     ],
     "player": {
-        "x": 2242.0,
-        "y": 1406.0
+        "x": 38.0,
+        "y": 798.0
     },
     "tiles": [
         {

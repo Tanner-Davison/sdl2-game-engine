@@ -45,7 +45,7 @@ class PlayerCreatorScene : public Scene {
   private:
     // ── Layout constants ──────────────────────────────────────────────────────
     static constexpr int PANEL_PAD     = 14;
-    static constexpr int SLOT_ROW_H    = 46;
+    static constexpr int SLOT_ROW_H    = 64;  // 46 base + 18 for SFX strip
     static constexpr int PREVIEW_W     = 160;  // fallback cell size
     static constexpr int PREVIEW_H     = 160;
     static constexpr int PREVIEW_PAD   = 16;   // padding around sprite in cell
@@ -81,6 +81,26 @@ class PlayerCreatorScene : public Scene {
         SDL_Rect plusRect{};
     };
     std::array<SlotFpsButtons, PLAYER_ANIM_SLOT_COUNT> mFpsBtns;
+
+    // ── Per-slot SFX drop zone ────────────────────────────────────────────────
+    // Small area below each slot row to drop a .wav/.ogg/.mp3 file.
+    struct SlotSfxUI {
+        SDL_Rect dropRect{};      // the drop zone + filename display area
+        SDL_Rect clearRect{};     // small "x" button to remove assigned SFX
+        SDL_Rect volDownRect{};   // "-" volume button
+        SDL_Rect volUpRect{};     // "+" volume button
+        SDL_Rect stretchRect{};   // "TS" time-stretch toggle button
+    };
+    std::array<SlotSfxUI, PLAYER_ANIM_SLOT_COUNT> mSfxUI;
+    int  mSfxDropHoverSlot = -1; // which slot's SFX zone is being hovered (-1 = none)
+
+    // Returns true if the file extension is an audio format we support
+    static bool isAudioFile(const std::filesystem::path& p) {
+        auto ext = p.extension().string();
+        // lowercase compare
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        return ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac";
+    }
 
     // ── Slot selection ────────────────────────────────────────────────────────
     int  mSelectedSlot = 0;   // which PlayerAnimSlot row is highlighted

@@ -18,6 +18,12 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                                                                        : "platformer";
     j["player"]      = {{"x", level.player.x}, {"y", level.player.y}};
 
+    // Audio
+    if (!level.musicPath.empty())
+        j["music"]       = level.musicPath;
+    if (level.musicVolume < 1.0f)
+        j["musicVolume"] = level.musicVolume;
+
     j["enemies"] = json::array();
     for (const auto& e : level.enemies) {
         json ej = {{"x", e.x}, {"y", e.y}, {"speed", e.speed},
@@ -138,6 +144,10 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         es.enemyType   = e.value("enemyType", std::string{});
         out.enemies.push_back(std::move(es));
     }
+
+    // Audio
+    out.musicPath   = j.value("music", std::string{});
+    out.musicVolume = j.value("musicVolume", 1.0f);
 
     out.parallaxLayers.clear();
     for (const auto& pl : j.value("parallaxLayers", json::array())) {

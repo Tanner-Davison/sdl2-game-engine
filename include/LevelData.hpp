@@ -115,4 +115,8 @@ struct Level {
     std::vector<EnemySpawn> enemies;
     std::vector<TileSpawn>  tiles;
     std::vector<ParallaxLayer> parallaxLayers;
+
+    // ── Audio ─────────────────────────────────────────────────────────────
+    std::string musicPath;              // relative path to OGG/MP3 (empty = no music)
+    float       musicVolume = 1.0f;     // 0..1 level-specific music volume
 };

@@ -140,6 +140,17 @@ inline void PlayerStateSystem(entt::registry& reg) {
             }
         }
 
+        // Hazard awareness: while standing on a hazard tile (lava, spikes,
+        // etc.) the hurt animation must persist. Without this, the normal
+        // movement-based logic below would override HURT with IDLE/WALK
+        // every frame, restarting the animation and glitching the SFX.
+        // Note: hz.active carries the PREVIOUS frame's collision result
+        // (CollisionSystem runs later), so the very first hazard frame is
+        // handled by GameScene's hazard code; PlayerStateSystem takes over
+        // from frame 2 onward.
+        const HazardState* hazard = reg.try_get<HazardState>(entity);
+        const bool onHazard = hazard && hazard->active;
+
         // Crouch (Ctrl) takes priority over everything except attack.
         // This ensures the crouch animation always plays when Ctrl is held,
         // regardless of airborne state, invincibility, or other conditions.
@@ -152,6 +163,12 @@ inline void PlayerStateSystem(entt::registry& reg) {
             frames  = &set.idle;
             fps     = resolveFps(set.idleFps, 12.0f);
             id      = AnimationID::IDLE;
+        } else if (canHurt && onHazard
+                   && !(reg.try_get<AttackState>(entity) && reg.get<AttackState>(entity).isAttacking)) {
+            frames  = &set.hurt;
+            fps     = resolveFps(set.hurtFps, 12.0f);
+            looping = false;
+            id      = AnimationID::HURT;
         } else if (canHurt && inv.isInvincible && inv.remaining > 0.5f
                    && !(reg.try_get<AttackState>(entity) && reg.get<AttackState>(entity).isAttacking)
                    && !(anim.currentAnim == AnimationID::HURT

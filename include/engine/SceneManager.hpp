@@ -1,7 +1,8 @@
-// engine/SceneManager.hpp — canonical location.
+// engine/SceneManager.hpp -- canonical location.
 #pragma once
 #include "Components.hpp"
 #include "Scene.hpp"
+#include "audio/AudioEngine.hpp"
 #include <SDL3/SDL.h>
 #include <engine/Scene.hpp>
 #include <entt/entt.hpp>
@@ -12,10 +13,24 @@ class Window;
 
 class SceneManager {
   public:
+    // ── Audio engine lifecycle ────────────────────────────────────────────
+    // SceneManager owns the AudioEngine. main() calls InitAudio() once
+    // after construction, and ShutdownAudio() is called in Shutdown().
+
+    /// Open the audio device. Call once in main() after SDL_Init.
+    bool InitAudio() { return mAudio.Init(); }
+
+    /// Direct access to the audio engine (e.g. for main() to pre-load SFX).
+    audio::AudioEngine& Audio() { return mAudio; }
+    const audio::AudioEngine& Audio() const { return mAudio; }
+
+    // ── Scene management ─────────────────────────────────────────────────
+
     void SetScene(std::unique_ptr<Scene> scene, Window& window) {
         if (mCurrent)
             mCurrent->Unload();
         mCurrent = std::move(scene);
+        mCurrent->SetAudio(&mAudio);
         mCurrent->Load(window);
     }
 
@@ -50,6 +65,7 @@ class SceneManager {
         if (next) {
             mCurrent->Unload();
             mCurrent = std::move(next);
+            mCurrent->SetAudio(&mAudio);
             mCurrent->Load(window);
         }
     }
@@ -67,6 +83,7 @@ class SceneManager {
             mCurrent->Unload();
             mCurrent.reset();
         }
+        mAudio.Shutdown();
     }
 
     bool ShouldQuit() const {
@@ -75,4 +92,5 @@ class SceneManager {
 
   private:
     std::unique_ptr<Scene> mCurrent;
+    audio::AudioEngine     mAudio;
 };

@@ -7,6 +7,8 @@
 
 #include "SurfaceUtils.hpp"
 #include "TitleScene.hpp"
+#include "audio/AudioEngine.hpp"
+#include "audio/AudioEvents.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <cmath>
@@ -157,6 +159,8 @@ void GameScene::Load(Window& window) {
     };
 
     mSlotFps.fill(0.0f);
+    mSlotSfxVol.fill(1.0f);
+    mSlotSfxStretch.fill(false);
     if (useProfile) {
         // Apply FPS overrides for every slot, regardless of whether that slot
         // has custom sprites. A hitbox-only profile (e.g. "bones") may still
@@ -165,6 +169,8 @@ void GameScene::Load(Window& window) {
             auto slot = static_cast<PlayerAnimSlot>(i);
             if (profile.HasFps(slot))
                 mSlotFps[i] = profile.Slot(slot).fps;
+            mSlotSfxVol[i]     = profile.slots[i].sfxVolume;
+            mSlotSfxStretch[i] = profile.slots[i].sfxTimeStretch;
         }
     }
 
@@ -317,10 +323,39 @@ void GameScene::Load(Window& window) {
                                                    window.GetHeight() / 2 - lcSize.y / 2,
                                                    64);
     }
+    // ── Audio: load level music and player animation SFX ─────────────────
+    if (Audio() && Audio()->IsReady()) {
+        // Level music
+        Audio()->StartLevelMusic(mLevel.musicPath, mLevel.musicVolume, 500);
+
+        // Player animation SFX from profile
+        if (useProfile) {
+            for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+                const auto& slot = profile.slots[i];
+                if (!slot.sfxPath.empty()) {
+                    auto sfxId = audio::PlayerSlotSfxId(i);
+                    std::print("[Audio] Loading slot {} sfxId='{}' path='{}'\n",
+                               i, sfxId, slot.sfxPath);
+                    if (!sfxId.empty()) {
+                        bool ok = Audio()->Sfx().Load(std::string(sfxId), slot.sfxPath);
+                        std::print("[Audio]   -> {}\n", ok ? "OK" : "FAILED");
+                    }
+                }
+            }
+        } else {
+            std::print("[Audio] No profile loaded, skipping SFX\n");
+        }
+    }
+
     Spawn();
 }
 
 void GameScene::Unload() {
+    // Stop level music and unload scene-scoped SFX
+    if (Audio() && Audio()->IsReady()) {
+        Audio()->StopLevelMusic(300);
+        Audio()->Sfx().UnloadAll();
+    }
     reg.clear();
     for (auto* t : tileScaledTextures)
         SDL_DestroyTexture(t);
@@ -488,7 +523,19 @@ void GameScene::Update(float dt) {
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
+    // Snapshot player animation before state update for SFX trigger
+    AnimationID prevPlayerAnim = AnimationID::NONE;
+    int prevPlayerFrame = 0;
+    if (Audio() && Audio()->IsReady()) {
+        auto pview = reg.view<PlayerTag, AnimationState>();
+        pview.each([&](const AnimationState& anim) {
+            prevPlayerAnim  = anim.currentAnim;
+            prevPlayerFrame = anim.currentFrame;
+        });
+    }
+
     PlayerStateSystem(reg);
+
     MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW);
     BoundsSystem(reg,
                  dt,
@@ -991,7 +1038,7 @@ void GameScene::Update(float dt) {
                 bool isAttacking = false;
                 if (auto* atk = reg.try_get<AttackState>(playerEnt))
                     isAttacking = atk->isAttacking;
-                if (!isAttacking && !set.hurt.empty()) {
+                if (!mPlayerDying && !isAttacking && !set.hurt.empty()) {
                     // Restart hurt from frame 0 whenever:
                     //   - we just entered lava (currentAnim != HURT), OR
                     //   - the previous hurt cycle finished (last frame reached)
@@ -1015,6 +1062,53 @@ void GameScene::Update(float dt) {
                 hz.flashTimer = 0.0f;
                 if (anim.currentAnim == AnimationID::HURT)
                     anim.currentAnim = AnimationID::NONE;
+            }
+        });
+    }
+
+    // Fire animation SFX on transition, time-matched to animation duration.
+    // Runs AFTER both PlayerStateSystem and hazard code so we see the final
+    // animation state for the frame (not an intermediate that gets overridden).
+    if (Audio() && Audio()->IsReady()) {
+        auto pview = reg.view<PlayerTag, AnimationState>();
+        pview.each([&](const AnimationState& anim) {
+            bool animChanged = (anim.currentAnim != prevPlayerAnim);
+            bool animRestarted = !animChanged && !anim.looping
+                              && anim.currentFrame == 0
+                              && prevPlayerFrame > 0;
+            if (animChanged || animRestarted) {
+                std::print("[Audio] Anim {}: {} -> {} (frames={} fps={:.1f} loop={})\n",
+                           animRestarted ? "restart" : "transition",
+                           (int)prevPlayerAnim, (int)anim.currentAnim,
+                           anim.totalFrames, anim.fps, anim.looping);
+                Audio()->StopAnimSFX();
+
+                float animDuration = (anim.fps > 0.0f && anim.totalFrames > 0)
+                    ? static_cast<float>(anim.totalFrames) / anim.fps
+                    : 0.0f;
+
+                auto animToSlot = [](AnimationID a) -> int {
+                    switch (a) {
+                        case AnimationID::IDLE:  return 0;
+                        case AnimationID::WALK:  return 1;
+                        case AnimationID::DUCK:  return 2;
+                        case AnimationID::JUMP:  return 3;
+                        case AnimationID::FRONT: return 4;
+                        case AnimationID::SLASH: return 5;
+                        case AnimationID::HURT:  return 6;
+                        case AnimationID::DEATH: return 7;
+                        default:                 return -1;
+                    }
+                };
+                int slotIdx = animToSlot(anim.currentAnim);
+                float sfxGain = (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT)
+                              ? mSlotSfxVol[slotIdx] : 1.0f;
+
+                bool wantStretch = (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT)
+                                 ? mSlotSfxStretch[slotIdx] : false;
+                float targetDur = wantStretch ? animDuration : 0.0f;
+                Audio()->PlayAnimSFXTimed(anim.currentAnim, targetDur,
+                                          anim.looping, sfxGain);
             }
         });
     }

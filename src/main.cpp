@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
     SDL_SetHint(SDL_HINT_RENDER_VSYNC,  "1");
 
-    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD);
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO);
     if (!TTF_Init()) {
         std::print("Error initializing SDL_ttf: {}\n", SDL_GetError());
         return 1;
@@ -26,6 +26,11 @@ int main(int argc, char** argv) {
 
     Window       GameWindow;
     SceneManager manager;
+
+    // Open the audio device early so every scene has access.
+    if (!manager.InitAudio()) {
+        std::print("Warning: audio device failed to open -- running without sound\n");
+    }
 
     // Auto-open any gamepads already connected at startup.
     // SDL3 also fires SDL_EVENT_GAMEPAD_ADDED for hot-plug so HandleEvent

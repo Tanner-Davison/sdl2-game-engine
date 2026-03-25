@@ -10,6 +10,9 @@
                 "x": 67,
                 "y": 43
             },
+            "sfxPath": "/Users/tanner.davison/Downloads/heartbeat.wav",
+            "sfxTimeStretch": false,
+            "sfxVolume": 1.0,
             "slot": 0
         },
         {
@@ -21,6 +24,9 @@
                 "x": 68,
                 "y": 43
             },
+            "sfxPath": "game_assets/audio/sfx/player/footsteps.wav",
+            "sfxTimeStretch": false,
+            "sfxVolume": 0.5,
             "slot": 1
         },
         {
@@ -43,6 +49,9 @@
                 "x": 60,
                 "y": 41
             },
+            "sfxPath": "game_assets/audio/sfx/player/jump.wav",
+            "sfxTimeStretch": true,
+            "sfxVolume": 0.49999991059303284,
             "slot": 3
         },
         {
@@ -65,17 +74,23 @@
                 "x": 62,
                 "y": 45
             },
+            "sfxPath": "game_assets/audio/sfx/player/slash.wav",
+            "sfxTimeStretch": false,
+            "sfxVolume": 0.2999999225139618,
             "slot": 5
         },
         {
             "folderPath": "game_assets/char_sprites/king/Hurt",
-            "fps": 0.0,
+            "fps": 12.0,
             "hitbox": {
                 "h": 103,
                 "w": 58,
                 "x": 62,
                 "y": 44
             },
+            "sfxPath": "/Users/tanner.davison/Downloads/gruntmale/malegruntpainone.wav",
+            "sfxTimeStretch": true,
+            "sfxVolume": 1.0,
             "slot": 6
         },
         {
@@ -87,6 +102,9 @@
                 "x": 13,
                 "y": 79
             },
+            "sfxPath": "/Users/tanner.davison/Downloads/maledeath.wav",
+            "sfxTimeStretch": false,
+            "sfxVolume": 1.0,
             "slot": 7
         }
     ],
