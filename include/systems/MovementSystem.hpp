@@ -336,14 +336,31 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             return;
         }
 
+        auto* react = reg.try_get<EnemyReaction>(ent);
+        if (react && react->turnCooldown > 0.0f)
+            react->turnCooldown -= dt;
+
         if (!stunned) {
             constexpr float AGGRO_RANGE = 300.0f;
             float enemyCX  = t.x + c.w * 0.5f;
             float playerCX = playerX + playerW * 0.5f;
             float dist     = std::abs(enemyCX - playerCX);
             if (dist < AGGRO_RANGE && dist > 4.0f) {
-                float dir = (playerCX > enemyCX) ? 1.0f : -1.0f;
-                v.dx = dir * v.speed;
+                float desiredDir = (playerCX > enemyCX) ? 1.0f : -1.0f;
+
+                bool wantsToTurn = react
+                    && react->lastDirSign != 0.0f
+                    && desiredDir != react->lastDirSign;
+
+                if (wantsToTurn && react->turnCooldown > 0.0f) {
+                    v.dx *= 0.88f;
+                    if (std::abs(v.dx) < 1.0f) v.dx = 0.0f;
+                } else {
+                    if (wantsToTurn && react)
+                        react->turnCooldown = 0.3f;
+                    v.dx = desiredDir * v.speed;
+                    if (react) react->lastDirSign = desiredDir;
+                }
             }
         } else {
             v.dx *= 0.85f;

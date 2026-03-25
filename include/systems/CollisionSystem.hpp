@@ -108,10 +108,14 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                             result.lowestHitHpFrac = frac;
                     }
 
+                    constexpr float STOMP_STUN = 0.55f;
                     if (!reg.all_of<HitFlash>(enemy))
-                        reg.emplace<HitFlash>(enemy, 0.15f, 0.15f);
+                        reg.emplace<HitFlash>(enemy, STOMP_STUN, STOMP_STUN);
                     else
-                        reg.get<HitFlash>(enemy).timer = 0.15f;
+                        reg.get<HitFlash>(enemy).timer = STOMP_STUN;
+
+                    if (auto* react = reg.try_get<EnemyReaction>(enemy))
+                        react->turnCooldown = STOMP_STUN + 0.25f;
 
                     if (auto* ead = reg.try_get<EnemyAnimData>(enemy);
                         ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
@@ -660,11 +664,14 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         et2->x += kbDir * 24.0f;
                 }
 
-                // Flash red + stun (AI pauses during this window so knockback sticks)
+                constexpr float SLASH_STUN = 0.35f;
                 if (!reg.all_of<HitFlash>(enemy))
-                    reg.emplace<HitFlash>(enemy, 0.2f, 0.2f);
+                    reg.emplace<HitFlash>(enemy, SLASH_STUN, SLASH_STUN);
                 else
-                    reg.get<HitFlash>(enemy).timer = 0.2f;
+                    reg.get<HitFlash>(enemy).timer = SLASH_STUN;
+
+                if (auto* react = reg.try_get<EnemyReaction>(enemy))
+                    react->turnCooldown = SLASH_STUN + 0.15f;
 
                 // Swap to hurt animation if the enemy has EnemyAnimData
                 if (auto* ead = reg.try_get<EnemyAnimData>(enemy);

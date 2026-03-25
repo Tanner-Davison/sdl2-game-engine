@@ -452,6 +452,14 @@ struct HitFlash {
     float duration = 0.18f; // seconds the flash lasts
 };
 
+// ── Enemy reaction delay ────────────────────────────────────────────────────
+// Prevents enemies from instantly flipping direction. While turnCooldown > 0
+// the enemy decelerates instead of re-acquiring the player.
+struct EnemyReaction {
+    float turnCooldown = 0.0f;
+    float lastDirSign  = 0.0f; // +1 or -1, last committed chase direction
+};
+
 struct ClimbState {
     bool onLadder  = false; // true while player overlaps a ladder tile this frame
     bool climbing  = false; // true while actively climbing (gravity suspended)

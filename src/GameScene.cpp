@@ -452,6 +452,22 @@ void GameScene::Update(float dt) {
         AnimationSystem(reg, dt);
         mCamera.TickShake(dt);
 
+        {
+            float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
+            float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
+            if (shakeAmp > 0.1f || punchAmp > 0.1f) {
+                SDL_Gamepad* pad = GetFirstGamepad();
+                if (pad) {
+                    float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
+                    float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
+                    Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
+                    Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
+                    lo = std::max(lo, hi);
+                    SDL_RumbleGamepad(pad, lo, hi, 50);
+                }
+            }
+        }
+
         bool animDone = false;
         auto pv = reg.view<PlayerTag, AnimationState>();
         pv.each([&](const AnimationState& anim) {
@@ -1029,6 +1045,23 @@ void GameScene::Update(float dt) {
         });
     }
     mCamera.TickShake(dt);
+
+    // Rumble the gamepad proportional to camera shake/punch
+    {
+        float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
+        float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
+        if (shakeAmp > 0.1f || punchAmp > 0.1f) {
+            SDL_Gamepad* pad = GetFirstGamepad();
+            if (pad) {
+                float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
+                float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
+                Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
+                Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
+                lo = std::max(lo, hi);
+                SDL_RumbleGamepad(pad, lo, hi, 50);
+            }
+        }
+    }
 }
 
 void GameScene::Render(Window& window, float alpha) {
@@ -1902,6 +1935,7 @@ void GameScene::Spawn() {
         reg.emplace<PrevTransform>(enemy, es.x, es.y);
         reg.emplace<Velocity>(enemy, dx, 0.0f, speed);
         reg.emplace<EnemyTag>(enemy);
+        reg.emplace<EnemyReaction>(enemy);
 
         // Try loading custom enemy profile
         bool usedProfile = false;

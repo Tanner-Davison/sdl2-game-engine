@@ -1,0 +1,64 @@
+{
+    "health": 300.0,
+    "name": "MyEnemy",
+    "slots": [
+        {
+            "folderPath": "game_assets/enemy_sprites/MyEnemy/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 93,
+                "w": 49,
+                "x": 34,
+                "y": 36
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/MyEnemy/Move",
+            "fps": 12.0,
+            "hitbox": {
+                "h": 93,
+                "w": 60,
+                "x": 26,
+                "y": 33
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/MyEnemy/Attack",
+            "fps": 14.0,
+            "hitbox": {
+                "h": 90,
+                "w": 102,
+                "x": 15,
+                "y": 34
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/MyEnemy/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 91,
+                "w": 71,
+                "x": 19,
+                "y": 38
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/MyEnemy/Dead",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 53,
+                "w": 71,
+                "x": 15,
+                "y": 79
+            },
+            "slot": 4
+        }
+    ],
+    "speed": 100.0,
+    "spriteH": 150,
+    "spriteW": 120
+}

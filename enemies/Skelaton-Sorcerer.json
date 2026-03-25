@@ -1,0 +1,64 @@
+{
+    "health": 400.0,
+    "name": "Skelaton-Sorcerer",
+    "slots": [
+        {
+            "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Idle",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 103,
+                "w": 78,
+                "x": 46,
+                "y": 49
+            },
+            "slot": 0
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Move",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 107,
+                "w": 74,
+                "x": 51,
+                "y": 47
+            },
+            "slot": 1
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Attack",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 117,
+                "w": 120,
+                "x": 52,
+                "y": 32
+            },
+            "slot": 2
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Hurt",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 130,
+                "w": 64,
+                "x": 55,
+                "y": 22
+            },
+            "slot": 3
+        },
+        {
+            "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Dead",
+            "fps": 0.0,
+            "hitbox": {
+                "h": 75,
+                "w": 133,
+                "x": 32,
+                "y": 82
+            },
+            "slot": 4
+        }
+    ],
+    "speed": 230.0,
+    "spriteH": 180,
+    "spriteW": 180
+}
