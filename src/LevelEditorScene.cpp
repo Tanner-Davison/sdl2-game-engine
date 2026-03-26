@@ -348,6 +348,33 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             }
         }
     }
+    // ── Music volume slider ──────────────────────────────────────────────────
+    if (!mLevel.musicPath.empty() && mMusicVolSlider.w > 0) {
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            int mx = (int)e.button.x, my = (int)e.button.y;
+            if (HitTest(mMusicVolSlider, mx, my)) {
+                mMusicVolDragging = true;
+                float t = std::clamp((float)(mx - mMusicVolSlider.x) / (float)mMusicVolSlider.w, 0.0f, 1.0f);
+                mLevel.musicVolume = t;
+                int pct = (int)(t * 100.0f + 0.5f);
+                SetStatus("Music volume: " + std::to_string(pct) + "%");
+                return true;
+            }
+        }
+        if (e.type == SDL_EVENT_MOUSE_MOTION && mMusicVolDragging) {
+            int mx = (int)e.motion.x;
+            float t = std::clamp((float)(mx - mMusicVolSlider.x) / (float)mMusicVolSlider.w, 0.0f, 1.0f);
+            mLevel.musicVolume = t;
+            return true;
+        }
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT && mMusicVolDragging) {
+            mMusicVolDragging = false;
+            int pct = (int)(mLevel.musicVolume * 100.0f + 0.5f);
+            SetStatus("Music volume: " + std::to_string(pct) + "%  (saved with level)");
+            return true;
+        }
+    }
+
     // ── Pan: middle-mouse drag OR Ctrl + left-mouse drag ────────────────────
     auto startPan = [&](int mx, int my) { mCamera.StartPan(mx, my); };
 
@@ -1650,6 +1677,55 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     mPopups.delNo          = mUIRenderer.DelConfirmNoRect();
     mPopups.animPickerRect       = mUIRenderer.AnimPickerRect();
     mPopups.camShakeToggleRect   = mUIRenderer.CamShakeToggleRect();
+
+    // ── Music volume slider (in toolbar, right side) ─────────────────────
+    if (!mLevel.musicPath.empty()) {
+        auto* fmt = SDL_GetPixelFormatDetails(screen->format);
+        auto mapC = [&](Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
+            return SDL_MapRGBA(fmt, nullptr, r, g, b, a);
+        };
+
+        int sliderW = 120, sliderH = 12;
+        int sliderX = cw - sliderW - 12;
+        int sliderY = TOOLBAR_H - sliderH - 6;
+        mMusicVolSlider = {sliderX, sliderY, sliderW, sliderH};
+
+        // Label via badge cache
+        int pct = (int)(mLevel.musicVolume * 100.0f + 0.5f);
+        std::string musicName = fs::path(mLevel.musicPath).filename().string();
+        if ((int)musicName.size() > 16) musicName = musicName.substr(0, 14) + "..";
+        std::string label = musicName + " " + std::to_string(pct) + "%";
+        SDL_Surface* badge = mSurfaceCache.GetBadge(label, {180, 200, 220, 255});
+        if (badge) {
+            SDL_Rect dst = {sliderX, sliderY - badge->h - 2, badge->w, badge->h};
+            SDL_Rect bg  = {dst.x - 2, dst.y - 1, dst.w + 4, dst.h + 2};
+            SDL_FillSurfaceRect(screen, &bg, mapC(18, 20, 30, 220));
+            SDL_BlitSurface(badge, nullptr, screen, &dst);
+        }
+
+        // Slider track
+        SDL_FillSurfaceRect(screen, &mMusicVolSlider, mapC(20, 22, 36, 255));
+        for (int side = 0; side < 4; ++side) {
+            SDL_Rect edge{};
+            if (side == 0) edge = {mMusicVolSlider.x, mMusicVolSlider.y, mMusicVolSlider.w, 1};
+            if (side == 1) edge = {mMusicVolSlider.x, mMusicVolSlider.y + sliderH - 1, mMusicVolSlider.w, 1};
+            if (side == 2) edge = {mMusicVolSlider.x, mMusicVolSlider.y, 1, sliderH};
+            if (side == 3) edge = {mMusicVolSlider.x + sliderW - 1, mMusicVolSlider.y, 1, sliderH};
+            SDL_FillSurfaceRect(screen, &edge, mapC(50, 55, 80, 255));
+        }
+
+        // Filled portion
+        int fillW = (int)(mLevel.musicVolume * (float)(sliderW - 2));
+        if (fillW > 0) {
+            SDL_Rect filled = {sliderX + 1, sliderY + 1, fillW, sliderH - 2};
+            SDL_FillSurfaceRect(screen, &filled, mapC(50, 120, 200, 255));
+        }
+
+        // Knob
+        int knobX = sliderX + 1 + fillW;
+        SDL_Rect knob = {knobX - 2, sliderY, 4, sliderH};
+        SDL_FillSurfaceRect(screen, &knob, mapC(180, 200, 255, 255));
+    }
 
     // Upload completed surface to GPU and present.
     // Use LINEAR filtering — the surface contains anti-aliased text from

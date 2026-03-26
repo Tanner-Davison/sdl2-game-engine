@@ -19,10 +19,10 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
     j["player"]      = {{"x", level.player.x}, {"y", level.player.y}};
 
     // Audio
-    if (!level.musicPath.empty())
+    if (!level.musicPath.empty()) {
         j["music"]       = level.musicPath;
-    if (level.musicVolume < 1.0f)
         j["musicVolume"] = level.musicVolume;
+    }
 
     j["enemies"] = json::array();
     for (const auto& e : level.enemies) {
