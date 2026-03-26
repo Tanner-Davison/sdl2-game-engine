@@ -45,11 +45,12 @@ The audio subsystem is built on SDL3_mixer and injected into scenes through `Sce
 
 **Per-animation SFX workflow:**
 
-1. In the **Character Creator**, drag a WAV/OGG file onto any animation slot's SFX drop zone.
+1. In the **Character Creator** or **Enemy Creator**, drag a WAV/OGG file onto any animation slot's SFX drop zone.
 2. Adjust per-slot **volume** with the +/- buttons.
 3. Toggle **TS** (time-stretch) to match audio playback speed to the animation cycle duration, or leave it off to play the sound at its natural speed.
 4. The profile saves `sfxPath`, `sfxVolume`, and `sfxTimeStretch` per slot in JSON.
 5. At runtime, `GameScene` loads each slot's SFX into the `SoundBank` and triggers playback on animation transitions.
+6. Enemy SFX are keyed as `<enemyTypeName>_<slot>` (e.g. `slime_hurt`, `bat_dead`), so multiple enemy types can have unique sounds.
 
 **Playback behavior:**
 
@@ -59,10 +60,17 @@ The audio subsystem is built on SDL3_mixer and injected into scenes through `Sce
 | Looping, TS off (idle, walk) | `mSfxTrack` | Loops at natural speed. Stopped when animation changes. |
 | Any animation, TS on | `mSfxTrack` | Frequency ratio adjusted so one audio cycle matches the animation cycle. Looping anims loop the audio; one-shots play once at the adjusted speed. |
 
-**SFX trigger logic** — runs once per frame after all animation-changing systems (PlayerStateSystem, hazard code):
-- Fires on **animation transitions** (ID changed from previous frame).
+**SFX trigger logic** — runs once per frame after all animation-changing systems:
+
+*Player:*
+- Fires on **animation transitions** (AnimationID changed from previous frame).
 - Fires on **cycle restarts** (same non-looping animation, frame jumped back to 0) — ensures hurt SFX replays on each hazard damage cycle.
 - Calls `StopAnimSFX()` (stops the looping track only) before starting the new sound.
+
+*Enemies:*
+- Snapshots each enemy's current sprite sheet before animation recovery and collision processing.
+- After all transitions resolve, detects **sheet changes** (move → hurt, move → attack, any → dead).
+- Maps the new sheet to the EnemyAnimSlot index, looks up the per-type SFX ID, and fires `PlayTimed` with the slot's volume and time-stretch settings.
 
 **Auto-conversion** — If `MIX_LoadAudio` fails on a WAV file, `SoundBank` automatically attempts to convert it to standard 16-bit PCM WAV using `afconvert` (macOS) or `ffmpeg`, caching the result next to the original with a `_pcm16` suffix.
 
@@ -70,7 +78,7 @@ The audio subsystem is built on SDL3_mixer and injected into scenes through `Sce
 
 - **Level Editor** — Full-featured tile-based editor with palette browser, multi-tool workflow, grid snapping, undo, camera pan/zoom, play-test, and save/load.
 - **Character Creator** — 8 animation slots (Idle, Walk, Crouch, Jump, Fall, Slash, Hurt, Death) with drag-and-drop sprite folders, per-slot FPS, interactive hitbox handles, and per-slot SFX assignment with volume control and a time-stretch toggle that matches audio playback to animation cycle duration.
-- **Enemy Designer** — 5 animation slots (Idle, Move, Attack, Hurt, Dead) with sprite size configuration, custom hitboxes, speed, health, and a live animation preview.
+- **Enemy Designer** — 5 animation slots (Idle, Move, Attack, Hurt, Dead) with sprite size configuration, custom hitboxes, speed, health, live animation preview, and per-slot SFX assignment with volume control and time-stretch toggle.
 - **Tile Animation Creator** — Build animated tile sequences from PNG folders, preview playback, and export manifest JSON.
 - **Backgrounds Panel** — Browse and assign base backgrounds, add parallax layers with adjustable scroll factors, and toggle infinite repeat.
 
@@ -101,7 +109,7 @@ Components are plain data structs defined in `Components.hpp`. Systems are free 
 | `LadderSystem` | Ladder column detection, climb/descend/top-lock, jump-off, side walk-off |
 | `RenderSystem` | GPU-rendered sprites with camera offset, flip, rotation, invincibility flash, hazard flash, hit flash, health bars, and pre-sorted tile draw order |
 | `HUDSystem` | Health bar, gravity indicator, goal count, stomp count |
-| Audio SFX trigger | Detects animation transitions and cycle restarts, fires per-slot SFX with volume and optional time-stretch |
+| Audio SFX trigger | Detects player animation transitions / cycle restarts and enemy sprite-sheet swaps, fires per-slot SFX with volume and optional time-stretch |
 
 ### Scene System
 
@@ -113,7 +121,7 @@ Scenes inherit from `Scene` (load, unload, handle event, update, render, next sc
 | `GameScene` | Runtime gameplay — owns the ECS registry, all assets, and the fixed-step game loop |
 | `LevelEditorScene` | Level editor with modular subsystems (FileOps, Palette, Toolbar, Popups, Camera, Canvas, UI, SurfaceCache) |
 | `PlayerCreatorScene` | Character creator with drag-and-drop sprites, hitbox editor, and JSON save/load |
-| `EnemyCreatorScene` | Enemy type designer with animation slots, hitbox handles, speed/health fields, and a saved roster |
+| `EnemyCreatorScene` | Enemy type designer with animation slots, hitbox handles, speed/health fields, per-slot SFX (drop, volume, TS), and a saved roster |
 | `TileAnimCreatorScene` | Animated tile builder from PNG sequences |
 | `PauseMenuScene` | In-game pause overlay with resume, back-to-editor, and back-to-title |
 
@@ -140,7 +148,7 @@ The editor uses a tool abstraction (`EditorTool` base) with a shared `EditorTool
 | `Text` | SDL3_ttf rendering with centering helpers and font cache |
 | `LevelSerializer` | JSON save/load for levels (tiles, enemies, player spawn, backgrounds, parallax layers, gravity mode) |
 | `PlayerProfile` | JSON save/load for character profiles (name, dimensions, per-slot sprites, hitboxes, FPS, per-slot SFX path/volume/time-stretch) |
-| `EnemyProfile` | JSON save/load for enemy types (name, dimensions, speed, health, per-slot sprites, hitboxes) |
+| `EnemyProfile` | JSON save/load for enemy types (name, dimensions, speed, health, per-slot sprites, hitboxes, per-slot SFX path/volume/time-stretch) |
 | `AnimatedTile` | JSON manifest loader for tile animation sequences |
 | `GameConfig` | Compile-time gameplay constants (player stats, physics, enemy stats, camera) |
 | `GameEvents` | Lightweight result structs returned by systems (`CollisionResult`, `FloatingResult`) |
@@ -148,7 +156,7 @@ The editor uses a tool abstraction (`EditorTool` base) with a shared `EditorTool
 | `AudioDevice` | RAII SDL3_mixer device and mixer initialization |
 | `SoundBank` | Named SFX resource manager with fire-and-forget playback, dual managed tracks (looping + one-shot), per-sound gain, and frequency-ratio time-stretch |
 | `MusicPlayer` | Background music streaming with fade-in/out and track switching |
-| `AudioEvents` | Canonical SFX ID constants and AnimationID → SFX ID mapping helpers |
+| `AudioEvents` | Canonical SFX ID constants, player AnimationID → SFX ID mapping, and per-enemy-type SFX ID builder (`EnemySfxId`) |
 
 ---
 
@@ -257,7 +265,8 @@ forge2d/
 │   ├── audio/                     # Sound effects and music
 │   │   ├── music/                 # Background music tracks (OGG)
 │   │   └── sfx/                   # Per-entity sound effects (WAV)
-│   │       └── player/            # Player animation SFX (footsteps, slash, hurt, etc.)
+│   │       ├── player/            # Player animation SFX (footsteps, slash, hurt, etc.)
+│   │       └── enemies/           # Enemy animation SFX (attack, hurt, dead, etc.)
 │   ├── backgrounds/               # Parallax and base background PNGs
 │   ├── char_sprites/              # Player character sprite folders
 │   ├── enemy_sprites/             # Enemy type sprite folders
@@ -326,7 +335,7 @@ Plug in any Xbox-compatible controller (XInput/SDL gamepad). Hot-plug is support
 
 1. **Launch** — The title screen offers Play, Editor, Character Creator, and Enemy Creator.
 2. **Design characters** — In the Character Creator, assign sprite folders to each of the 8 animation slots, tune hitboxes and FPS, and save to `players/`.
-3. **Design enemies** — In the Enemy Creator, configure sprite dimensions, speed, health, and animation slots (Idle, Move, Attack, Hurt, Dead), then save to `enemies/`.
+3. **Design enemies** — In the Enemy Creator, configure sprite dimensions, speed, health, animation slots (Idle, Move, Attack, Hurt, Dead), and per-slot SFX with volume and time-stretch, then save to `enemies/`.
 4. **Build levels** — In the Level Editor, paint tiles from the palette, set properties (solid, prop, hazard, ladder, slope, action, goal, moving platform, power-up), place enemies and coins, configure the player spawn, and set up layered parallax backgrounds.
 5. **Animate tiles** — In the Tile Animation Creator, select a folder of PNGs, preview the sequence, and export a manifest JSON that the editor can reference.
 6. **Play-test** — Press Play in the editor to drop into the level with your selected character. Press ESC to return to the editor and iterate.

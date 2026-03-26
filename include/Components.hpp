@@ -4,6 +4,8 @@
 #include "GameConfig.hpp"
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
+#include <array>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -242,6 +244,15 @@ struct EnemyAnimData {
     EnemyHitbox           idleHitbox;
     // Sprite dimensions
     int spriteW = 40, spriteH = 40;
+    // Enemy type name (for building per-type SFX IDs at runtime)
+    std::string typeName;
+    // Per-slot SFX metadata (indexed by EnemyAnimSlot)
+    struct SfxFile { float volume = 1.0f; bool timeStretch = false; };
+    struct SlotSfx {
+        std::vector<SfxFile> files;
+        int nextIdx = 0;
+    };
+    std::array<SlotSfx, 5> slotSfx{};
 
     // Apply the hitbox for a given animation to the entity's Collider
     // and RenderOffset. Falls back to spriteW x spriteH.

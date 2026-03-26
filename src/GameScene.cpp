@@ -159,18 +159,15 @@ void GameScene::Load(Window& window) {
     };
 
     mSlotFps.fill(0.0f);
-    mSlotSfxVol.fill(1.0f);
-    mSlotSfxStretch.fill(false);
+    mSlotSfxNext.fill(0);
+    for (auto& v : mSlotSfx) v.clear();
     if (useProfile) {
-        // Apply FPS overrides for every slot, regardless of whether that slot
-        // has custom sprites. A hitbox-only profile (e.g. "bones") may still
-        // define custom FPS values that should take effect with the fallback visuals.
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
             auto slot = static_cast<PlayerAnimSlot>(i);
             if (profile.HasFps(slot))
                 mSlotFps[i] = profile.Slot(slot).fps;
-            mSlotSfxVol[i]     = profile.slots[i].sfxVolume;
-            mSlotSfxStretch[i] = profile.slots[i].sfxTimeStretch;
+            for (const auto& e : profile.slots[i].sfx)
+                mSlotSfx[i].push_back({e.volume, e.timeStretch});
         }
     }
 
@@ -332,12 +329,12 @@ void GameScene::Load(Window& window) {
         if (useProfile) {
             for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
                 const auto& slot = profile.slots[i];
-                if (!slot.sfxPath.empty()) {
-                    auto sfxId = audio::PlayerSlotSfxId(i);
-                    std::print("[Audio] Loading slot {} sfxId='{}' path='{}'\n",
-                               i, sfxId, slot.sfxPath);
+                for (int fi = 0; fi < (int)slot.sfx.size(); ++fi) {
+                    auto sfxId = audio::PlayerSlotSfxId(i, fi);
+                    std::print("[Audio] Loading slot {} file {} sfxId='{}' path='{}'\n",
+                               i, fi, sfxId, slot.sfx[fi].path);
                     if (!sfxId.empty()) {
-                        bool ok = Audio()->Sfx().Load(std::string(sfxId), slot.sfxPath);
+                        bool ok = Audio()->Sfx().Load(sfxId, slot.sfx[fi].path);
                         std::print("[Audio]   -> {}\n", ok ? "OK" : "FAILED");
                     }
                 }
@@ -545,6 +542,15 @@ void GameScene::Update(float dt) {
                  mLevelW,
                  mLevelH);
     AnimationSystem(reg, dt);
+
+    // Snapshot enemy animation sheets before transitions for SFX trigger
+    std::unordered_map<entt::entity, SDL_Texture*> prevEnemySheet;
+    if (Audio() && Audio()->IsReady()) {
+        auto ev = reg.view<EnemyTag, EnemyAnimData, Renderable>();
+        ev.each([&](entt::entity e, const EnemyAnimData&, const Renderable& r) {
+            prevEnemySheet[e] = r.sheet;
+        });
+    }
 
     // Recover enemies from hurt/attack animation back to move animation
     {
@@ -789,6 +795,36 @@ void GameScene::Update(float dt) {
         }
         reg.emplace<DeadTag>(e);
         stompCount++;
+    }
+
+    // Fire enemy SFX on animation transitions
+    if (Audio() && Audio()->IsReady() && !prevEnemySheet.empty()) {
+        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>();
+        ev.each([&](entt::entity e, EnemyAnimData& ead,
+                     const AnimationState& anim, const Renderable& r) {
+            auto pit = prevEnemySheet.find(e);
+            if (pit == prevEnemySheet.end()) return;
+            if (r.sheet == pit->second) return;
+            int slotIdx = -1;
+            if (r.sheet == ead.moveSheet)   slotIdx = 1;
+            else if (r.sheet == ead.attackSheet) slotIdx = 2;
+            else if (r.sheet == ead.hurtSheet)   slotIdx = 3;
+            else if (r.sheet == ead.deadSheet)   slotIdx = 4;
+            if (slotIdx < 0 || ead.slotSfx[slotIdx].files.empty()) return;
+            auto& ss = ead.slotSfx[slotIdx];
+            const auto& fi = ss.files[ss.nextIdx];
+            std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
+            if (sfxId.empty()) return;
+            if (ss.files.size() > 1) {
+                if (Audio()->Sfx().PlayOneShotSeq(sfxId, fi.volume))
+                    ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
+            } else {
+                float dur = 0.0f;
+                if (fi.timeStretch && anim.fps > 0.0f && anim.totalFrames > 0)
+                    dur = static_cast<float>(anim.totalFrames) / anim.fps;
+                Audio()->Sfx().PlayTimed(sfxId, dur, anim.looping, fi.volume);
+            }
+        });
     }
 
     goalsCollected += collision.goalsCollected;
@@ -1101,14 +1137,21 @@ void GameScene::Update(float dt) {
                     }
                 };
                 int slotIdx = animToSlot(anim.currentAnim);
-                float sfxGain = (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT)
-                              ? mSlotSfxVol[slotIdx] : 1.0f;
-
-                bool wantStretch = (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT)
-                                 ? mSlotSfxStretch[slotIdx] : false;
-                float targetDur = wantStretch ? animDuration : 0.0f;
-                Audio()->PlayAnimSFXTimed(anim.currentAnim, targetDur,
-                                          anim.looping, sfxGain);
+                if (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT
+                    && !mSlotSfx[slotIdx].empty()) {
+                    int& nextIdx = mSlotSfxNext[slotIdx];
+                    const auto& fi = mSlotSfx[slotIdx][nextIdx];
+                    auto sfxId = audio::PlayerAnimSfxId(anim.currentAnim, nextIdx);
+                    if (!sfxId.empty()) {
+                        if (mSlotSfx[slotIdx].size() > 1) {
+                            if (Audio()->Sfx().PlayOneShotSeq(sfxId, fi.volume))
+                                nextIdx = (nextIdx + 1) % (int)mSlotSfx[slotIdx].size();
+                        } else {
+                            float targetDur = fi.timeStretch ? animDuration : 0.0f;
+                            Audio()->Sfx().PlayTimed(sfxId, targetDur, anim.looping, fi.volume);
+                        }
+                    }
+                }
             }
         });
     }
@@ -1927,6 +1970,7 @@ void GameScene::Spawn() {
         EnemyHitbox attackHitbox;
         EnemyHitbox hurtHitbox;
         EnemyHitbox deadHitbox;
+        std::array<EnemyAnimData::SlotSfx, 5> slotSfx;
     };
     std::unordered_map<std::string, std::shared_ptr<EnemyTypeCache>> enemyTypeCache;
     mEnemySpriteSheets.clear();  // clear from previous Spawn (Respawn path)
@@ -1996,6 +2040,19 @@ void GameScene::Spawn() {
         tc->attackHitbox = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Attack).hitbox);
         tc->hurtHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Hurt).hitbox);
         tc->deadHitbox   = toEnemyHitbox(prof.Slot(EnemyAnimSlot::Dead).hitbox);
+
+        // Load per-slot SFX for this enemy type
+        if (Audio() && Audio()->IsReady()) {
+            for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
+                const auto& slot = prof.slots[i];
+                for (int fi = 0; fi < (int)slot.sfx.size(); ++fi) {
+                    std::string sfxId = audio::EnemySfxId(typeName, i, fi);
+                    if (!sfxId.empty())
+                        Audio()->Sfx().Load(sfxId, slot.sfx[fi].path);
+                    tc->slotSfx[i].files.push_back({slot.sfx[fi].volume, slot.sfx[fi].timeStretch});
+                }
+            }
+        }
 
         // If Move has no frames, fall back to Idle for movement animation
         if (tc->moveFrames.empty() && !tc->idleFrames.empty()) {
@@ -2072,6 +2129,8 @@ void GameScene::Spawn() {
                     ead.deadFrames   = tc->deadFrames.empty() ? frames : tc->deadFrames;
                     ead.deadFps      = tc->deadFps;
                     ead.deadHitbox   = tc->deadHitbox;
+                    ead.typeName     = es.enemyType;
+                    ead.slotSfx      = tc->slotSfx;
                     ead.spriteW      = tc->spriteW;
                     ead.spriteH      = tc->spriteH;
                     reg.emplace<EnemyAnimData>(enemy, std::move(ead));

@@ -54,6 +54,13 @@ class SoundBank {
     bool PlayTimed(std::string_view id, float targetSec, bool loop = false,
                    float gain = 1.0f);
 
+    /// Play a loaded SFX sequentially — if the previous sequential sound is
+    /// still playing, the call is skipped and returns false. This lets
+    /// multi-file slots cycle through sounds one at a time rather than
+    /// overlapping. Callers should only advance their round-robin index
+    /// when this returns true.
+    bool PlayOneShotSeq(std::string_view id, float gain = 1.0f);
+
     /// Stop the managed SFX track (used to end looping animation SFX).
     void StopManaged();
 
@@ -96,6 +103,13 @@ class SoundBank {
     // control. NOT stopped by StopManaged(), so the sound finishes
     // naturally even after the animation transitions to something else.
     MIX_Track* mOneShotTrack = nullptr;
+
+    // Sequential one-shot track for multi-file slots. Plays one sound
+    // at a time; PlayOneShotSeq() skips if the previous sound hasn't
+    // finished yet. Busy state is tracked via start time + duration.
+    MIX_Track* mSeqTrack      = nullptr;
+    Uint64     mSeqStartMs    = 0;
+    Uint64     mSeqDurationMs = 0;
 
     std::unordered_map<std::string, MIX_Audio*, StringHash, std::equal_to<>> mAudios;
     float mVolume = 1.0f;

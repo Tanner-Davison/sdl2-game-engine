@@ -61,10 +61,17 @@ struct EnemyProfile {
     float       speed    = 120.0f; // default movement speed (px/s)
     float       health   = 30.0f;  // max HP (default = slime HP)
 
+    struct SfxEntry {
+        std::string path;
+        float       volume      = 1.0f;
+        bool        timeStretch = false;
+    };
+
     struct SlotData {
-        std::string    folderPath; // path to directory of PNGs (or single PNG)
-        EnemyAnimHitbox hitbox;    // custom hitbox for this animation (zeros = use default)
-        float          fps = 0.0f; // playback speed in frames/sec (0 = use engine default)
+        std::string    folderPath;
+        EnemyAnimHitbox hitbox;
+        float          fps = 0.0f;
+        std::vector<SfxEntry> sfx; // per-file SFX — multiple = round-robin on each trigger
     };
 
     std::array<SlotData, ENEMY_ANIM_SLOT_COUNT> slots;
@@ -76,6 +83,7 @@ struct EnemyProfile {
     bool HasSlot(EnemyAnimSlot s) const { return !Slot(s).folderPath.empty(); }
     bool HasHitbox(EnemyAnimSlot s) const { return !Slot(s).hitbox.IsDefault(); }
     bool HasFps(EnemyAnimSlot s) const { return Slot(s).fps > 0.0f; }
+    bool HasSFX(EnemyAnimSlot s) const { return !Slot(s).sfx.empty(); }
 };
 
 // ── Path portability helpers ─────────────────────────────────────────────────
@@ -172,7 +180,7 @@ inline bool SaveEnemyProfile(const EnemyProfile& p, const std::string& path) {
             }
         }
 
-        j["slots"].push_back({
+        json slotJson = {
             {"slot",       i},
             {"folderPath", savePath},
             {"fps",        s.fps},
@@ -182,7 +190,14 @@ inline bool SaveEnemyProfile(const EnemyProfile& p, const std::string& path) {
                 {"w", s.hitbox.w},
                 {"h", s.hitbox.h}
             }}
-        });
+        };
+        if (!s.sfx.empty()) {
+            json arr = json::array();
+            for (const auto& e : s.sfx)
+                arr.push_back({{"path", e.path}, {"volume", e.volume}, {"timeStretch", e.timeStretch}});
+            slotJson["sfx"] = std::move(arr);
+        }
+        j["slots"].push_back(std::move(slotJson));
     }
 
     std::ofstream f(path);
@@ -217,8 +232,29 @@ inline bool LoadEnemyProfile(const std::string& path, EnemyProfile& out) {
         int idx = entry.value("slot", -1);
         if (idx < 0 || idx >= ENEMY_ANIM_SLOT_COUNT) continue;
         auto& s = out.slots[idx];
-        s.folderPath = ResolveEnemyFolderPath(entry.value("folderPath", ""));
-        s.fps        = entry.value("fps", 0.0f);
+        s.folderPath     = ResolveEnemyFolderPath(entry.value("folderPath", ""));
+        s.fps            = entry.value("fps", 0.0f);
+        if (entry.contains("sfx") && entry["sfx"].is_array()) {
+            for (const auto& e : entry["sfx"]) {
+                EnemyProfile::SfxEntry se;
+                se.path        = e.value("path", std::string{});
+                se.volume      = e.value("volume", 1.0f);
+                se.timeStretch = e.value("timeStretch", false);
+                if (!se.path.empty()) s.sfx.push_back(std::move(se));
+            }
+        } else if (entry.contains("sfxPaths") && entry["sfxPaths"].is_array()) {
+            float vol = entry.value("sfxVolume", 1.0f);
+            bool  ts  = entry.value("sfxTimeStretch", false);
+            for (const auto& p : entry["sfxPaths"])
+                if (p.is_string() && !p.get<std::string>().empty())
+                    s.sfx.push_back({p.get<std::string>(), vol, ts});
+        } else if (entry.contains("sfxPath") && entry["sfxPath"].is_string()) {
+            auto legacy = entry["sfxPath"].get<std::string>();
+            if (!legacy.empty())
+                s.sfx.push_back({std::move(legacy),
+                                 entry.value("sfxVolume", 1.0f),
+                                 entry.value("sfxTimeStretch", false)});
+        }
         if (entry.contains("hitbox")) {
             s.hitbox.x = entry["hitbox"].value("x", 0);
             s.hitbox.y = entry["hitbox"].value("y", 0);

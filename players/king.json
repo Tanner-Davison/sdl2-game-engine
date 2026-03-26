@@ -75,7 +75,7 @@
                 "y": 45
             },
             "sfxPath": "game_assets/audio/sfx/player/slash.wav",
-            "sfxTimeStretch": false,
+            "sfxTimeStretch": true,
             "sfxVolume": 0.2999999225139618,
             "slot": 5
         },

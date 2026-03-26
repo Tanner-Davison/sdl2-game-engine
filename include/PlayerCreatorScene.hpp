@@ -82,17 +82,19 @@ class PlayerCreatorScene : public Scene {
     };
     std::array<SlotFpsButtons, PLAYER_ANIM_SLOT_COUNT> mFpsBtns;
 
-    // ── Per-slot SFX drop zone ────────────────────────────────────────────────
-    // Small area below each slot row to drop a .wav/.ogg/.mp3 file.
-    struct SlotSfxUI {
-        SDL_Rect dropRect{};      // the drop zone + filename display area
-        SDL_Rect clearRect{};     // small "x" button to remove assigned SFX
-        SDL_Rect volDownRect{};   // "-" volume button
-        SDL_Rect volUpRect{};     // "+" volume button
-        SDL_Rect stretchRect{};   // "TS" time-stretch toggle button
+    // ── Per-file SFX UI ──────────────────────────────────────────────────────
+    struct SfxFileUI {
+        SDL_Rect nameRect{};
+        SDL_Rect clearRect{};
+        SDL_Rect volDownRect{};
+        SDL_Rect volUpRect{};
+        SDL_Rect stretchRect{};
     };
-    std::array<SlotSfxUI, PLAYER_ANIM_SLOT_COUNT> mSfxUI;
-    int  mSfxDropHoverSlot = -1; // which slot's SFX zone is being hovered (-1 = none)
+    // mSfxFileUI[slot] = vector of per-file rects (rebuilt each computeLayout)
+    std::array<std::vector<SfxFileUI>, PLAYER_ANIM_SLOT_COUNT> mSfxFileUI;
+    // mSfxDropRect[slot] = the "drop audio file" zone at the bottom of each slot
+    std::array<SDL_Rect, PLAYER_ANIM_SLOT_COUNT> mSfxDropRect;
+    int  mSfxDropHoverSlot = -1;
 
     // Returns true if the file extension is an audio format we support
     static bool isAudioFile(const std::filesystem::path& p) {

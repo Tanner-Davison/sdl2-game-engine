@@ -58,6 +58,10 @@ namespace audio {
 
 SoundBank::~SoundBank() {
     UnloadAll();
+    if (mSeqTrack) {
+        MIX_DestroyTrack(mSeqTrack);
+        mSeqTrack = nullptr;
+    }
     if (mOneShotTrack) {
         MIX_DestroyTrack(mOneShotTrack);
         mOneShotTrack = nullptr;
@@ -72,19 +76,30 @@ SoundBank::SoundBank(SoundBank&& other) noexcept
     : mMixer(std::exchange(other.mMixer, nullptr))
     , mSfxTrack(std::exchange(other.mSfxTrack, nullptr))
     , mOneShotTrack(std::exchange(other.mOneShotTrack, nullptr))
+    , mSeqTrack(std::exchange(other.mSeqTrack, nullptr))
+    , mSeqStartMs(other.mSeqStartMs)
+    , mSeqDurationMs(other.mSeqDurationMs)
     , mAudios(std::move(other.mAudios))
     , mVolume(other.mVolume) {
+    other.mSeqStartMs = 0;
+    other.mSeqDurationMs = 0;
     other.mVolume = 1.0f;
 }
 
 SoundBank& SoundBank::operator=(SoundBank&& other) noexcept {
     if (this != &other) {
         UnloadAll();
+        if (mSeqTrack) MIX_DestroyTrack(mSeqTrack);
         if (mOneShotTrack) MIX_DestroyTrack(mOneShotTrack);
         if (mSfxTrack) MIX_DestroyTrack(mSfxTrack);
         mMixer        = std::exchange(other.mMixer, nullptr);
         mSfxTrack     = std::exchange(other.mSfxTrack, nullptr);
         mOneShotTrack = std::exchange(other.mOneShotTrack, nullptr);
+        mSeqTrack     = std::exchange(other.mSeqTrack, nullptr);
+        mSeqStartMs   = other.mSeqStartMs;
+        mSeqDurationMs = other.mSeqDurationMs;
+        other.mSeqStartMs = 0;
+        other.mSeqDurationMs = 0;
         mAudios       = std::move(other.mAudios);
         mVolume       = other.mVolume;
         other.mVolume = 1.0f;
@@ -103,6 +118,11 @@ void SoundBank::SetMixer(MIX_Mixer* mixer) {
         mOneShotTrack = MIX_CreateTrack(mMixer);
         if (mOneShotTrack)
             MIX_TagTrack(mOneShotTrack, "sfx_oneshot");
+    }
+    if (mMixer && !mSeqTrack) {
+        mSeqTrack = MIX_CreateTrack(mMixer);
+        if (mSeqTrack)
+            MIX_TagTrack(mSeqTrack, "sfx_seq");
     }
 }
 
@@ -150,6 +170,12 @@ void SoundBank::Unload(const std::string& id) {
 }
 
 void SoundBank::UnloadAll() {
+    if (mSeqTrack) {
+        MIX_StopTrack(mSeqTrack, 0);
+        MIX_SetTrackAudio(mSeqTrack, nullptr);
+    }
+    mSeqStartMs = 0;
+    mSeqDurationMs = 0;
     if (mOneShotTrack) {
         MIX_StopTrack(mOneShotTrack, 0);
         MIX_SetTrackAudio(mOneShotTrack, nullptr);
@@ -177,6 +203,38 @@ bool SoundBank::Play(std::string_view id) {
         return false;
     }
     return true;
+}
+
+bool SoundBank::PlayOneShotSeq(std::string_view id, float gain) {
+    if (!mMixer) return false;
+
+    // If the previous sequential sound is still playing, skip this trigger
+    if (mSeqDurationMs > 0 && (SDL_GetTicks() - mSeqStartMs) < mSeqDurationMs)
+        return false;
+
+    auto it = mAudios.find(id);
+    if (it == mAudios.end()) return false;
+
+    if (!mSeqTrack) return Play(id);
+
+    MIX_StopTrack(mSeqTrack, 0);
+    if (!MIX_SetTrackAudio(mSeqTrack, it->second)) return Play(id);
+    MIX_SetTrackGain(mSeqTrack, std::clamp(gain, 0.0f, 1.0f));
+    MIX_SetTrackFrequencyRatio(mSeqTrack, 1.0f);
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
+    bool ok = MIX_PlayTrack(mSeqTrack, props);
+    SDL_DestroyProperties(props);
+
+    if (ok) {
+        mSeqStartMs = SDL_GetTicks();
+        Sint64 frames = MIX_GetAudioDuration(it->second);
+        mSeqDurationMs = (frames > 0)
+            ? static_cast<Uint64>(MIX_AudioFramesToMS(it->second, frames))
+            : 0;
+    }
+    return ok;
 }
 
 bool SoundBank::PlayTimed(std::string_view id, float targetSec, bool loop, float gain) {

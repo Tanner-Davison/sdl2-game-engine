@@ -5,6 +5,7 @@
 #include <fstream>
 #include <filesystem>
 #include <print>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -61,13 +62,17 @@ struct PlayerProfile {
     int         spriteW  = 0;   // render width  in px (0 = use engine default)
     int         spriteH  = 0;   // render height in px (0 = use engine default)
 
+    struct SfxEntry {
+        std::string path;
+        float       volume      = 1.0f;
+        bool        timeStretch = false;
+    };
+
     struct SlotData {
-        std::string folderPath; // absolute or relative path to a directory of PNGs
-        AnimHitbox  hitbox;     // custom hitbox for this animation (zeros = use default)
-        float       fps = 0.0f; // playback speed in frames/sec (0 = use engine default)
-        std::string sfxPath;    // relative path to WAV/OGG sound effect (empty = none)
-        float       sfxVolume = 1.0f; // 0.0 .. 1.0 per-animation SFX volume
-        bool        sfxTimeStretch = false; // true = stretch/compress SFX to match anim duration
+        std::string folderPath;
+        AnimHitbox  hitbox;
+        float       fps = 0.0f;
+        std::vector<SfxEntry> sfx; // per-file SFX — multiple = round-robin on each trigger
     };
 
     std::array<SlotData, PLAYER_ANIM_SLOT_COUNT> slots;
@@ -89,7 +94,7 @@ struct PlayerProfile {
         return Slot(s).fps > 0.0f;
     }
     bool HasSFX(PlayerAnimSlot s) const {
-        return !Slot(s).sfxPath.empty();
+        return !Slot(s).sfx.empty();
     }
 };
 
@@ -192,10 +197,11 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
                 {"h", s.hitbox.h}
             }}
         };
-        if (!s.sfxPath.empty()) {
-            slotJson["sfxPath"]        = s.sfxPath;
-            slotJson["sfxVolume"]      = s.sfxVolume;
-            slotJson["sfxTimeStretch"] = s.sfxTimeStretch;
+        if (!s.sfx.empty()) {
+            json arr = json::array();
+            for (const auto& e : s.sfx)
+                arr.push_back({{"path", e.path}, {"volume", e.volume}, {"timeStretch", e.timeStretch}});
+            slotJson["sfx"] = std::move(arr);
         }
         j["slots"].push_back(std::move(slotJson));
     }
@@ -232,9 +238,27 @@ inline bool LoadPlayerProfile(const std::string& path, PlayerProfile& out) {
         // ResolveFolderPath silently drops stale absolute paths from other machines
         s.folderPath = ResolveFolderPath(entry.value("folderPath", ""));
         s.fps        = entry.value("fps", 0.0f);
-        s.sfxPath    = entry.value("sfxPath", std::string{});
-        s.sfxVolume      = entry.value("sfxVolume", 1.0f);
-        s.sfxTimeStretch = entry.value("sfxTimeStretch", false);
+        if (entry.contains("sfx") && entry["sfx"].is_array()) {
+            for (const auto& e : entry["sfx"]) {
+                PlayerProfile::SfxEntry se;
+                se.path        = e.value("path", std::string{});
+                se.volume      = e.value("volume", 1.0f);
+                se.timeStretch = e.value("timeStretch", false);
+                if (!se.path.empty()) s.sfx.push_back(std::move(se));
+            }
+        } else if (entry.contains("sfxPaths") && entry["sfxPaths"].is_array()) {
+            float vol = entry.value("sfxVolume", 1.0f);
+            bool  ts  = entry.value("sfxTimeStretch", false);
+            for (const auto& p : entry["sfxPaths"])
+                if (p.is_string() && !p.get<std::string>().empty())
+                    s.sfx.push_back({p.get<std::string>(), vol, ts});
+        } else if (entry.contains("sfxPath") && entry["sfxPath"].is_string()) {
+            auto legacy = entry["sfxPath"].get<std::string>();
+            if (!legacy.empty())
+                s.sfx.push_back({std::move(legacy),
+                                 entry.value("sfxVolume", 1.0f),
+                                 entry.value("sfxTimeStretch", false)});
+        }
         if (entry.contains("hitbox")) {
             s.hitbox.x = entry["hitbox"].value("x", 0);
             s.hitbox.y = entry["hitbox"].value("y", 0);

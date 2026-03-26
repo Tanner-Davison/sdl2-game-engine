@@ -86,6 +86,24 @@ class EnemyCreatorScene : public Scene {
     };
     std::array<SlotFpsButtons, ENEMY_ANIM_SLOT_COUNT> mFpsBtns;
 
+    // ── Per-file SFX UI ──────────────────────────────────────────────────────
+    struct SfxFileUI {
+        SDL_Rect nameRect{};
+        SDL_Rect clearRect{};
+        SDL_Rect volDownRect{};
+        SDL_Rect volUpRect{};
+        SDL_Rect stretchRect{};
+    };
+    std::array<std::vector<SfxFileUI>, ENEMY_ANIM_SLOT_COUNT> mSfxFileUI;
+    std::array<SDL_Rect, ENEMY_ANIM_SLOT_COUNT> mSfxDropRect;
+    int mSfxDropHoverSlot = -1;
+
+    static bool isAudioFile(const std::filesystem::path& p) {
+        auto ext = p.extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        return ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac";
+    }
+
     // ── Slot selection ────────────────────────────────────────────────────────
     int  mSelectedSlot = 0;
 

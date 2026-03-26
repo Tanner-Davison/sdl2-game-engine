@@ -14,13 +14,20 @@
         },
         {
             "folderPath": "game_assets/char_sprites/angryorange/Walk",
-            "fps": 30.0,
+            "fps": 41.0,
             "hitbox": {
                 "h": 71,
                 "w": 61,
                 "x": 53,
                 "y": 81
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/steps/Steps Loop 5.wav",
+                    "timeStretch": false,
+                    "volume": 1.0
+                }
+            ],
             "slot": 1
         },
         {
@@ -65,6 +72,23 @@
                 "x": 53,
                 "y": 83
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yummy.wav",
+                    "timeStretch": false,
+                    "volume": 0.7999999523162842
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yumyum.wav",
+                    "timeStretch": false,
+                    "volume": 0.7999999523162842
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yumyumyummy.wav",
+                    "timeStretch": false,
+                    "volume": 0.7999999523162842
+                }
+            ],
             "slot": 5
         },
         {
