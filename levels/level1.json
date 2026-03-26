@@ -2,8 +2,6 @@
     "background": "game_assets/backgrounds/Background_01.png",
     "bgFitMode": "scroll_wide",
     "bgRepeat": true,
-    "music": "game_assets/audio/music/dungeon.ogg",
-    "musicVolume": 1.0,
     "enemies": [
         {
             "antiGravity": false,

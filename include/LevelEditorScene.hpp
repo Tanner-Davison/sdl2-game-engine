@@ -309,4 +309,8 @@ class LevelEditorScene : public Scene {
     int mTileW         = GRID;
     int mTileH         = GRID;
     int mGhostRotation = 0;
+
+    // Music volume slider
+    SDL_Rect mMusicVolSlider{};
+    bool     mMusicVolDragging = false;
 };

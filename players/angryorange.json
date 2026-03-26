@@ -34,11 +34,18 @@
             "folderPath": "game_assets/char_sprites/angryorange/Crouch",
             "fps": 0.0,
             "hitbox": {
-                "h": 51,
-                "w": 77,
+                "h": 10,
+                "w": 88,
                 "x": 47,
-                "y": 99
+                "y": 140
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/gremlinyum.wav",
+                    "timeStretch": false,
+                    "volume": 1.0
+                }
+            ],
             "slot": 2
         },
         {
@@ -50,6 +57,13 @@
                 "x": 53,
                 "y": 85
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/Plop.wav",
+                    "timeStretch": false,
+                    "volume": 1.0
+                }
+            ],
             "slot": 3
         },
         {
@@ -86,7 +100,7 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yumyumyummy.wav",
                     "timeStretch": false,
-                    "volume": 0.7999999523162842
+                    "volume": 0.5999999046325684
                 }
             ],
             "slot": 5
@@ -100,6 +114,13 @@
                 "x": 53,
                 "y": 84
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/screaming-in-pain.wav",
+                    "timeStretch": false,
+                    "volume": 1.0
+                }
+            ],
             "slot": 6
         },
         {
@@ -111,6 +132,13 @@
                 "x": 53,
                 "y": 86
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/Cartoon Voice Whats Happening/whatshappening.wav",
+                    "timeStretch": false,
+                    "volume": 1.0
+                }
+            ],
             "slot": 7
         }
     ],

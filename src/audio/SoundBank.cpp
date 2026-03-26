@@ -58,6 +58,10 @@ namespace audio {
 
 SoundBank::~SoundBank() {
     UnloadAll();
+    if (mPreviewTrack) {
+        MIX_DestroyTrack(mPreviewTrack);
+        mPreviewTrack = nullptr;
+    }
     if (mSeqTrack) {
         MIX_DestroyTrack(mSeqTrack);
         mSeqTrack = nullptr;
@@ -79,6 +83,7 @@ SoundBank::SoundBank(SoundBank&& other) noexcept
     , mSeqTrack(std::exchange(other.mSeqTrack, nullptr))
     , mSeqStartMs(other.mSeqStartMs)
     , mSeqDurationMs(other.mSeqDurationMs)
+    , mPreviewTrack(std::exchange(other.mPreviewTrack, nullptr))
     , mAudios(std::move(other.mAudios))
     , mVolume(other.mVolume) {
     other.mSeqStartMs = 0;
@@ -100,6 +105,8 @@ SoundBank& SoundBank::operator=(SoundBank&& other) noexcept {
         mSeqDurationMs = other.mSeqDurationMs;
         other.mSeqStartMs = 0;
         other.mSeqDurationMs = 0;
+        if (mPreviewTrack) MIX_DestroyTrack(mPreviewTrack);
+        mPreviewTrack = std::exchange(other.mPreviewTrack, nullptr);
         mAudios       = std::move(other.mAudios);
         mVolume       = other.mVolume;
         other.mVolume = 1.0f;
@@ -123,6 +130,11 @@ void SoundBank::SetMixer(MIX_Mixer* mixer) {
         mSeqTrack = MIX_CreateTrack(mMixer);
         if (mSeqTrack)
             MIX_TagTrack(mSeqTrack, "sfx_seq");
+    }
+    if (mMixer && !mPreviewTrack) {
+        mPreviewTrack = MIX_CreateTrack(mMixer);
+        if (mPreviewTrack)
+            MIX_TagTrack(mPreviewTrack, "sfx_preview");
     }
 }
 
@@ -170,6 +182,10 @@ void SoundBank::Unload(const std::string& id) {
 }
 
 void SoundBank::UnloadAll() {
+    if (mPreviewTrack) {
+        MIX_StopTrack(mPreviewTrack, 0);
+        MIX_SetTrackAudio(mPreviewTrack, nullptr);
+    }
     if (mSeqTrack) {
         MIX_StopTrack(mSeqTrack, 0);
         MIX_SetTrackAudio(mSeqTrack, nullptr);
@@ -208,15 +224,12 @@ bool SoundBank::Play(std::string_view id) {
 bool SoundBank::PlayOneShotSeq(std::string_view id, float gain) {
     if (!mMixer) return false;
 
-    // If the previous sequential sound is still playing, skip this trigger
-    if (mSeqDurationMs > 0 && (SDL_GetTicks() - mSeqStartMs) < mSeqDurationMs)
-        return false;
-
     auto it = mAudios.find(id);
     if (it == mAudios.end()) return false;
 
     if (!mSeqTrack) return Play(id);
 
+    // Always cut the previous sound and start the new one immediately.
     MIX_StopTrack(mSeqTrack, 0);
     if (!MIX_SetTrackAudio(mSeqTrack, it->second)) return Play(id);
     MIX_SetTrackGain(mSeqTrack, std::clamp(gain, 0.0f, 1.0f));
@@ -318,9 +331,68 @@ void SoundBank::StopManaged() {
     }
 }
 
+void SoundBank::StopOneShot() {
+    if (mOneShotTrack)
+        MIX_StopTrack(mOneShotTrack, 0);
+}
+
+void SoundBank::FadeOutManaged(int ms) {
+    if (mSfxTrack)
+        MIX_StopTrack(mSfxTrack, ms);
+}
+
+void SoundBank::FadeOutSeq(int ms) {
+    if (mSeqTrack)
+        MIX_StopTrack(mSeqTrack, ms);
+    mSeqDurationMs = 0;
+}
+
+void SoundBank::StopSeq() {
+    if (mSeqTrack)
+        MIX_StopTrack(mSeqTrack, 0);
+    mSeqStartMs = 0;
+    mSeqDurationMs = 0;
+}
+
 void SoundBank::StopAll() {
     if (mMixer)
         MIX_StopAllTracks(mMixer, 0);
+}
+
+// ── Preview (editor) ────────────────────────────────────────────────────────
+
+bool SoundBank::PlayPreview(std::string_view id, float gain) {
+    if (!mMixer || !mPreviewTrack) return false;
+
+    auto it = mAudios.find(id);
+    if (it == mAudios.end()) return false;
+
+    MIX_StopTrack(mPreviewTrack, 0);
+    if (!MIX_SetTrackAudio(mPreviewTrack, it->second)) return false;
+    MIX_SetTrackGain(mPreviewTrack, std::clamp(gain, 0.0f, 1.0f));
+    MIX_SetTrackFrequencyRatio(mPreviewTrack, 1.0f);
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
+    bool ok = MIX_PlayTrack(mPreviewTrack, props);
+    SDL_DestroyProperties(props);
+    return ok;
+}
+
+void SoundBank::SetPreviewGain(float gain) {
+    if (mPreviewTrack)
+        MIX_SetTrackGain(mPreviewTrack, std::clamp(gain, 0.0f, 1.0f));
+}
+
+void SoundBank::StopPreview() {
+    if (mPreviewTrack)
+        MIX_StopTrack(mPreviewTrack, 0);
+}
+
+bool SoundBank::IsPreviewPlaying() const {
+    // Check if the track is actively playing by checking if we have audio set
+    // SDL3_mixer doesn't have a direct IsPlaying, so we rely on our timer logic
+    return mPreviewTrack != nullptr;
 }
 
 // ── Query ────────────────────────────────────────────────────────────────────
@@ -328,6 +400,7 @@ void SoundBank::StopAll() {
 bool SoundBank::Has(std::string_view id) const {
     return mAudios.find(id) != mAudios.end();
 }
+
 
 float SoundBank::GetDuration(std::string_view id) const {
     auto it = mAudios.find(id);

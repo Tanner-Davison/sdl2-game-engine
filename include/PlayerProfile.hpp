@@ -66,6 +66,8 @@ struct PlayerProfile {
         std::string path;
         float       volume      = 1.0f;
         bool        timeStretch = false;
+        float       trimStart   = 0.0f;  // 0.0–1.0 fraction of audio to skip at start
+        float       trimEnd     = 1.0f;  // 0.0–1.0 fraction of audio to play up to
     };
 
     struct SlotData {
@@ -200,7 +202,8 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
         if (!s.sfx.empty()) {
             json arr = json::array();
             for (const auto& e : s.sfx)
-                arr.push_back({{"path", e.path}, {"volume", e.volume}, {"timeStretch", e.timeStretch}});
+                arr.push_back({{"path", e.path}, {"volume", e.volume}, {"timeStretch", e.timeStretch},
+                               {"trimStart", e.trimStart}, {"trimEnd", e.trimEnd}});
             slotJson["sfx"] = std::move(arr);
         }
         j["slots"].push_back(std::move(slotJson));
@@ -244,6 +247,8 @@ inline bool LoadPlayerProfile(const std::string& path, PlayerProfile& out) {
                 se.path        = e.value("path", std::string{});
                 se.volume      = e.value("volume", 1.0f);
                 se.timeStretch = e.value("timeStretch", false);
+                se.trimStart   = e.value("trimStart", 0.0f);
+                se.trimEnd     = e.value("trimEnd", 1.0f);
                 if (!se.path.empty()) s.sfx.push_back(std::move(se));
             }
         } else if (entry.contains("sfxPaths") && entry["sfxPaths"].is_array()) {

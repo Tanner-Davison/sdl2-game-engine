@@ -64,8 +64,35 @@ class SoundBank {
     /// Stop the managed SFX track (used to end looping animation SFX).
     void StopManaged();
 
+    /// Stop the one-shot track immediately.
+    void StopOneShot();
+
+    /// Fade out the managed (looping/time-stretched) track over @p ms.
+    void FadeOutManaged(int ms);
+
+    /// Fade out the sequential one-shot track over @p ms.
+    void FadeOutSeq(int ms);
+
+    /// Stop the sequential one-shot track immediately and clear its busy state.
+    void StopSeq();
+
     /// Stop all tracks on the mixer.
     void StopAll();
+
+    // ── Preview (editor) ─────────────────────────────────────────────────
+
+    /// Play a sound once on the dedicated preview track (non-looping).
+    /// Use SetPreviewGain() in Update to mute/unmute for trim window.
+    bool PlayPreview(std::string_view id, float gain = 1.0f);
+
+    /// Adjust preview track gain in real-time (for trim muting).
+    void SetPreviewGain(float gain);
+
+    /// Stop preview playback immediately.
+    void StopPreview();
+
+    /// Returns true if the preview track is currently playing.
+    [[nodiscard]] bool IsPreviewPlaying() const;
 
     // ── Query ────────────────────────────────────────────────────────────
 
@@ -110,6 +137,9 @@ class SoundBank {
     MIX_Track* mSeqTrack      = nullptr;
     Uint64     mSeqStartMs    = 0;
     Uint64     mSeqDurationMs = 0;
+
+    // Editor preview track (looping trim playback)
+    MIX_Track* mPreviewTrack  = nullptr;
 
     std::unordered_map<std::string, MIX_Audio*, StringHash, std::equal_to<>> mAudios;
     float mVolume = 1.0f;

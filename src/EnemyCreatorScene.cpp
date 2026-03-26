@@ -1,5 +1,7 @@
 #include "EnemyCreatorScene.hpp"
 #include "TitleScene.hpp"
+#include "audio/AudioEngine.hpp"
+#include "audio/AudioEvents.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -39,6 +41,9 @@ void EnemyCreatorScene::Load(Window& window) {
 }
 
 void EnemyCreatorScene::Unload() {
+    if (Audio() && mPreviewPlaying)
+        Audio()->Sfx().StopPreview();
+    mPreviewPlaying = false;
     stopTextInput();
 }
 
@@ -91,34 +96,39 @@ void EnemyCreatorScene::computeLayout() {
         mFpsBtns[i].plusRect  = {mSlotPanel.x + LEFT_W - 8 - BW,      BY, BW, BH};
         mFpsBtns[i].minusRect = {mSlotPanel.x + LEFT_W - 8 - BW*2 - 2, BY, BW, BH};
 
-        static constexpr int SFX_ROW_H = 16;
-        static constexpr int BASE_H    = 44;
+        static constexpr int SFX_NAME_H   = 14;
+        static constexpr int SFX_SLIDER_H = 10;
+        static constexpr int SFX_TRIM_H   = 10;
+        static constexpr int SFX_ENTRY_H  = SFX_NAME_H + SFX_SLIDER_H + SFX_TRIM_H;
+        static constexpr int SFX_DROP_H   = 16;
+        static constexpr int BASE_H       = 44;
         const int sfxW   = LEFT_W - 16;
         const int clearW = 14;
-        const int volBW  = 14;
         const int tsW    = 16;
-        const int btnsW  = clearW + volBW * 2 + tsW + 6;
+        const int btnsW  = clearW + tsW + 3;
 
         int numSfx = (int)mProfile.slots[i].sfx.size();
-        int rowH   = BASE_H + (numSfx + 1) * SFX_ROW_H;
+        int rowH   = BASE_H + numSfx * SFX_ENTRY_H + SFX_DROP_H;
         mSlotRowRects[i].h = rowH - 4;
 
         mSfxFileUI[i].clear();
         mSfxFileUI[i].resize(numSfx);
         for (int fi = 0; fi < numSfx; ++fi) {
-            int sfxY = ry + BASE_H + fi * SFX_ROW_H;
+            int entryY = ry + BASE_H + fi * SFX_ENTRY_H;
+            mSfxFileUI[i][fi].nameRect    = {mSlotPanel.x + 8, entryY, sfxW - btnsW - 2, SFX_NAME_H};
             int bx2 = mSlotPanel.x + 8 + sfxW - btnsW;
-            mSfxFileUI[i][fi].nameRect    = {mSlotPanel.x + 8, sfxY, sfxW - btnsW - 2, SFX_ROW_H};
-            mSfxFileUI[i][fi].stretchRect = {bx2, sfxY, tsW, SFX_ROW_H}; bx2 += tsW + 1;
-            mSfxFileUI[i][fi].volDownRect = {bx2, sfxY, volBW, SFX_ROW_H}; bx2 += volBW + 1;
-            mSfxFileUI[i][fi].volUpRect   = {bx2, sfxY, volBW, SFX_ROW_H};
-            mSfxFileUI[i][fi].clearRect   = {mSlotPanel.x + 8 + sfxW - clearW, sfxY, clearW, SFX_ROW_H};
+            mSfxFileUI[i][fi].stretchRect = {bx2, entryY, tsW, SFX_NAME_H};
+            mSfxFileUI[i][fi].clearRect   = {mSlotPanel.x + 8 + sfxW - clearW, entryY, clearW, SFX_NAME_H};
+            mSfxFileUI[i][fi].sliderRect     = {mSlotPanel.x + 8, entryY + SFX_NAME_H, sfxW, SFX_SLIDER_H};
+            mSfxFileUI[i][fi].trimSliderRect = {mSlotPanel.x + 8, entryY + SFX_NAME_H + SFX_SLIDER_H, sfxW, SFX_TRIM_H};
         }
-        int dropY = ry + BASE_H + numSfx * SFX_ROW_H;
-        mSfxDropRect[i] = {mSlotPanel.x + 8, dropY, sfxW, SFX_ROW_H};
+        int dropY = ry + BASE_H + numSfx * SFX_ENTRY_H;
+        mSfxDropRect[i] = {mSlotPanel.x + 8, dropY, sfxW, SFX_DROP_H};
 
         ry += rowH;
     }
+
+    recomputePreviewRect();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -271,12 +281,14 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         if (e.key.key == SDLK_DOWN || e.key.key == SDLK_S) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mSelectedSlot = (mSelectedSlot + 1) % ENEMY_ANIM_SLOT_COUNT;
+            mSelectedSfxFile = 0;
             initHBFromProfile(mSelectedSlot);
             mAnimFrame = 0; mAnimTimer = 0; mFrameStripScroll = 0;
         }
         if (e.key.key == SDLK_UP || e.key.key == SDLK_W) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mSelectedSlot = (mSelectedSlot - 1 + ENEMY_ANIM_SLOT_COUNT) % ENEMY_ANIM_SLOT_COUNT;
+            mSelectedSfxFile = 0;
             initHBFromProfile(mSelectedSlot);
             mAnimFrame = 0; mAnimTimer = 0; mFrameStripScroll = 0;
         }
@@ -286,6 +298,23 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
     // ── Mouse motion ──────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx = (int)e.motion.x, my = (int)e.motion.y;
+        if (mVolDragSlot >= 0 && mVolDragFile >= 0) {
+            auto& entry = mProfile.slots[mVolDragSlot].sfx[mVolDragFile];
+            const auto& sr = mSfxFileUI[mVolDragSlot][mVolDragFile].sliderRect;
+            float t = std::clamp((float)(mx - sr.x) / (float)sr.w, 0.0f, 1.0f);
+            entry.volume = t;
+            return true;
+        }
+        if (mTrimDragSlot >= 0 && mTrimDragFile >= 0) {
+            auto& entry = mProfile.slots[mTrimDragSlot].sfx[mTrimDragFile];
+            const auto& tr = mSfxFileUI[mTrimDragSlot][mTrimDragFile].trimSliderRect;
+            float t = std::clamp((float)(mx - tr.x) / (float)tr.w, 0.0f, 1.0f);
+            if (mTrimDragHandle == 0)
+                entry.trimStart = std::min(t, entry.trimEnd - 0.01f);
+            else
+                entry.trimEnd = std::max(t, entry.trimStart + 0.01f);
+            return true;
+        }
         if (mHBEditing && mHBDragHandle >= 0) {
             int dx = mx - mHBDragStartMX, dy = my - mHBDragStartMY;
             SDL_Rect r = mHBDragStartRect;
@@ -306,32 +335,47 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
 
-        // Per-file SFX controls (TS, vol+/-, remove)
+        // Per-file SFX controls (TS, slider, remove) — clicking any part selects it for preview
         for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
             for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
                 const auto& ui = mSfxFileUI[i][fi];
                 auto& entry = mProfile.slots[i].sfx[fi];
+                bool anyHit = hit(ui.nameRect, mx, my) || hit(ui.stretchRect, mx, my) ||
+                              hit(ui.sliderRect, mx, my) || hit(ui.trimSliderRect, mx, my) ||
+                              hit(ui.clearRect, mx, my);
+                if (anyHit && i == mSelectedSlot)
+                    mSelectedSfxFile = fi;
                 if (hit(ui.stretchRect, mx, my)) {
                     entry.timeStretch = !entry.timeStretch;
                     mDropMsg = fs::path(entry.path).filename().string()
                               + " TS: " + (entry.timeStretch ? "ON" : "OFF");
                     return true;
                 }
-                if (hit(ui.volDownRect, mx, my)) {
-                    entry.volume = std::max(0.0f, entry.volume - 0.1f);
-                    mDropMsg = fs::path(entry.path).filename().string()
-                              + " vol: " + std::to_string((int)(entry.volume * 100.0f + 0.5f)) + "%";
+                if (hit(ui.sliderRect, mx, my)) {
+                    mVolDragSlot = i;
+                    mVolDragFile = fi;
+                    float t = std::clamp((float)(mx - ui.sliderRect.x) / (float)ui.sliderRect.w, 0.0f, 1.0f);
+                    entry.volume = t;
                     return true;
                 }
-                if (hit(ui.volUpRect, mx, my)) {
-                    entry.volume = std::min(1.0f, entry.volume + 0.1f);
-                    mDropMsg = fs::path(entry.path).filename().string()
-                              + " vol: " + std::to_string((int)(entry.volume * 100.0f + 0.5f)) + "%";
+                if (hit(ui.trimSliderRect, mx, my)) {
+                    mTrimDragSlot = i;
+                    mTrimDragFile = fi;
+                    float t = std::clamp((float)(mx - ui.trimSliderRect.x) / (float)ui.trimSliderRect.w, 0.0f, 1.0f);
+                    float dStart = std::abs(t - entry.trimStart);
+                    float dEnd   = std::abs(t - entry.trimEnd);
+                    mTrimDragHandle = (dStart <= dEnd) ? 0 : 1;
+                    if (mTrimDragHandle == 0)
+                        entry.trimStart = std::min(t, entry.trimEnd - 0.01f);
+                    else
+                        entry.trimEnd = std::max(t, entry.trimStart + 0.01f);
                     return true;
                 }
                 if (hit(ui.clearRect, mx, my)) {
                     mDropMsg = fs::path(entry.path).filename().string() + " removed";
                     mProfile.slots[i].sfx.erase(mProfile.slots[i].sfx.begin() + fi);
+                    if (mSelectedSfxFile >= (int)mProfile.slots[i].sfx.size())
+                        mSelectedSfxFile = std::max(0, (int)mProfile.slots[i].sfx.size() - 1);
                     computeLayout();
                     return true;
                 }
@@ -357,6 +401,7 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             if (hit(mSlotRowRects[i], mx, my)) {
                 if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
                 mSelectedSlot = i;
+                mSelectedSfxFile = 0;
                 initHBFromProfile(mSelectedSlot);
                 mAnimFrame = 0; mAnimTimer = 0; mFrameStripScroll = 0;
                 return true;
@@ -501,6 +546,15 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
 
     // ── Mouse up ──────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
+        if (mVolDragSlot >= 0) {
+            mVolDragSlot = -1;
+            mVolDragFile = -1;
+        }
+        if (mTrimDragSlot >= 0) {
+            mTrimDragSlot   = -1;
+            mTrimDragFile   = -1;
+            mTrimDragHandle = -1;
+        }
         if (mHBEditing) {
             mHBEditing    = false;
             mHBDragHandle = -1;
@@ -548,6 +602,60 @@ void EnemyCreatorScene::Update(float dt) {
             mAnimFrame = (mAnimFrame + 1) % (int)prev->frames.size();
         }
     }
+
+    if (!Audio()) return;
+    auto& sfx = Audio()->Sfx();
+    const auto& slotSfx = mProfile.slots[mSelectedSlot].sfx;
+
+    if (slotSfx.empty()) {
+        if (mPreviewPlaying) {
+            sfx.StopPreview();
+            mPreviewPlaying = false;
+            mPreviewSfxId.clear();
+            mPreviewPath.clear();
+            mPreviewSlot = -1;
+            mPreviewFile = -1;
+        }
+        return;
+    }
+
+    int fileIdx = std::clamp(mSelectedSfxFile, 0, (int)slotSfx.size() - 1);
+    const auto& entry = slotSfx[fileIdx];
+    std::string wantId = audio::EnemySfxId(mProfile.name, mSelectedSlot, fileIdx);
+
+    if (mPreviewSlot != mSelectedSlot || mPreviewFile != fileIdx ||
+        mPreviewSfxId != wantId || mPreviewPath != entry.path) {
+        if (mPreviewPlaying)
+            sfx.StopPreview();
+
+        if (!sfx.Has(wantId))
+            sfx.Load(wantId, entry.path);
+
+        mPreviewSfxId = wantId;
+        mPreviewPath  = entry.path;
+        mPreviewSlot  = mSelectedSlot;
+        mPreviewFile  = fileIdx;
+        mPreviewTimer = 0.0f;
+        mPreviewPlaying = false;
+    }
+
+    float totalDur = sfx.GetDuration(mPreviewSfxId);
+    if (totalDur <= 0.0f) return;
+
+    float tStart = entry.trimStart * totalDur;
+    float tEnd   = entry.trimEnd   * totalDur;
+    if (tEnd <= tStart) return;
+
+    mPreviewTimer += dt;
+
+    if (!mPreviewPlaying || mPreviewTimer >= totalDur) {
+        sfx.PlayPreview(mPreviewSfxId, entry.volume);
+        mPreviewPlaying = true;
+        mPreviewTimer = 0.0f;
+    }
+
+    bool inWindow = (mPreviewTimer >= tStart && mPreviewTimer < tEnd);
+    sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -611,21 +719,17 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             drawText(s, fpsStr, labelX, mFpsBtns[i].minusRect.y + 2, 10, {160, 170, 200, 255});
         }
 
-        // Per-file SFX rows
+        // Per-file SFX rows (name + controls, then slider)
         for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
             const auto& ui = mSfxFileUI[i][fi];
             const auto& entry = mProfile.slots[i].sfx[fi];
-            fillRect(s, ui.nameRect, {35, 55, 80, 255});
-            outlineRect(s, ui.nameRect, {60, 100, 160, 255});
 
+            bool isSelected = (i == mSelectedSlot && fi == mSelectedSfxFile);
+            fillRect(s, ui.nameRect, isSelected ? SDL_Color{50, 65, 95, 255} : SDL_Color{35, 55, 80, 255});
+            outlineRect(s, ui.nameRect, isSelected ? SDL_Color{200, 140, 40, 255} : SDL_Color{60, 100, 160, 255});
             std::string fname = fs::path(entry.path).filename().string();
-            int pct = (int)(entry.volume * 100.0f + 0.5f);
-            std::string display = fname + " " + std::to_string(pct) + "%";
-            if ((int)display.size() > 24) {
-                fname = fname.substr(0, 14) + "..";
-                display = fname + " " + std::to_string(pct) + "%";
-            }
-            drawText(s, display, ui.nameRect.x + 3, ui.nameRect.y + 2, 9, {120, 190, 255, 255});
+            if ((int)fname.size() > 20) fname = fname.substr(0, 18) + "..";
+            drawText(s, fname, ui.nameRect.x + 3, ui.nameRect.y + 2, 9, {120, 190, 255, 255});
 
             bool ts = entry.timeStretch;
             SDL_Color tsBg  = ts ? SDL_Color{40, 80, 50, 255}  : SDL_Color{40, 35, 55, 255};
@@ -635,19 +739,38 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             outlineRect(s, ui.stretchRect, tsOut);
             drawTextCentered(s, "TS", ui.stretchRect, 7, tsFg);
 
-            SDL_Color vdBg = (pct <= 0) ? SDL_Color{30, 30, 40, 255} : SDL_Color{50, 40, 60, 255};
-            fillRect(s, ui.volDownRect, vdBg);
-            outlineRect(s, ui.volDownRect, {70, 60, 90, 255});
-            drawTextCentered(s, "-", ui.volDownRect, 9, {180, 160, 200, 255});
-
-            SDL_Color vuBg = (pct >= 100) ? SDL_Color{30, 30, 40, 255} : SDL_Color{50, 40, 60, 255};
-            fillRect(s, ui.volUpRect, vuBg);
-            outlineRect(s, ui.volUpRect, {70, 60, 90, 255});
-            drawTextCentered(s, "+", ui.volUpRect, 9, {180, 160, 200, 255});
-
             fillRect(s, ui.clearRect, {80, 30, 30, 255});
             outlineRect(s, ui.clearRect, {140, 50, 50, 255});
             drawTextCentered(s, "x", ui.clearRect, 8, {255, 150, 150, 255});
+
+            int pct = (int)(entry.volume * 100.0f + 0.5f);
+            const SDL_Rect& sr = ui.sliderRect;
+            fillRect(s, sr, {20, 22, 36, 255});
+            outlineRect(s, sr, {50, 55, 80, 255});
+            int fillW = (int)(entry.volume * (float)(sr.w - 2));
+            if (fillW > 0) {
+                SDL_Rect filled = {sr.x + 1, sr.y + 1, fillW, sr.h - 2};
+                fillRect(s, filled, {50, 120, 200, 255});
+            }
+            int knobX = sr.x + 1 + fillW;
+            SDL_Rect knob = {knobX - 2, sr.y, 4, sr.h};
+            fillRect(s, knob, {180, 200, 255, 255});
+            std::string volStr = std::to_string(pct) + "%";
+            drawText(s, volStr, sr.x + sr.w / 2 - (int)volStr.size() * 3, sr.y + 1, 7, {200, 210, 230, 255});
+
+            const SDL_Rect& tr = ui.trimSliderRect;
+            fillRect(s, tr, {30, 22, 16, 255});
+            outlineRect(s, tr, {80, 60, 30, 255});
+            int tStartX = tr.x + (int)(entry.trimStart * (float)(tr.w - 2)) + 1;
+            int tEndX   = tr.x + (int)(entry.trimEnd   * (float)(tr.w - 2)) + 1;
+            if (tEndX > tStartX) {
+                SDL_Rect trimFill = {tStartX, tr.y + 1, tEndX - tStartX, tr.h - 2};
+                fillRect(s, trimFill, {200, 120, 30, 255});
+            }
+            SDL_Rect startKnob = {tStartX - 2, tr.y, 4, tr.h};
+            SDL_Rect endKnob   = {tEndX - 2,   tr.y, 4, tr.h};
+            fillRect(s, startKnob, {255, 200, 100, 255});
+            fillRect(s, endKnob,   {255, 200, 100, 255});
         }
 
         // Drop zone at bottom
@@ -1121,6 +1244,7 @@ void EnemyCreatorScene::loadRosterEntry(int idx) {
         for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i)
             rebuildPreview(i);
         mSelectedSlot = 0;
+        mSelectedSfxFile = 0;
         recomputePreviewRect();
         initHBFromProfile(0);
         mAnimFrame = 0; mAnimTimer = 0;

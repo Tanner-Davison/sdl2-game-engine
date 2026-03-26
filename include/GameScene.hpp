@@ -64,7 +64,7 @@ class GameScene : public Scene {
     int            mPlayerSpriteW = 0;         // resolved sprite width  (set in Load, used in Spawn)
     int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
     std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};     // per-slot fps from profile (0 = engine default)
-    struct SfxFileInfo { float volume = 1.0f; bool timeStretch = false; };
+    struct SfxFileInfo { float volume = 1.0f; bool timeStretch = false; float trimStart = 0.0f; float trimEnd = 1.0f; };
     std::array<std::vector<SfxFileInfo>, PLAYER_ANIM_SLOT_COUNT> mSlotSfx{};
     std::array<int, PLAYER_ANIM_SLOT_COUNT> mSlotSfxNext{};
     bool           mHasProfile        = false;  // true = a valid PlayerProfile was loaded

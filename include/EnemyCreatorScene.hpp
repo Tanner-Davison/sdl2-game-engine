@@ -90,11 +90,24 @@ class EnemyCreatorScene : public Scene {
     struct SfxFileUI {
         SDL_Rect nameRect{};
         SDL_Rect clearRect{};
-        SDL_Rect volDownRect{};
-        SDL_Rect volUpRect{};
         SDL_Rect stretchRect{};
+        SDL_Rect sliderRect{};
+        SDL_Rect trimSliderRect{};
     };
     std::array<std::vector<SfxFileUI>, ENEMY_ANIM_SLOT_COUNT> mSfxFileUI;
+    int  mVolDragSlot   = -1;
+    int  mVolDragFile   = -1;
+    int  mTrimDragSlot  = -1;
+    int  mTrimDragFile  = -1;
+    int  mTrimDragHandle = -1;
+
+    int  mSelectedSfxFile = 0;
+    std::string mPreviewSfxId;
+    std::string mPreviewPath;
+    int  mPreviewSlot  = -1;
+    int  mPreviewFile  = -1;
+    float mPreviewTimer = 0.0f;
+    bool  mPreviewPlaying = false;
     std::array<SDL_Rect, ENEMY_ANIM_SLOT_COUNT> mSfxDropRect;
     int mSfxDropHoverSlot = -1;
 

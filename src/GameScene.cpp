@@ -167,7 +167,7 @@ void GameScene::Load(Window& window) {
             if (profile.HasFps(slot))
                 mSlotFps[i] = profile.Slot(slot).fps;
             for (const auto& e : profile.slots[i].sfx)
-                mSlotSfx[i].push_back({e.volume, e.timeStretch});
+                mSlotSfx[i].push_back({e.volume, e.timeStretch, e.trimStart, e.trimEnd});
         }
     }
 
@@ -1095,6 +1095,10 @@ void GameScene::Update(float dt) {
                     }
                 }
             } else {
+                if (hz.flashTimer > 0.0f) {
+                    if (Audio() && Audio()->IsReady())
+                        Audio()->StopAllAnimSFX();
+                }
                 hz.flashTimer = 0.0f;
                 if (anim.currentAnim == AnimationID::HURT)
                     anim.currentAnim = AnimationID::NONE;
@@ -1117,7 +1121,20 @@ void GameScene::Update(float dt) {
                            animRestarted ? "restart" : "transition",
                            (int)prevPlayerAnim, (int)anim.currentAnim,
                            anim.totalFrames, anim.fps, anim.looping);
-                Audio()->StopAnimSFX();
+
+                bool enteringDeath = (anim.currentAnim == AnimationID::DEATH);
+                if (enteringDeath) {
+                    // Let the currently playing hurt sound finish naturally;
+                    // only fade the managed (looping) track so it doesn't loop
+                    // forever. One-shot and sequential tracks play to completion.
+                    Audio()->FadeOutAnimSFX(300);
+                } else {
+                    Audio()->StopAnimSFX();
+                }
+
+                // While dying, don't re-trigger hurt sounds from the queue
+                if (mPlayerDying && anim.currentAnim == AnimationID::HURT)
+                    return;
 
                 float animDuration = (anim.fps > 0.0f && anim.totalFrames > 0)
                     ? static_cast<float>(anim.totalFrames) / anim.fps
@@ -1154,6 +1171,7 @@ void GameScene::Update(float dt) {
                 }
             }
         });
+
     }
 
     if (mLevel.gravityMode != GravityMode::OpenWorld) {
@@ -2049,7 +2067,7 @@ void GameScene::Spawn() {
                     std::string sfxId = audio::EnemySfxId(typeName, i, fi);
                     if (!sfxId.empty())
                         Audio()->Sfx().Load(sfxId, slot.sfx[fi].path);
-                    tc->slotSfx[i].files.push_back({slot.sfx[fi].volume, slot.sfx[fi].timeStretch});
+                    tc->slotSfx[i].files.push_back({slot.sfx[fi].volume, slot.sfx[fi].timeStretch, slot.sfx[fi].trimStart, slot.sfx[fi].trimEnd});
                 }
             }
         }

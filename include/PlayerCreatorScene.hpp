@@ -86,12 +86,25 @@ class PlayerCreatorScene : public Scene {
     struct SfxFileUI {
         SDL_Rect nameRect{};
         SDL_Rect clearRect{};
-        SDL_Rect volDownRect{};
-        SDL_Rect volUpRect{};
         SDL_Rect stretchRect{};
+        SDL_Rect sliderRect{};     // volume slider track (blue)
+        SDL_Rect trimSliderRect{}; // trim range slider track (orange)
     };
-    // mSfxFileUI[slot] = vector of per-file rects (rebuilt each computeLayout)
     std::array<std::vector<SfxFileUI>, PLAYER_ANIM_SLOT_COUNT> mSfxFileUI;
+    int  mVolDragSlot   = -1;
+    int  mVolDragFile   = -1;
+    int  mTrimDragSlot  = -1;     // which slot's trim slider is being dragged
+    int  mTrimDragFile  = -1;
+    int  mTrimDragHandle = -1;    // 0 = start handle, 1 = end handle
+
+    // SFX preview (loops trimmed audio while slot is selected)
+    int  mSelectedSfxFile = 0;    // which SFX file in the slot is selected for preview
+    std::string mPreviewSfxId;
+    std::string mPreviewPath;
+    int  mPreviewSlot  = -1;
+    int  mPreviewFile  = -1;
+    float mPreviewTimer = 0.0f;
+    bool  mPreviewPlaying = false;
     // mSfxDropRect[slot] = the "drop audio file" zone at the bottom of each slot
     std::array<SDL_Rect, PLAYER_ANIM_SLOT_COUNT> mSfxDropRect;
     int  mSfxDropHoverSlot = -1;
@@ -129,13 +142,15 @@ class PlayerCreatorScene : public Scene {
 
     void rebuildPreview(int slotIdx);
     void clearPreview(int slotIdx);
-    void deleteFrame(int slotIdx, int frameIdx); // delete a single PNG and rebuild
+    void deleteFrame(int slotIdx, int frameIdx);
+    void duplicateFrame(int slotIdx, int frameIdx);
 
     // ── Frame strip ───────────────────────────────────────────────────────────
     int  mFrameStripScroll = 0;   // horizontal scroll offset (in frames)
     static constexpr int FRAME_THUMB_SZ = 48;  // thumbnail size in the strip
     static constexpr int FRAME_STRIP_H  = 68;  // total height of strip area
     std::vector<SDL_Rect> mFrameDelRects; // per-frame delete button rects (rebuilt each render)
+    std::vector<SDL_Rect> mFrameDupRects; // per-frame duplicate button rects
 
     // ── Hitbox editor ────────────────────────────────────────────────────────
     // The hitbox rect is drawn/edited in *preview-local* coordinates.

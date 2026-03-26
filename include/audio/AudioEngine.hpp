@@ -67,6 +67,19 @@ class AudioEngine {
         mSfx.StopManaged();
     }
 
+    /// Fade out managed + sequential SFX tracks over @p ms milliseconds.
+    void FadeOutAnimSFX(int ms) {
+        mSfx.FadeOutManaged(ms);
+        mSfx.FadeOutSeq(ms);
+    }
+
+    /// Hard-stop all animation SFX (managed + sequential + one-shot).
+    void StopAllAnimSFX() {
+        mSfx.StopManaged();
+        mSfx.StopOneShot();
+        mSfx.StopSeq();
+    }
+
     // ── Convenience: game event SFX ──────────────────────────────────────
 
     void PlayEvent(std::string_view eventId) {

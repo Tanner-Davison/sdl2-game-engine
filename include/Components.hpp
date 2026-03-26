@@ -247,7 +247,7 @@ struct EnemyAnimData {
     // Enemy type name (for building per-type SFX IDs at runtime)
     std::string typeName;
     // Per-slot SFX metadata (indexed by EnemyAnimSlot)
-    struct SfxFile { float volume = 1.0f; bool timeStretch = false; };
+    struct SfxFile { float volume = 1.0f; bool timeStretch = false; float trimStart = 0.0f; float trimEnd = 1.0f; };
     struct SlotSfx {
         std::vector<SfxFile> files;
         int nextIdx = 0;
