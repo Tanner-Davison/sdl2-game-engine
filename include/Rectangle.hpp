@@ -12,6 +12,8 @@ class Rectangle {
     SDL_Color GetColor() const;
     void      SetHoverColor(const SDL_Color& NewColor);
     SDL_Color GetHoverColor() const;
+    void      SetCornerRadius(float radius);
+    float     GetCornerRadius() const;
 
     virtual ~Rectangle() = default;
 
@@ -20,11 +22,13 @@ class Rectangle {
     virtual void OnLeftClick();
 
   protected:
-    SDL_Rect Rect;
+    SDL_Rect  Rect;
     SDL_Color Color{255, 0, 0, 255};
     SDL_Color HoverColor{128, 128, 128, 0};
+    float     CornerRadius{0.0f};
 
   private:
     bool isPointerHovering{false};
     bool isWithinRect(int x, int y) const;
+    void RenderRounded(SDL_Renderer* renderer, const SDL_Color& color) const;
 };

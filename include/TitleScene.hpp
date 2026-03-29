@@ -44,10 +44,13 @@ class TitleScene : public Scene {
                                            titleX, row1Y - 80 - 72, 72);
         const int row2Y = row1Y + btnH + rowGap;
 
+        const float btnRadius = 8.0f;
+
         editorBtnRect = {cx - btnW - gap / 2, row1Y, btnW, btnH};
         editorButton  = std::make_unique<Rectangle>(editorBtnRect);
         editorButton->SetColor({80, 120, 200, 255});
         editorButton->SetHoverColor({100, 150, 230, 255});
+        editorButton->SetCornerRadius(btnRadius);
         auto [eBtnX, eBtnY] = Text::CenterInRect("Level Editor", 22, editorBtnRect);
         editorBtnText = std::make_unique<Text>("Level Editor", SDL_Color{255, 255, 255, 255},
                                                eBtnX, eBtnY, 22);
@@ -56,6 +59,7 @@ class TitleScene : public Scene {
         createPlayerButton  = std::make_unique<Rectangle>(createPlayerBtnRect);
         createPlayerButton->SetColor({160, 80, 180, 255});
         createPlayerButton->SetHoverColor({200, 110, 220, 255});
+        createPlayerButton->SetCornerRadius(btnRadius);
         auto [cpbx, cpby] = Text::CenterInRect("Create Player", 20, createPlayerBtnRect);
         createPlayerBtnText = std::make_unique<Text>("Create Player",
                                                      SDL_Color{255, 255, 255, 255},
@@ -65,6 +69,7 @@ class TitleScene : public Scene {
         tileAnimButton  = std::make_unique<Rectangle>(tileAnimBtnRect);
         tileAnimButton->SetColor({40, 140, 160, 255});
         tileAnimButton->SetHoverColor({60, 180, 200, 255});
+        tileAnimButton->SetCornerRadius(btnRadius);
         auto [tabx, taby] = Text::CenterInRect("Tile Animator", 20, tileAnimBtnRect);
         tileAnimBtnText = std::make_unique<Text>("Tile Animator",
                                                   SDL_Color{255, 255, 255, 255},
@@ -75,6 +80,7 @@ class TitleScene : public Scene {
         createEnemyButton  = std::make_unique<Rectangle>(createEnemyBtnRect);
         createEnemyButton->SetColor({180, 60, 40, 255});
         createEnemyButton->SetHoverColor({220, 90, 60, 255});
+        createEnemyButton->SetCornerRadius(btnRadius);
         auto [cebx, ceby] = Text::CenterInRect("Create Enemy", 20, createEnemyBtnRect);
         createEnemyBtnText = std::make_unique<Text>("Create Enemy",
                                                      SDL_Color{255, 255, 255, 255},
@@ -84,6 +90,7 @@ class TitleScene : public Scene {
         tileAssetsButton  = std::make_unique<Rectangle>(tileAssetsBtnRect);
         tileAssetsButton->SetColor({120, 100, 40, 255});
         tileAssetsButton->SetHoverColor({160, 140, 60, 255});
+        tileAssetsButton->SetCornerRadius(btnRadius);
         auto [tabx2, taby2] = Text::CenterInRect("Tile Assets", 20, tileAssetsBtnRect);
         tileAssetsBtnText = std::make_unique<Text>("Tile Assets",
                                                     SDL_Color{255, 255, 255, 255},
@@ -100,6 +107,7 @@ class TitleScene : public Scene {
         viewLevelsButton  = std::make_unique<Rectangle>(viewLevelsBtnRect);
         viewLevelsButton->SetColor({40, 140, 60, 255});
         viewLevelsButton->SetHoverColor({60, 180, 80, 255});
+        viewLevelsButton->SetCornerRadius(btnRadius);
         auto [vlx, vly] = Text::CenterInRect("Play Level", 22, viewLevelsBtnRect);
         viewLevelsBtnText = std::make_unique<Text>("Play Level",
             SDL_Color{255, 255, 255, 255}, vlx, vly, 22);
