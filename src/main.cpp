@@ -57,7 +57,6 @@ int main(int argc, char** argv) {
     // frame rate so gameplay feels identical on WSL (variable dt) and macOS
     // (stable VSync). Any leftover time carries into the next frame via the
     // accumulator — nothing is ever lost or rounded.
-    //
     // Reference: https://gafferongames.com/post/fix_your_timestep/
     constexpr float FIXED_DT    = 1.0f / 120.0f; // physics tick rate (120 Hz)
     constexpr float MAX_FRAME   = 1.0f / 20.0f;  // max real dt before spiral-of-death clamp
