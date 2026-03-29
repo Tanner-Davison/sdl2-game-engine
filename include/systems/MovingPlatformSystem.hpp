@@ -4,37 +4,23 @@
 #include <entt/entt.hpp>
 #include <unordered_map>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Moving Platform — two-phase, called from GameScene::Update:
+// Two-phase moving platform, called from GameScene::Update:
+//   MovingPlatformTick(reg, dt)  — BEFORE CollisionSystem
+//   MovingPlatformCarry(reg)     — AFTER  CollisionSystem
 //
-//   MovingPlatformTick(reg, dt)   — BEFORE CollisionSystem
-//     Moves tiles, records vx. Also detects which platform tile the player
-//     is currently standing on and stores it in mps.playerOnTop, so Carry
-//     doesn't need fragile threshold checks.
-//
-//   MovingPlatformCarry(reg)      — AFTER CollisionSystem
-//     Applies vx to the player if they were detected as standing on the
-//     platform before this frame's movement.
-//
-// Detection logic (in Tick, using LAST FRAME's positions):
-//   Before we move the tile this frame, the tile is at its old position and
-//   the player has just been floor-snapped by last frame's CollisionSystem.
-//   So pt.y + pc.h == old_tt.y exactly — a perfect time to detect contact.
-//   We do the check here, store a bool, and Carry blindly applies vx if set.
-// ─────────────────────────────────────────────────────────────────────────────
+// Detection runs in Tick using last frame's positions: the tile hasn't moved
+// yet and the player was floor-snapped by last frame's CollisionSystem, so
+// pt.y + pc.h == old_tt.y exactly — most reliable moment for contact check.
 
 inline void MovingPlatformTick(entt::registry& reg, float dt) {
     std::unordered_map<int, float> groupPhase;
     auto mpView     = reg.view<Transform, MovingPlatformState>();
     auto playerView = reg.view<PlayerTag, Transform, Collider, GravityState>();
 
-    // ── Detect which platform the player is standing on (using last frame pos) ─
-    // At this point: tile is at old position, player was floor-snapped last frame.
-    // pt.y + pc.h == tt.y exactly (or very close) — most reliable moment to check.
     for (auto platEnt : mpView) {
         if (!reg.all_of<MovingPlatformTag>(platEnt)) continue;
         auto& mps = mpView.get<MovingPlatformState>(platEnt);
-        mps.playerOnTop = false;  // reset each frame
+        mps.playerOnTop = false;
 
         const auto& tt = mpView.get<Transform>(platEnt);
         int tcW = 48;
@@ -46,18 +32,13 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
             const auto& pt = playerView.get<Transform>(playerEnt);
             const auto& pc = playerView.get<Collider>(playerEnt);
 
-            // Horizontal overlap check
             bool overlapX = (pt.x + pc.w > tt.x) && (pt.x < tt.x + tcW);
             if (!overlapX) continue;
 
-            // Grounded check: use a generous threshold so we catch the landing
-            // frame (when isGrounded is still false but feet are right at the
-            // tile top — CollisionSystem hasn't snapped them yet this frame).
+            // Generous threshold catches the landing frame before CollisionSystem snaps.
             constexpr float THRESH = 6.0f;
             float feetY   = pt.y + pc.h;
             bool  onTop   = (feetY >= tt.y - THRESH) && (feetY <= tt.y + THRESH);
-            // Also accept the frame just before landing: player falling, feet
-            // within one frame of travel above the tile top.
             bool  nearTop = (!gs.isGrounded && gs.velocity > 0.0f
                              && feetY < tt.y && (tt.y - feetY) < gs.velocity * 0.05f + 8.0f);
 
@@ -68,12 +49,11 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
         }
     }
 
-    // ── Advance phase for non-loop platforms & collect group phases ────────────
     for (auto entity : mpView) {
         if (!reg.all_of<MovingPlatformTag>(entity)) continue;
         auto& mps = mpView.get<MovingPlatformState>(entity);
-        if (mps.loop) continue; // loop platforms advance phase in the move block
-        if (mps.trigger && !mps.triggered) continue; // waiting for player
+        if (mps.loop) continue;
+        if (mps.trigger && !mps.triggered) continue;
         float omega = (mps.range > 0.0f) ? (mps.speed / mps.range) : 1.0f;
         mps.phase  += omega * dt;
         if (mps.phase > 6.28318f) mps.phase -= 6.28318f;
@@ -81,9 +61,8 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
             groupPhase[mps.groupId] = mps.phase;
     }
 
-    // ── Propagate trigger state across group members ──────────────────────────
-    // If ANY tile in a group is triggered (or has playerOnTop), mark the whole
-    // group triggered so multi-tile platforms all start at the same time.
+    // Propagate trigger state: if ANY tile in a group is triggered (or has
+    // playerOnTop), mark the whole group so multi-tile platforms start together.
     {
         std::unordered_map<int, bool> groupTriggered;
         std::unordered_map<int, bool> groupPlayerOnTop;
@@ -103,21 +82,18 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
         }
     }
 
-    // ── Sync group phases, move tile, record vx ──────────────────────────────
     for (auto entity : mpView) {
         if (!reg.all_of<MovingPlatformTag>(entity)) continue;
 
         auto& t   = mpView.get<Transform>(entity);
         auto& mps = mpView.get<MovingPlatformState>(entity);
 
-        // Sync sine-oscillator phase within group
         if (!mps.loop && mps.groupId != 0) {
             auto it = groupPhase.find(mps.groupId);
             if (it != groupPhase.end())
                 mps.phase = it->second;
         }
 
-        // Trigger: don't move until player has landed on it
         if (mps.trigger && !mps.triggered) {
             mps.vx = 0.0f;
             mps.vy = 0.0f;
@@ -126,14 +102,14 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
         }
 
         if (mps.loop) {
-            // Ping-pong: travel right to originX+range, reverse, travel back, repeat.
+            // Ping-pong: travel to originX+range, reverse, repeat.
             mps.phase += mps.speed * mps.loopDir * dt;
             if (mps.phase >= mps.range) {
-                mps.phase   = mps.range;  // clamp, don't overshoot
-                mps.loopDir = -1;         // reverse: head back left
+                mps.phase   = mps.range;
+                mps.loopDir = -1;
             } else if (mps.phase <= 0.0f) {
-                mps.phase   = 0.0f;       // clamp at origin
-                mps.loopDir = 1;          // reverse: head right again
+                mps.phase   = 0.0f;
+                mps.loopDir = 1;
             }
             float newX = mps.originX + mps.phase;
             mps.vx = newX - t.x;
@@ -162,11 +138,9 @@ inline void MovingPlatformCarry(entt::registry& reg) {
     auto mpView     = reg.view<Transform, MovingPlatformState>();
     auto playerView = reg.view<PlayerTag, Transform>();
 
-    // Collect the carry to apply.
-    // For multi-tile platforms, pick the tile with the greatest absolute motion
-    // rather than whichever happens to be first in EnTT's sparse_set.
-    // This avoids a rare bug where a stationary tile (vx==0 on the lag frame)
-    // sorts before the actually-moving tile and silently drops carry.
+    // For multi-tile platforms, pick the tile with greatest absolute motion
+    // to avoid a bug where a stationary tile (vx==0 on the lag frame) sorts
+    // first in EnTT's sparse_set and silently drops carry.
     float carryVx = 0.0f;
     float carryVy = 0.0f;
     bool  carried = false;
@@ -188,9 +162,9 @@ inline void MovingPlatformCarry(entt::registry& reg) {
 
     if (!carried) return;
 
-    // Snap player feet to tile top exactly (both up and down) so
-    // CollisionSystem has nothing to correct next frame — eliminates the
-    // 1-frame oscillation where Carry and CollisionSystem fight each other.
+    // Snap player feet to tile top exactly so CollisionSystem has nothing to
+    // correct next frame — eliminates the 1-frame oscillation where Carry
+    // and CollisionSystem fight each other.
     float snapTileY = -1.0f;
     if (carryVy > 0.5f) {
         for (auto platEnt : mpView) {
@@ -207,8 +181,7 @@ inline void MovingPlatformCarry(entt::registry& reg) {
     pView.each([&](Transform& pt, GravityState& pg, const Collider& pc) {
         pt.x += carryVx;
         if (carryVy > 0.5f) {
-            // Platform moving down: snap player feet to tile top exactly so
-            // CollisionSystem has nothing to correct next frame.
+            // Platform moving down: snap feet to tile top.
             if (snapTileY >= 0.0f)
                 pt.y = snapTileY - pc.h;
             else
@@ -216,8 +189,7 @@ inline void MovingPlatformCarry(entt::registry& reg) {
             pg.isGrounded = true;
             pg.velocity   = 0.0f;
         } else if (carryVy < -0.5f) {
-            // Platform moving up: just offset, don't force grounded/velocity.
-            // Snapping here kills jump velocity the same frame it's set.
+            // Platform moving up: just offset. Snapping here kills jump velocity.
             pt.y += carryVy;
         } else {
             pt.y += carryVy;

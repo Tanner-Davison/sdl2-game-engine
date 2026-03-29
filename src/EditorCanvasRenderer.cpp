@@ -9,7 +9,6 @@
 #include <string>
 
 namespace {
-// ─── Generic surface drawing helpers (internal linkage) ─────────────────────
 void DrawRectS(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
     const auto* fmt = SDL_GetPixelFormatDetails(s->format);
     SDL_FillSurfaceRect(s, &r, SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a));
@@ -37,7 +36,6 @@ void DrawOutlineS(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1) {
 }
 } // namespace
 
-// ── Statics (delegate to anonymous namespace) ─────────────────────────────
 void EditorCanvasRenderer::DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
     DrawRectS(s, r, c);
 }
@@ -57,7 +55,7 @@ SDL_Surface* EditorCanvasRenderer::Badge(EditorSurfaceCache& cache,
     return cache.GetBadge(text, col);
 }
 
-// ── Main entry ──────────────────────────────────────────────────────────────
+// --- Render ---
 void EditorCanvasRenderer::Render(
     Window&              window,
     SDL_Surface*         screen,
@@ -81,7 +79,6 @@ void EditorCanvasRenderer::Render(
     SDL_Renderer* ren  = window.GetRenderer();
     int           winH = window.GetHeight();
 
-    // ── Background (GPU-rendered before the surface pipeline) ────────────────
     if (background) {
         if (background->GetFitMode() == FitMode::SCROLL)
             background->RenderScrolling(ren, camera.X(), 0.0f);
@@ -104,13 +101,11 @@ void EditorCanvasRenderer::Render(
     RenderTiles(screen, canvasW, toolbarH, winH, level, camera, cache,
                 activeToolId, actionAnimDropHover);
 
-    // ── Moving-platform tool overlay ─────────────────────────────────────────
     if (activeToolId == ToolId::MovingPlat) {
         RenderMovingPlatOverlay(screen, canvasW, toolbarH, level, camera, cache, grid, movPlat);
         if (movPlat.popupOpen)
             RenderMovPlatPopup(screen, canvasW, toolbarH, cache, movPlat);
     } else {
-        // Outside MovingPlat: subtle M badge on all moving tiles
         for (int ti = 0; ti < (int)level.tiles.size(); ti++) {
             const auto& t = level.tiles[ti];
             if (!t.HasMoving()) continue;
@@ -128,7 +123,6 @@ void EditorCanvasRenderer::Render(
     RenderEntities(screen, canvasW, toolbarH, winH, level, camera, cache, enemySheet, grid);
     RenderPlayerMarker(screen, level, camera);
 
-    // ── Tool overlay (Select marquee, Resize/Hitbox handles, etc.) ───────────
     if (activeTool) {
         activeTool->RenderOverlay(toolCtx, screen, canvasW);
     }
@@ -136,7 +130,7 @@ void EditorCanvasRenderer::Render(
     RenderGhost(screen, canvasW, toolbarH, camera, palette, cache, activeToolId, activeTool, grid);
 }
 
-// ── Grid ─────────────────────────────────────────────────────────────────────
+// --- Grid ---
 void EditorCanvasRenderer::RenderGrid(SDL_Surface* screen, int canvasW, int toolbarH,
                                       int winH, const EditorCamera& cam, int grid)
 {
@@ -172,7 +166,7 @@ void EditorCanvasRenderer::RenderGrid(SDL_Surface* screen, int canvasW, int tool
     }
 }
 
-// ── Tiles ─────────────────────────────────────────────────────────────────────
+// --- Tiles ---
 void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int toolbarH,
                                        int winH, const Level& level,
                                        const EditorCamera& cam,
@@ -229,7 +223,6 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
                                               : SDL_Color{100, 180, 255, 255};
         DrawOutline(screen, dst, outlineCol);
 
-        // ── Shooter barrel graphic ────────────────────────────────────────────
         if (t.HasShooter()) {
             int cx = tsx + tsw / 2;
             int cy = tsy + tsh / 2;
@@ -275,7 +268,6 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             DrawRect(screen, muzzle, {255, 140, 30, 255});
         }
 
-        // ── Stacked top-left badges ──────────────────────────────────────────
         {
             int           bx = tsx + 2;
             constexpr int BH = 14, BW = 14, GAP = 2;
@@ -333,7 +325,6 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             (void)bx;
         }
 
-        // ── Action tile: anim indicator + group badge ────────────────────────
         if (t.HasAction()) {
             constexpr int ANIM_SZ = 16;
             int abx = tsx + tsw - ANIM_SZ - 2;
@@ -374,7 +365,6 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             }
         }
 
-        // ── Slope line ───────────────────────────────────────────────────────
         if (t.HasSlope()) {
             int riseH = (int)(t.h * t.slope->heightFrac);
             int highY = tsy, lowY = tsy + riseH;
@@ -398,7 +388,6 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             }
         }
 
-        // ── Rotation badge (bottom-right) ────────────────────────────────────
         if (t.rotation != 0) {
             std::string rb  = std::to_string(t.rotation);
             int         rbw = 22;
@@ -410,7 +399,7 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
     }
 }
 
-// ── Moving-platform overlay ───────────────────────────────────────────────────
+// --- Moving-platform overlay ---
 void EditorCanvasRenderer::RenderMovingPlatOverlay(
     SDL_Surface* screen, int canvasW, int toolbarH,
     const Level& level, const EditorCamera& cam,
@@ -547,7 +536,7 @@ void EditorCanvasRenderer::RenderMovingPlatOverlay(
     BlitBadge(screen, badge(paramStr, {0, 230, 230, 255}), 6, toolbarH + 23);
 }
 
-// ── Moving-platform config popup ─────────────────────────────────────────────
+// --- MovPlatPopup ---
 void EditorCanvasRenderer::RenderMovPlatPopup(SDL_Surface* screen, int canvasW,
                                                int toolbarH, EditorSurfaceCache& cache,
                                                const MovPlatState& mp)
@@ -644,7 +633,7 @@ void EditorCanvasRenderer::RenderMovPlatPopup(SDL_Surface* screen, int canvasW,
     }
 }
 
-// ── Entities (coins, enemies) ─────────────────────────────────────────────────
+// --- Entities ---
 void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int toolbarH,
                                           int winH, const Level& level,
                                           const EditorCamera& cam,
@@ -656,9 +645,6 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
     const float camX  = cam.X();
     const float camY  = cam.Y();
 
-    // Enemies: render each enemy with its profile sprite if available,
-    // otherwise fall back to the generic slime sheet.
-    // Cache loaded profile data so we only parse JSON once per type per frame.
     struct EnemyRenderInfo {
         std::string previewPath;
         int spriteW = 40, spriteH = 40;
@@ -671,7 +657,7 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
 
     for (const auto& en : level.enemies) {
         // Determine render size: use profile spriteW/H if available
-        int enW = 40, enH = 40;  // default slime size
+        int enW = 40, enH = 40;
         std::string previewImg;
 
         if (!en.enemyType.empty()) {
@@ -696,14 +682,12 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
         int ex = (int)((en.x - camX) * zoom);
         int ey = (int)((en.y - camY) * zoom);
 
-        // Culling with actual size
         if (ex + drawW <= 0 || ex >= canvasW || ey + drawH <= toolbarH || ey >= winH)
             continue;
 
         SDL_Rect d = {ex, ey, drawW, drawH};
         bool rendered = false;
 
-        // Try to render using the enemy's profile sprite
         if (!previewImg.empty()) {
             SDL_Surface* thumb = cache.LoadAndCache(previewImg);
             if (thumb) {
@@ -714,7 +698,6 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
             }
         }
 
-        // Fallback: generic slime
         if (!rendered && enemySheet && !slimeFrames.empty()) {
             SDL_Rect s = slimeFrames[0];
             SDL_ScaleMode esm = (d.w < s.w || d.h < s.h)
@@ -749,7 +732,7 @@ void EditorCanvasRenderer::RenderEntities(SDL_Surface* screen, int canvasW, int 
     }
 }
 
-// ── Player marker ─────────────────────────────────────────────────────────────
+// --- Player marker ---
 void EditorCanvasRenderer::RenderPlayerMarker(SDL_Surface* screen, const Level& level,
                                                const EditorCamera& cam)
 {
@@ -761,7 +744,7 @@ void EditorCanvasRenderer::RenderPlayerMarker(SDL_Surface* screen, const Level& 
     DrawOutline(screen, {pmx, pmy, pmw, pmh}, {0, 255, 100, 255}, 2);
 }
 
-// ── Tile ghost (placement preview) ───────────────────────────────────────────
+// --- Tile ghost ---
 void EditorCanvasRenderer::RenderGhost(SDL_Surface* screen, int canvasW, int toolbarH,
                                         const EditorCamera& cam,
                                         const EditorPalette& palette,

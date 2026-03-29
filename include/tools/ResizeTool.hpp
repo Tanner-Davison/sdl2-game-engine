@@ -1,8 +1,6 @@
 #pragma once
-// ResizeTool.hpp
-//
-// Drag tile edges/corner to change tile dimensions. Shows handle highlights
-// on hover and renders a size label during drag.
+// ResizeTool.hpp -- drag tile edges/corners to resize. Shows handle highlights
+// on hover and a size label during drag.
 
 #include "tools/EditorTool.hpp"
 #include <algorithm>
@@ -52,7 +50,6 @@ class ResizeTool final : public EditorTool {
             return ToolResult::Consumed;
         }
 
-        // Hover detection
         if (my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
             mHoverEdge    = Edge::None;
             mHoverTileIdx = -1;

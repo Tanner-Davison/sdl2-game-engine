@@ -5,7 +5,6 @@
 #include <string>
 #include <unordered_map>
 
-// ── Global font cache ─────────────────────────────────────────────────────────
 namespace FontCache {
     inline TTF_Font* Get(int fontSize) {
         static std::unordered_map<int, TTF_Font*> cache;
@@ -46,7 +45,6 @@ class Text {
     TTF_Font* mFont    = nullptr;
     int       mFontSize = 24;
 
-    // ── Measurement utilities ─────────────────────────────────────────────────
     static SDL_Point Measure(const std::string& content, int fontSize) {
         TTF_Font* font = FontCache::Get(fontSize);
         if (!font) return {0, 0};

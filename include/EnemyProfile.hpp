@@ -11,16 +11,14 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-// ── Animation slot indices ────────────────────────────────────────────────────
-// Maps to the named animation states the enemy creator exposes.
-// Enemies have fewer states than players -- no crouch, slash, etc.
+// --- Animation slot indices ---
 // "Move" covers walking, flying, swimming depending on the enemy type.
 enum class EnemyAnimSlot : int {
-    Idle   = 0,   // standing / default pose
-    Move   = 1,   // walking, flying, swimming -- the main locomotion anim
-    Attack = 2,   // enemy attacking the player (bite, slash, projectile)
-    Hurt   = 3,   // took damage from the player (hit reaction)
-    Dead   = 4,   // death animation
+    Idle   = 0,
+    Move   = 1,
+    Attack = 2,
+    Hurt   = 3,
+    Dead   = 4,
     COUNT  = 5
 };
 
@@ -37,9 +35,9 @@ inline const char* EnemyAnimSlotName(EnemyAnimSlot s) {
     }
 }
 
-// ── Per-animation hitbox ──────────────────────────────────────────────────────
-// x/y are offsets from the sprite's top-left; w/h are the hitbox dimensions.
-// If w == 0 and h == 0, the system falls back to the default global hitbox.
+// --- Per-animation hitbox ---
+// x/y offset from sprite top-left; w/h are hitbox dimensions.
+// w == 0 && h == 0 means "use the default global hitbox".
 struct EnemyAnimHitbox {
     int x = 0;
     int y = 0;
@@ -49,17 +47,14 @@ struct EnemyAnimHitbox {
     bool IsDefault() const { return w == 0 && h == 0; }
 };
 
-// ── Enemy profile ─────────────────────────────────────────────────────────────
-// Describes a fully configured enemy type: name, per-slot sprite folder paths,
-// per-slot hitbox overrides, default speed, health, and behavior flags.
-// Any slot with an empty folderPath is treated as missing -- the runtime should
-// gracefully skip or fall back to Idle.
+// --- Enemy profile ---
+// Empty folderPath = missing slot; runtime falls back to Idle.
 struct EnemyProfile {
     std::string name     = "Unnamed";
-    int         spriteW  = 40;    // render width in px
-    int         spriteH  = 40;    // render height in px
-    float       speed    = 120.0f; // default movement speed (px/s)
-    float       health   = 30.0f;  // max HP (default = slime HP)
+    int         spriteW  = 40;
+    int         spriteH  = 40;
+    float       speed    = 120.0f;
+    float       health   = 30.0f;
 
     struct SfxEntry {
         std::string path;
@@ -73,12 +68,11 @@ struct EnemyProfile {
         std::string    folderPath;
         EnemyAnimHitbox hitbox;
         float          fps = 0.0f;
-        std::vector<SfxEntry> sfx; // per-file SFX — multiple = round-robin on each trigger
+        std::vector<SfxEntry> sfx; // multiple = round-robin on each trigger
     };
 
     std::array<SlotData, ENEMY_ANIM_SLOT_COUNT> slots;
 
-    // Convenience accessors
     SlotData&       Slot(EnemyAnimSlot s)       { return slots[static_cast<int>(s)]; }
     const SlotData& Slot(EnemyAnimSlot s) const { return slots[static_cast<int>(s)]; }
 
@@ -88,25 +82,19 @@ struct EnemyProfile {
     bool HasSFX(EnemyAnimSlot s) const { return !Slot(s).sfx.empty(); }
 };
 
-// ── Path portability helpers ─────────────────────────────────────────────────
-// Sprite folders are stored as paths RELATIVE to the project root (CWD at
-// runtime). On save, any absolute path is copied into
-//   game_assets/enemy_sprites/<enemyName>/<slotName>/
-// and the stored path becomes that relative path.
+// --- Path portability ---
+// Paths stored relative to CWD. On save, absolute paths are copied into
+// game_assets/enemy_sprites/<enemyName>/<slotName>/ and made relative.
 
 inline std::string EnemySpriteRelDir(const std::string& enemyName,
                                      const std::string& slotName) {
     return "game_assets/enemy_sprites/" + enemyName + "/" + slotName;
 }
 
-// Copy every PNG from srcDir into dstDir, creating dstDir if needed.
-// Returns true if at least one PNG was copied successfully.
-// Also handles the case where srcDir points to a single PNG file
-// (for enemies that use single-image sprites rather than frame sequences).
+// Also handles single-file sprites (some enemies use one PNG per slot).
 inline bool CopyEnemySpritePNGs(const fs::path& srcDir, const fs::path& dstDir) {
     std::error_code ec;
 
-    // Handle single-file case: if srcDir is actually a file, copy just that file
     if (fs::is_regular_file(srcDir, ec) && !ec) {
         auto ext = srcDir.extension().string();
         if (ext == ".png" || ext == ".PNG") {
@@ -137,20 +125,18 @@ inline bool CopyEnemySpritePNGs(const fs::path& srcDir, const fs::path& dstDir) 
     return copied;
 }
 
-// Resolve a stored folderPath to a usable path on the current machine.
-// Same logic as the player version.
+// Resolve stored path: relative passes through, stale absolute returns "".
 inline std::string ResolveEnemyFolderPath(const std::string& stored) {
     if (stored.empty()) return "";
     fs::path p(stored);
     std::error_code ec;
     if (p.is_relative()) return stored;
-    // Absolute path: only usable if it's actually a directory or file on THIS machine
     if ((fs::is_directory(p, ec) || fs::is_regular_file(p, ec)) && !ec)
         return stored;
     return "";
 }
 
-// ── Serialization ─────────────────────────────────────────────────────────────
+// --- Serialization ---
 
 inline bool SaveEnemyProfile(const EnemyProfile& p, const std::string& path) {
     json j;
@@ -165,8 +151,7 @@ inline bool SaveEnemyProfile(const EnemyProfile& p, const std::string& path) {
         const auto& s = p.slots[i];
         std::string savePath = s.folderPath;
 
-        // If the stored path is absolute, copy sprites to a portable relative
-        // location inside game_assets and switch to that relative path.
+        // Copy absolute-path sprites into a portable relative location
         if (!savePath.empty()) {
             fs::path fp(savePath);
             if (fp.is_absolute()) {
@@ -271,7 +256,7 @@ inline bool LoadEnemyProfile(const std::string& path, EnemyProfile& out) {
     return true;
 }
 
-// ── Roster helpers ────────────────────────────────────────────────────────────
+// --- Roster helpers ---
 
 inline std::vector<fs::path> ScanEnemyProfiles() {
     std::vector<fs::path> result;
@@ -287,12 +272,8 @@ inline std::string EnemyProfilePath(const std::string& name) {
     return "enemies/" + name + ".json";
 }
 
-// ── Preview helper ──────────────────────────────────────────────────────────
-// Returns the path to the first PNG found in the Idle slot (or Move slot as
-// fallback) for use as a thumbnail/preview in the editor's enemy picker.
-// Returns empty string if no sprite is assigned.
+// Returns path to the first PNG in Idle (or Move) slot for thumbnails.
 inline std::string EnemyPreviewImagePath(const EnemyProfile& p) {
-    // Try Idle first, then Move
     for (auto slot : {EnemyAnimSlot::Idle, EnemyAnimSlot::Move}) {
         const auto& fp = p.Slot(slot).folderPath;
         if (fp.empty()) continue;
@@ -300,14 +281,12 @@ inline std::string EnemyPreviewImagePath(const EnemyProfile& p) {
         fs::path fpath(fp);
         std::error_code ec;
 
-        // Single file
         if (fs::is_regular_file(fpath, ec) && !ec) {
             auto ext = fpath.extension().string();
             if (ext == ".png" || ext == ".PNG") return fp;
             continue;
         }
 
-        // Directory -- find first PNG alphabetically
         if (fs::is_directory(fpath, ec) && !ec) {
             std::vector<fs::path> pngs;
             for (const auto& entry : fs::directory_iterator(fpath, ec)) {

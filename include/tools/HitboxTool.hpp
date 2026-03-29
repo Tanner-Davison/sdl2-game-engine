@@ -1,8 +1,5 @@
 #pragma once
-// HitboxTool.hpp
-//
-// 8-handle hitbox editor for adjusting per-tile collision rectangles.
-// Renders handles at corners and edge midpoints; drag to resize the hitbox.
+// HitboxTool.hpp -- 8-handle hitbox editor for per-tile collision rectangles.
 
 #include "tools/EditorTool.hpp"
 #include "Text.hpp"
@@ -65,7 +62,6 @@ class HitboxTool final : public EditorTool {
     }
 
     ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override {
-        // Drag update
         if (mDragging && mTileIdx >= 0 && mTileIdx < static_cast<int>(ctx.level.tiles.size())) {
             auto& t = ctx.level.tiles[mTileIdx];
             int dx = mx - mDragX, dy = my - mDragY;
@@ -116,7 +112,6 @@ class HitboxTool final : public EditorTool {
                           std::to_string(t.hitbox->w) + "x" + std::to_string(t.hitbox->h) + ")");
             return ToolResult::Consumed;
         }
-        // Hover detection
         if (mTileIdx >= 0 && !mDragging && mTileIdx < static_cast<int>(ctx.level.tiles.size())) {
             mHoverHdl = Handle::None;
             const auto& t = ctx.level.tiles[mTileIdx];
@@ -176,7 +171,6 @@ class HitboxTool final : public EditorTool {
              static_cast<int>(t.w * zoom), static_cast<int>(t.h * zoom)},
             {255, 255, 255, 60}, 1);
 
-        // 8 handles
         constexpr int HS = 10;
         constexpr SDL_Color hcNorm = {80, 180, 255, 220};
         constexpr SDL_Color hcHov  = {255, 220, 80, 255};
@@ -190,7 +184,6 @@ class HitboxTool final : public EditorTool {
         drawH(hx, cy, Handle::Left);                                          drawH(hx + hw, cy, Handle::Right);
         drawH(hx, hy + hh, Handle::BotLeft); drawH(cx, hy + hh, Handle::Bottom); drawH(hx + hw, hy + hh, Handle::BotRight);
 
-        // Info label
         std::string info = "HB: " + std::to_string(hw) + "x" + std::to_string(hh) + " @(" +
                            std::to_string(t.hitbox->offX) + "," + std::to_string(t.hitbox->offY) + ")";
         EditorToolContext::DrawRect(screen, {hx, hy - 16, static_cast<int>(info.size()) * 7, 14}, {10, 20, 50, 200});

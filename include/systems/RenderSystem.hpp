@@ -6,22 +6,9 @@
 #include <entt/entt.hpp>
 #include <vector>
 
-// camX/camY: world-space top-left of the viewport.
-// All world positions are offset by (-camX, -camY) before rendering.
-// Entities whose bounding rect lies fully outside the viewport are culled.
-//
-// vw/vh: logical viewport dimensions. Pass Window::GetWidth()/GetHeight() to
-//        avoid an SDL driver query every frame. Leave at 0 to auto-query.
-//
-// sortedTiles: pre-sorted tile entity list built once in Spawn() and stored on
-//        GameScene. Passing it eliminates the per-frame heap alloc + sort for
-//        Pass 1. Pass nullptr to fall back to building the list inline (used by
-//        scenes that don't maintain their own sorted list, e.g. the editor).
-// alpha: interpolation factor in [0,1) from the fixed-step accumulator.
-// For each moving entity that has PrevTransform, the draw position is:
-//   drawX = prevX + (currX - prevX) * alpha
-// Tiles (TileTag, LadderTag, PropTag) are static — they skip interpolation.
-// Moving platforms do have PrevTransform and interpolate naturally.
+// camX/camY: viewport top-left. vw/vh: viewport size (0 = auto-query).
+// sortedTiles: pre-sorted from Spawn(); nullptr = build inline.
+// alpha: fixed-step interpolation factor for smooth rendering.
 inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                          float camX = 0.0f, float camY = 0.0f,
                          int vw = 0, int vh = 0,
@@ -37,10 +24,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                wy      >= camY + vh;
     };
 
-    // Pass 1: tiles in strict spawn order
-    // Uses the pre-sorted list from GameScene::Spawn() when available to avoid
-    // a per-frame allocation + sort. Falls back to building inline when called
-    // from scenes that don't maintain a sorted list (e.g. editor previews).
+    // --- Pass 1: tiles in spawn order ---
     {
         std::vector<entt::entity> localTiles;
         const std::vector<entt::entity>* tiles = sortedTiles;
@@ -57,8 +41,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         }
 
         for (auto entity : *tiles) {
-            // Guard: action tiles can be destroyed mid-level; the sorted list
-            // isn't pruned until the next Spawn(), so we must validate here.
+            // Destroyed action tiles may still be in the sorted list.
             if (!reg.valid(entity)) continue;
 
             auto* rp   = reg.try_get<Renderable>(entity);
@@ -74,7 +57,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             int tFrameIdx = anim.currentFrame;
             if (tFrameIdx >= (int)r.frames.size()) tFrameIdx = 0;
             const SDL_Rect& src = r.frames[tFrameIdx];
-            // Use renderW/H when set (native-res tiles); fall back to src dims.
             const int tDrawW = (r.renderW > 0) ? r.renderW : src.w;
             const int tDrawH = (r.renderH > 0) ? r.renderH : src.h;
             if (culled(t.x, t.y, tDrawW, tDrawH)) continue;
@@ -99,12 +81,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         }
     }
 
-    // Pass 2: player, enemies, coins
-    // Interpolated draw position helper: if the entity has PrevTransform, lerp
-    // between previous and current physics position using alpha. This removes
-    // the up-to-FIXED_DT lag that would otherwise be visible as micro-stutter.
-    // Entities without PrevTransform (e.g. coins spawned mid-level) draw at
-    // their exact current position — no visible difference for static objects.
+    // --- Pass 2: player, enemies, coins ---
     auto interpPos = [&](entt::entity e, const Transform& t) -> std::pair<float,float> {
         if (const auto* p = reg.try_get<PrevTransform>(e))
             return { p->x + (t.x - p->x) * alpha,
@@ -119,20 +96,15 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                   const AnimationState& anim) {
         if (!r.sheet || r.frames.empty()) return;
 
-        // Clamp frame index — protects against a 1-frame window where
-        // AnimationSystem has advanced currentFrame but PlayerStateSystem
-        // hasn't swapped the frames vector yet (or vice versa).
+        // Clamp frame index against animation/state system ordering race.
         int frameIdx = anim.currentFrame;
         if (frameIdx >= (int)r.frames.size()) frameIdx = 0;
         const SDL_Rect& src = r.frames[frameIdx];
         // Use the intended render size when set; fall back to source frame dims.
         const int drawW = (r.renderW > 0) ? r.renderW : src.w;
         const int drawH = (r.renderH > 0) ? r.renderH : src.h;
-        // Cull using physics position (conservative — interpolated pos is between
-        // prev and curr, so if curr is on-screen prev almost certainly is too).
         if (culled(t.x, t.y, drawW, drawH)) return;
 
-        // Use interpolated world position for all draw calculations below
         auto [ix, iy] = interpPos(entity, t);
 
         auto* g    = reg.try_get<GravityState>(entity);
@@ -142,10 +114,8 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         auto* col  = reg.try_get<Collider>(entity);
         auto* roff = reg.try_get<RenderOffset>(entity);
 
-        // Colour mod for invincibility / hazard / hit flash
         bool colorModded = false;
         if (hf && hf->timer > 0.0f) {
-            // Enemy hit flash — bright red tint
             SDL_SetTextureColorMod(r.sheet, 255, 60, 60);
             colorModded = true;
         } else if (inv && inv->isInvincible && (int)(inv->remaining * 10.0f) % 2 == 0) {
@@ -156,7 +126,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             colorModded = true;
         }
 
-        // Flip / rotation flags
         SDL_FlipMode flip  = r.flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
         double       angle = 0.0;
 
@@ -169,7 +138,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             }
         }
 
-        // Render position — use interpolated world pos (ix, iy) throughout
         float rx = ix - camX;
         float ry = iy - camY;
 
@@ -199,8 +167,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                     break;
             }
         } else {
-            // g->active is false (e.g. on a ladder, or open-world mode).
-            // Must still apply the correct flip-aware offset.
+            // Inactive gravity (ladder, open-world) — still apply flip-aware offset.
             if (roff && col) {
                 if (r.flipH) {
                     rx = (ix - camX) - (drawW - col->w) - roff->x;
@@ -214,9 +181,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             }
         }
 
-        // Source rect samples the full native-res frame; dst rect scales to
-        // the intended render size. The GPU does the single scale in one pass
-        // with nearest-neighbor, keeping pixel art crisp.
         SDL_FRect srcF = {(float)src.x, (float)src.y, (float)src.w, (float)src.h};
         SDL_FRect dst  = {rx, ry, (float)drawW, (float)drawH};
         SDL_RenderTextureRotated(renderer, r.sheet, &srcF, &dst, angle, nullptr, flip);
@@ -225,7 +189,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             SDL_SetTextureColorMod(r.sheet, 255, 255, 255);
     });
 
-    // Pass 3: enemy health bars (drawn on top of all sprites)
+    // --- Pass 3: enemy health bars ---
     {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 

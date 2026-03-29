@@ -18,7 +18,6 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
                                                                        : "platformer";
     j["player"]      = {{"x", level.player.x}, {"y", level.player.y}};
 
-    // Audio
     if (!level.musicPath.empty()) {
         j["music"]       = level.musicPath;
         j["musicVolume"] = level.musicVolume;
@@ -45,7 +44,6 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
 
     j["tiles"] = json::array();
     for (const auto& t : level.tiles) {
-        // Slope
         std::string slopeStr = "none";
         SlopeType   slopeType = t.GetSlopeType();
         if (slopeType == SlopeType::DiagUpRight) slopeStr = "diagupright";
@@ -158,7 +156,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         out.enemies.push_back(std::move(es));
     }
 
-    // Audio
     out.musicPath   = j.value("music", std::string{});
     out.musicVolume = j.value("musicVolume", 1.0f);
 
@@ -187,7 +184,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         ts.antiGravity = t.value("antiGravity", false);
         ts.goal        = t.value("goal", false);
 
-        // Action
         if (t.value("action", false)) {
             ActionData ad;
             ad.group          = t.value("actionGroup", 0);
@@ -197,7 +193,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             ts.action = ad;
         }
 
-        // Slope
         {
             std::string slopeStr = t.value("slope", std::string{"none"});
             SlopeType slopeType = SlopeType::None;
@@ -211,7 +206,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             }
         }
 
-        // Hitbox
         {
             int hbOffX = t.value("hitboxOffX", 0);
             int hbOffY = t.value("hitboxOffY", 0);
@@ -222,7 +216,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             }
         }
 
-        // Moving platform
         if (t.value("moving", false)) {
             MovingPlatformData mp;
             mp.horiz   = t.value("moveHoriz", true);
@@ -236,7 +229,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             ts.moving = mp;
         }
 
-        // Power-up
         if (t.value("powerUp", false)) {
             PowerUpData pu;
             pu.type     = t.value("powerUpType", std::string{});
@@ -246,7 +238,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             ts.powerUp = pu;
         }
 
-        // Shooter
         if (t.value("shooter", false)) {
             ShooterData sd;
             sd.side        = static_cast<ShooterSide>(t.value("shooterSide", 0));
@@ -258,7 +249,6 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             ts.shooter = sd;
         }
 
-        // Shield
         if (t.value("shield", false)) {
             ShieldData sd;
             sd.duration = t.value("shieldDuration", 20.0f);

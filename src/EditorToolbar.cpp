@@ -2,12 +2,7 @@
 
 #include <algorithm>
 
-// ---------------------------------------------------------------------------
-// Static button definition table
-// ---------------------------------------------------------------------------
-// Single source of truth for every button's identity, group, label text,
-// label font size, shortcut hint, and whether it uses tool or action width.
-// The order here determines left-to-right layout within each group.
+// --- Static button definition table ---
 const std::array<EditorToolbar::ButtonDef, EditorToolbar::kButtonCount>&
 EditorToolbar::Defs() {
     static const std::array<ButtonDef, kButtonCount> kDefs = {{
@@ -43,9 +38,7 @@ EditorToolbar::Defs() {
     return kDefs;
 }
 
-// ---------------------------------------------------------------------------
-// Static metadata lookup
-// ---------------------------------------------------------------------------
+// --- Static metadata lookup ---
 const std::array<EditorToolbar::ButtonMeta, EditorToolbar::kButtonCount>&
 EditorToolbar::AllButtons() {
     static const auto kMeta = []() {
@@ -62,26 +55,20 @@ EditorToolbar::Group EditorToolbar::GroupOf(ButtonId id) {
     return Defs()[static_cast<int>(id)].group;
 }
 
-// ---------------------------------------------------------------------------
-// Construction
-// ---------------------------------------------------------------------------
+// --- Construction ---
 EditorToolbar::EditorToolbar() {
-    // Zero-init all rects (off-screen)
     for (auto& r : mRects)
         r = {-200, BTN_Y, BTN_TOOL_W, BTN_H};
     for (auto& p : mPills)
         p = {};
 }
 
-// ---------------------------------------------------------------------------
-// RebuildLayout
-// ---------------------------------------------------------------------------
+// --- RebuildLayout ---
 void EditorToolbar::RebuildLayout() {
     const auto& defs = Defs();
 
     int x = BTN_GAP;
 
-    // Advance helpers
     auto advance = [&](bool isTool) -> SDL_Rect {
         int w = isTool ? BTN_TOOL_W : BTN_ACT_W;
         SDL_Rect r = {x, BTN_Y, w, BTN_H};
@@ -91,19 +78,15 @@ void EditorToolbar::RebuildLayout() {
 
     auto gap = [&]() { x += GRP_GAP; };
 
-    // Off-screen rect for collapsed buttons
     constexpr SDL_Rect kHidden = {-200, BTN_Y, BTN_TOOL_W, BTN_H};
 
-    // Track group boundaries for pill computation
     Group prevGroup   = Group::COUNT;
     int   groupStartX = x;
 
     for (int i = 0; i < kButtonCount; ++i) {
         const auto& def = defs[i];
 
-        // Detect group transition
         if (def.group != prevGroup) {
-            // Close previous group pill
             if (prevGroup != Group::COUNT) {
                 int gi = static_cast<int>(prevGroup);
                 mPills[gi] = {groupStartX, STRIP_Y, x - groupStartX, STRIP_H};
@@ -112,37 +95,31 @@ void EditorToolbar::RebuildLayout() {
             prevGroup   = def.group;
             groupStartX = x;
 
-            // If this group is collapsed, emit a single pill-width advance
             if (mCollapsed[static_cast<int>(def.group)]) {
-                // Mark all buttons in this group as hidden
                 for (int j = i; j < kButtonCount; ++j) {
                     if (defs[j].group != def.group)
                         break;
                     mRects[j] = kHidden;
                 }
                 x += PILL_W + BTN_GAP;
-                // Skip to the end of this group
                 while (i + 1 < kButtonCount && defs[i + 1].group == def.group)
                     ++i;
                 continue;
             }
         }
 
-        // Special case: gap before Back button in Actions group
-        // (Back sits after a divider within group 3)
+        // Gap before Back button (divider within group 3)
         if (def.id == ButtonId::Back)
             gap();
 
         mRects[i] = advance(def.isTool);
     }
 
-    // Close the last group pill
     if (prevGroup != Group::COUNT) {
         int gi = static_cast<int>(prevGroup);
         mPills[gi] = {groupStartX, STRIP_Y, x - groupStartX, STRIP_H};
     }
 
-    // Re-centre all existing labels in their (possibly moved) rects
     for (int i = 0; i < kButtonCount; ++i) {
         const auto& def = defs[i];
         if (mLabels[i]) {
@@ -156,7 +133,6 @@ void EditorToolbar::RebuildLayout() {
         }
     }
 
-    // Rebuild collapse tab labels (+/-)
     for (int g = 0; g < kGroupCount; ++g) {
         mCollapseLabels[g] = std::make_unique<Text>(
             mCollapsed[g] ? "+" : "-",
@@ -164,9 +140,7 @@ void EditorToolbar::RebuildLayout() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// CreateLabels
-// ---------------------------------------------------------------------------
+// --- CreateLabels ---
 void EditorToolbar::CreateLabels() {
     const auto& defs = Defs();
 
@@ -174,13 +148,11 @@ void EditorToolbar::CreateLabels() {
         const auto& def = defs[i];
         const auto& r   = mRects[i];
 
-        // Label
         auto [lx, ly] = Text::CenterInRect(std::string(def.label), def.labelSize, r);
         mLabels[i] = std::make_unique<Text>(
             std::string(def.label),
             SDL_Color{255, 255, 255, 255}, lx, ly, def.labelSize);
 
-        // Hint (only if non-empty)
         if (!def.hint.empty()) {
             mHints[i] = std::make_unique<Text>(
                 std::string(def.hint),
@@ -188,13 +160,10 @@ void EditorToolbar::CreateLabels() {
                 r.x + r.w - 14, r.y + r.h - 13, 9);
         }
     }
-
     // Collapse labels are created in RebuildLayout
 }
 
-// ---------------------------------------------------------------------------
-// SetGravityLabel
-// ---------------------------------------------------------------------------
+// --- SetGravityLabel ---
 void EditorToolbar::SetGravityLabel(std::string_view label) {
     int idx = static_cast<int>(ButtonId::Gravity);
     auto [gx, gy] = Text::CenterInRect(std::string(label), 11, mRects[idx]);
@@ -202,9 +171,7 @@ void EditorToolbar::SetGravityLabel(std::string_view label) {
         std::string(label), SDL_Color{255, 255, 255, 255}, gx, gy, 11);
 }
 
-// ---------------------------------------------------------------------------
-// ToggleGroup / SetCollapsed
-// ---------------------------------------------------------------------------
+// --- ToggleGroup / SetCollapsed ---
 void EditorToolbar::ToggleGroup(Group g) {
     int gi = static_cast<int>(g);
     mCollapsed[gi] = !mCollapsed[gi];
@@ -219,11 +186,8 @@ void EditorToolbar::SetCollapsed(Group g, bool collapsed) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// HandleClick
-// ---------------------------------------------------------------------------
+// --- HandleClick ---
 EditorToolbar::ClickResult EditorToolbar::HandleClick(int mx, int my) const {
-    // Check collapse pills first (they sit in the strip below buttons)
     for (int g = 0; g < kGroupCount; ++g) {
         const auto& pill = mPills[g];
         if (mx >= pill.x && mx <= pill.x + pill.w &&
@@ -233,15 +197,14 @@ EditorToolbar::ClickResult EditorToolbar::HandleClick(int mx, int my) const {
         }
     }
 
-    // Check all buttons
     for (int i = 0; i < kButtonCount; ++i) {
         const auto& r = mRects[i];
         if (r.x < 0)
-            continue; // off-screen (collapsed group)
+            continue;
         if (mx >= r.x && mx <= r.x + r.w && my >= r.y && my <= r.y + r.h) {
             return {ClickResult::Kind::Button, static_cast<ButtonId>(i), Group::COUNT};
         }
     }
 
-    return {}; // Kind::None
+    return {};
 }

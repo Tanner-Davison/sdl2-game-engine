@@ -18,22 +18,13 @@
 #include <unordered_map>
 #include <unordered_set>
 namespace fs = std::filesystem;
-// ─────────────────────────────────────────────────────────────────────────────
-// Level-scoped tile texture cache
-//
-// Key: "<path>|<w>x<h>|r<rotation>"  Value: non-owning ptr into tileScaledTextures
-// Populated during Spawn(); cleared in Unload() along with tileScaledTextures.
-// This avoids re-loading and re-uploading tile images on every Respawn().
-// ─────────────────────────────────────────────────────────────────────────────
+// Key: "<path>|<w>x<h>|r<rotation>" → non-owning ptr into tileScaledTextures. Avoids re-uploading on Respawn.
 static std::string TileCacheKey(const std::string& path, int w, int h, int rot) {
     return path + '|' + std::to_string(w) + 'x' + std::to_string(h) + "|r" +
            std::to_string(rot);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: load a surface, scale it, convert to texture, free the surface.
 // Returns nullptr on failure. Caller owns the texture.
-// ─────────────────────────────────────────────────────────────────────────────
 static SDL_Texture* LoadScaledTexture(
     SDL_Renderer* ren, const std::string& path, int tw, int th, int rotation = 0) {
     SDL_Surface* raw = IMG_Load(path.c_str());
@@ -49,7 +40,7 @@ static SDL_Texture* LoadScaledTexture(
 
     SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
 
-    // Apply rotation on the CPU (must happen before GPU upload).
+    // Rotation must happen on CPU before GPU upload.
     SDL_Surface* final = conv;
     if (rotation != 0) {
         SDL_Surface* rot = RotateSurfaceDeg(conv, rotation);
@@ -59,9 +50,7 @@ static SDL_Texture* LoadScaledTexture(
         }
     }
 
-    // Pre-scale on CPU to the target tile size so the texture is uploaded
-    // at exactly tw x th. This ensures renderW/renderH and the texture
-    // dimensions always agree — no surprise giant tiles.
+    // Pre-scale on CPU so texture dimensions match renderW/renderH exactly.
     if (tw > 0 && th > 0 && (final->w != tw || final->h != th)) {
         SDL_Surface* scaled = SDL_CreateSurface(tw, th, SDL_PIXELFORMAT_ARGB8888);
         if (scaled) {
@@ -75,10 +64,7 @@ static SDL_Texture* LoadScaledTexture(
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, final);
     SDL_DestroySurface(final);
     if (tex) {
-        // Native-res textures (tw/th==0) will be GPU-scaled at render time;
-        // use LINEAR for smooth downscaling (matches the editor). Pre-scaled
-        // textures are already at their target size so NEAREST keeps pixel
-        // edges crisp.
+        // LINEAR for GPU-scaled native-res textures; NEAREST for pre-scaled (crisp pixels).
         SDL_SetTextureScaleMode(tex, (tw <= 0 || th <= 0)
                                          ? SDL_SCALEMODE_LINEAR
                                          : SDL_SCALEMODE_NEAREST);
@@ -86,9 +72,7 @@ static SDL_Texture* LoadScaledTexture(
     return tex;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Construction
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Construction ---
 GameScene::GameScene(const std::string& levelPath,
                      bool               fromEditor,
                      const std::string& profilePath)
@@ -96,9 +80,7 @@ GameScene::GameScene(const std::string& levelPath,
     , mFromEditor(fromEditor)
     , mProfilePath(profilePath) {}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scene interface
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Scene interface ---
 void GameScene::Load(Window& window) {
     mWindow           = &window;
     gameOver          = false;
@@ -132,11 +114,7 @@ void GameScene::Load(Window& window) {
                     pngs.push_back(e.path());
             if (!pngs.empty()) {
                 std::sort(pngs.begin(), pngs.end());
-                // Pass the explicit sorted path list to SpriteSheet so every
-                // PNG in the folder is loaded in alphabetical order with no
-                // prefix filtering. This makes slot reuse work correctly:
-                // point two slots at the same folder, set different fps values,
-                // and both play the full frame set without any files being dropped.
+                // Explicit sorted paths — no prefix filtering, so slot reuse works correctly.
                 std::vector<std::string> pathStrs;
                 pathStrs.reserve(pngs.size());
                 for (const auto& p : pngs)
@@ -144,11 +122,7 @@ void GameScene::Load(Window& window) {
                 return std::make_unique<SpriteSheet>(pathStrs, KW, KH);
             }
         }
-        // No custom sprites for this slot — fall back to frost knight.
-        // When a profile is active with explicit sprite dimensions, load the
-        // frost knight frames at those dimensions so every animation state
-        // renders at the size the player configured in the character creator.
-        // Without a profile the knight loads at its native 120x160.
+        // Fallback to frost knight at profile-configured dimensions (or native 120x160).
         return std::make_unique<SpriteSheet>(
             "game_assets/frost_knight_png_sequences/" + fallbackFolder + "/",
             fallbackPrefix,
@@ -182,9 +156,7 @@ void GameScene::Load(Window& window) {
     knightSlashSheet = loadSlot(PlayerAnimSlot::Slash, "Slashing", "0_Knight_Slashing_", 12);
     knightDeathSheet = loadSlot(PlayerAnimSlot::Death, "Hurt", "0_Knight_Hurt_", 12);
 
-    // Upload all sprite sheets to GPU then free the CPU surfaces — GameScene
-    // only needs the GPU textures at runtime. PlayerCreatorScene skips FreeSurface()
-    // so its preview blits can still read from the CPU surface.
+    // Upload to GPU and free CPU surfaces (PlayerCreatorScene skips FreeSurface for preview blits).
     knightIdleSheet->CreateTexture(ren);
     knightIdleSheet->FreeSurface();
     knightWalkSheet->CreateTexture(ren);
@@ -205,17 +177,10 @@ void GameScene::Load(Window& window) {
     auto getFrames = [&](std::unique_ptr<SpriteSheet>& sheet,
                          PlayerAnimSlot                slot,
                          const std::string&            knightKey) -> std::vector<SDL_Rect> {
-        // Only use the "get all frames" path when the slot actually has custom
-        // sprites loaded. If the profile has a hitbox/fps override but no folder
-        // (e.g. "bones"), the sheet is still the frost knight fallback and we
-        // must use the named key — GetAnimation("") would match every frame.
+        // Custom sprites: use all frames. Frost knight fallback: use named key
+        // (GetAnimation("") would match every frame on the fallback sheet).
         if (useProfile && profile.HasSlot(slot)) {
-            auto all = sheet->GetAnimation("");
-            // Never fall through to the knight key on a custom sheet — the custom
-            // SpriteSheet has no knight-named frames so it would silently return
-            // empty, causing the engine to flash the frost-knight visuals.
-            // Return what we got (may be empty if load failed, handled downstream).
-            return all;
+            return sheet->GetAnimation("");
         }
         return sheet->GetAnimation(knightKey);
     };
@@ -229,10 +194,7 @@ void GameScene::Load(Window& window) {
     slashFrames = getFrames(knightSlashSheet, PlayerAnimSlot::Slash, "0_Knight_Slashing_");
     deathFrames = getFrames(knightDeathSheet, PlayerAnimSlot::Death, "0_Knight_Hurt_");
 
-    // When a custom profile is active, redirect any unfilled slot (empty frames)
-    // to idle frames so the character holds its idle pose instead of flashing
-    // to the frost-knight sprite set whenever an unassigned action triggers.
-    // The sheet texture is fixed up in resolveSheet() below when building AnimationSet.
+    // Redirect unfilled slots to idle frames to avoid flashing to frost-knight sprites.
     if (useProfile && !idleFrames.empty()) {
         if (!profile.HasSlot(PlayerAnimSlot::Walk) && walkFrames.empty())
             walkFrames = idleFrames;
@@ -320,7 +282,7 @@ void GameScene::Load(Window& window) {
                                                    window.GetHeight() / 2 - lcSize.y / 2,
                                                    64);
     }
-    // ── Audio: load level music and player animation SFX ─────────────────
+    // --- Audio: load level music and player animation SFX ---
     if (Audio() && Audio()->IsReady()) {
         // Level music
         Audio()->StartLevelMusic(mLevel.musicPath, mLevel.musicVolume, 500);
@@ -348,7 +310,6 @@ void GameScene::Load(Window& window) {
 }
 
 void GameScene::Unload() {
-    // Stop level music and unload scene-scoped SFX
     if (Audio() && Audio()->IsReady()) {
         Audio()->StopLevelMusic(300);
         Audio()->Sfx().UnloadAll();
@@ -384,7 +345,7 @@ bool GameScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
-    // ── Gamepad hot-plug ─────────────────────────────────────────────────
+    // --- Gamepad hot-plug ---
     if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
         SDL_OpenGamepad(e.gdevice.which);
         return true;
@@ -555,18 +516,13 @@ void GameScene::Update(float dt) {
 
     // Recover enemies from hurt/attack animation back to move animation
     {
-        // Hurt recovery: when the non-looping hurt animation reaches its last frame,
-        // immediately snap back to move animation. No waiting for HitFlash.
         auto hurtView = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>(
             entt::exclude<DeadTag>);
         hurtView.each([&](entt::entity e, const EnemyAnimData& ead,
                           AnimationState& anim, Renderable& r) {
-            // Only act on enemies currently playing a non-looping anim
-            // whose sheet matches the hurt sheet (not attack or dead)
             if (anim.looping) return;
             if (r.sheet != ead.hurtSheet) return;
             if (anim.currentFrame < anim.totalFrames - 1) return;
-            // Hurt anim done — restore move
             if (ead.moveSheet && !ead.moveFrames.empty()) {
                 r.sheet         = ead.moveSheet;
                 r.frames        = ead.moveFrames;
@@ -589,7 +545,6 @@ void GameScene::Update(float dt) {
                 eas.cooldown -= dt;
             if (eas.attacking && !anim.looping &&
                 anim.currentFrame >= anim.totalFrames - 1) {
-                // Attack animation finished — restore move
                 if (ead.moveSheet && !ead.moveFrames.empty()) {
                     r.sheet         = ead.moveSheet;
                     r.frames        = ead.moveFrames;
@@ -648,10 +603,8 @@ void GameScene::Update(float dt) {
         for (entt::entity e : toDestroy) {
             tileAnimFrameMap.erase(e);
             if (reg.valid(e)) {
-                // Collect goal when the destroy animation finishes.
-                // GoalTag was intentionally kept alive during action-tile
-                // processing so the goal only counts after the anim plays.
-                if (reg.all_of<GoalTag>(e)) {
+                    // Goal only counts after destroy animation plays.
+                    if (reg.all_of<GoalTag>(e)) {
                     goalsCollected++;
                     reg.remove<GoalTag>(e);
                 }
@@ -681,9 +634,7 @@ void GameScene::Update(float dt) {
         collision.actionTilesTriggered.push_back(e);
     MovingPlatformCarry(reg);
 
-    // ── Power-up pickup detection ──────────────────────────────────────────
-    // AABB overlap test: player vs any tile with PowerUpTag.
-    // On overlap, apply the power-up to the player and destroy the tile.
+    // --- Power-up pickup ---
     {
         entt::entity playerEnt = entt::null;
         SDL_Rect     playerRect{};
@@ -712,8 +663,6 @@ void GameScene::Update(float dt) {
                 if (!reg.valid(e))
                     continue;
                 const PowerUpTag& pu = reg.get<PowerUpTag>(e);
-                // Add/refresh this power-up in the multi-slot component.
-                // Each type runs its own independent timer.
                 if (!reg.all_of<ActivePowerUps>(playerEnt))
                     reg.emplace<ActivePowerUps>(playerEnt);
                 reg.get<ActivePowerUps>(playerEnt).add(pu.type, pu.duration);
@@ -726,7 +675,6 @@ void GameScene::Update(float dt) {
                         tp.sfxId = "powerup_" + std::to_string((uint32_t)e);
                     reg.emplace_or_replace<ActiveTurretPowerUp>(playerEnt, tp);
                 }
-                // Consume the tile
                 auto it2 =
                     std::find(mSortedTileRenderList.begin(), mSortedTileRenderList.end(), e);
                 if (it2 != mSortedTileRenderList.end())
@@ -736,9 +684,7 @@ void GameScene::Update(float dt) {
         }
     }
 
-    // ── Active power-up tick ────────────────────────────────────────────────
-    // Counts down each slot independently; removes expired slots.
-    // Applies per-frame effects for all currently active types.
+    // --- Active power-up tick ---
     {
         auto apv = reg.view<PlayerTag, ActivePowerUps, GravityState>();
         apv.each([&](entt::entity e, ActivePowerUps& aps, GravityState& g) {
@@ -765,7 +711,6 @@ void GameScene::Update(float dt) {
                 return;
             }
 
-            // Apply per-frame effects for all remaining active slots
             for (auto& [key, slot] : aps.slots) {
                 switch ((PowerUpType)key) {
                     case PowerUpType::AntiGravity:
@@ -781,8 +726,7 @@ void GameScene::Update(float dt) {
         });
     }
 
-    // Process enemies killed by floating objects — run through the same
-    // death pipeline that CollisionSystem uses for stomps/slashes.
+    // Float-killed enemies go through the same death pipeline as stomps/slashes.
     for (entt::entity e : floatResult.enemiesKilledByFloat) {
         if (!reg.valid(e) || reg.all_of<DeadTag>(e)) continue;
         if (reg.all_of<Velocity>(e)) {
@@ -907,7 +851,7 @@ void GameScene::Update(float dt) {
         if (!reg.valid(e))
             continue;
 
-        // Shield pickup: capture tile texture, give player the shield, destroy tile
+        // Shield pickup
         if (auto* sp = reg.try_get<ShieldPickupTag>(e)) {
             auto* rend = reg.try_get<Renderable>(e);
             if (rend) {
@@ -939,19 +883,13 @@ void GameScene::Update(float dt) {
             continue;
         }
 
-        // If this action tile is also a goal, decide when to collect it:
-        //   - Has a destroy animation? Keep the GoalTag alive so it gets
-        //     collected when the animation finishes (see DestroyAnimTag cleanup).
-        //   - No destroy animation? Collect the goal immediately since the
-        //     entity will be stripped/destroyed right away.
+        // Goals with destroy animations are collected when the anim finishes (see DestroyAnimTag cleanup).
         const ActionTag* atagPeek = reg.try_get<ActionTag>(e);
         bool hasDestroyAnim = atagPeek && !atagPeek->destroyAnimPath.empty();
         if (reg.all_of<GoalTag>(e) && !hasDestroyAnim) {
             goalsCollected++;
             reg.remove<GoalTag>(e);
         }
-        // GoalTag is intentionally kept for tiles WITH a destroy animation.
-        // It will be collected in the DestroyAnimTag cleanup block above.
 
         if (reg.all_of<TileTag>(e))
             reg.remove<TileTag>(e);
@@ -965,7 +903,6 @@ void GameScene::Update(float dt) {
             if (LoadAnimatedTileDef(atag->destroyAnimPath, def) && !def.framePaths.empty()) {
                 std::print("loaded {} frames at {}fps\n", def.framePaths.size(), def.fps);
 
-                // Remember the original tile's display size for centering.
                 int tileW = 38, tileH = 38;
                 if (reg.all_of<Renderable>(e)) {
                     const auto& rend = reg.get<Renderable>(e);
@@ -973,9 +910,6 @@ void GameScene::Update(float dt) {
                     if (rend.renderH > 0) tileH = rend.renderH;
                 }
 
-                // Load frames at native resolution (0,0) so the GPU
-                // handles scaling at render time -- same approach as
-                // regular animated tiles.
                 std::vector<SDL_Texture*> frameTex;
                 for (const auto& fp : def.framePaths) {
                     SDL_Texture* t = LoadScaledTexture(ren, fp, 0, 0);
@@ -988,7 +922,6 @@ void GameScene::Update(float dt) {
                     tileAnimFrameMap[e]        = std::move(frameTex);
                     auto&                 fvec = tileAnimFrameMap[e];
 
-                    // Build src rects from the native texture sizes.
                     std::vector<SDL_Rect> animRects;
                     animRects.reserve(fvec.size());
                     for (auto* ft : fvec) {
@@ -998,23 +931,13 @@ void GameScene::Update(float dt) {
                     }
 
                     // Centre the destroy animation on the original tile.
-                    // The animation renders at tileW x tileH (via renderW/H)
-                    // so offset the Transform so the anim's centre == the
-                    // tile's centre.
                     if (reg.all_of<Transform>(e)) {
                         auto& tr = reg.get<Transform>(e);
                         tr.x += tileW * 0.5f - tileW * 0.5f;  // no-op for same size
                         tr.y += tileH * 0.5f - tileH * 0.5f;
-                        // If the animation should render larger than the
-                        // original tile (e.g. an explosion), scale it up
-                        // and re-centre.  Use the native frame aspect ratio
-                        // to pick a render size that covers the tile.
+                        // Scale destroy anim to cover the tile at native aspect ratio.
                         float nativeW = 0, nativeH = 0;
                         SDL_GetTextureSize(fvec[0], &nativeW, &nativeH);
-                        // Render the destroy anim at its native aspect,
-                        // scaled so the larger axis matches the tile size
-                        // (at minimum). This keeps small tiles from
-                        // shrinking an explosion to nothing.
                         int animRenderW = tileW;
                         int animRenderH = tileH;
                         if (nativeW > 0 && nativeH > 0) {
@@ -1023,7 +946,6 @@ void GameScene::Update(float dt) {
                             animRenderW = std::max(tileW, (int)(tileH * aspect));
                             animRenderH = std::max(tileH, (int)(tileW / aspect));
                         }
-                        // Re-centre on the original tile midpoint
                         float tileCX = tr.x + tileW * 0.5f;
                         float tileCY = tr.y + tileH * 0.5f;
                         tr.x = tileCX - animRenderW * 0.5f;
@@ -1173,9 +1095,7 @@ void GameScene::Update(float dt) {
 
                 bool enteringDeath = (anim.currentAnim == AnimationID::DEATH);
                 if (enteringDeath) {
-                    // Let the currently playing hurt sound finish naturally;
-                    // only fade the managed (looping) track so it doesn't loop
-                    // forever. One-shot and sequential tracks play to completion.
+                    // Fade looping track; one-shot/sequential tracks finish naturally.
                     Audio()->FadeOutAnimSFX(300);
                 } else {
                     Audio()->StopAnimSFX();
@@ -1240,7 +1160,7 @@ void GameScene::Update(float dt) {
     if (totalGoals > 0 && goalsCollected >= totalGoals)
         levelComplete = true;
 
-    // ── Shooter turrets: fire at player when in range ─────────────────────
+    // --- Shooter turrets ---
     if (!mPlayerDying && !gameOver) {
         float playerCX = 0, playerCY = 0;
         bool  havePlayer = false;
@@ -1265,7 +1185,6 @@ void GameScene::Update(float dt) {
 
                 ss.cooldownLeft = 1.f / sh.fireRate;
 
-                // Direction: aim at the player from tile center
                 float aimX = playerCX - tcx, aimY = playerCY - tcy;
                 float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
                 if (aimLen < 1.f) return;
@@ -1303,7 +1222,7 @@ void GameScene::Update(float dt) {
         }
     }
 
-    // ── Bullet movement + collision ──────────────────────────────────────────
+    // --- Bullet movement + collision ---
     bool bulletKilledPlayer = false;
     {
         std::vector<entt::entity> bulletsToDestroy;
@@ -1416,7 +1335,6 @@ void GameScene::Update(float dt) {
                     auto& eh = reg.get<Health>(ee);
                     eh.current -= bt.damage;
 
-                    // Knockback
                     et.x += bt.dx * 24.f;
 
                     if (eh.current <= 0.f) {
@@ -1482,7 +1400,6 @@ void GameScene::Update(float dt) {
                     auto& hc = reg.get<Collider>(he);
                     SDL_FRect hazR = {ht.x, ht.y, (float)hc.w, (float)hc.h};
                     if (SDL_HasRectIntersectionFloat(&bulletR, &hazR)) {
-                        // Strip gameplay components so it's no longer solid/hazard
                         if (reg.all_of<HazardTag>(he)) reg.remove<HazardTag>(he);
                         if (reg.all_of<TileTag>(he))   reg.remove<TileTag>(he);
                         if (reg.all_of<Collider>(he))   reg.remove<Collider>(he);
@@ -1631,12 +1548,11 @@ void GameScene::Update(float dt) {
         mCamera.StartShake(6.0f, 0.2f);
     }
 
-    // ── Shield orbit: input, positioning, timer ──────────────────────────────
+    // --- Shield orbit ---
     {
         auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
         shv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
                      ActiveShield& as) {
-            // Per-shield timer: expire individual shields
             for (auto it = as.shields.begin(); it != as.shields.end(); ) {
                 it->remaining -= dt;
                 if (it->remaining <= 0.f)
@@ -1678,7 +1594,7 @@ void GameScene::Update(float dt) {
         });
     }
 
-    // ── Turret power-up: input, firing, timer ────────────────────────────────
+    // --- Turret power-up ---
     {
         auto tpv = reg.view<PlayerTag, Transform, Collider, ActiveTurretPowerUp>();
         tpv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
@@ -1838,7 +1754,7 @@ void GameScene::Render(Window& window, float alpha) {
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
 
-        // ── Debug hitbox overlay (F1) ─────────────────────────────────────
+        // --- Debug hitbox overlay (F1) ---
         if (mDebugHitboxes) {
             SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
 
@@ -1862,7 +1778,6 @@ void GameScene::Render(Window& window, float alpha) {
                     fill(r, 0, 255, 255, 50);
                     outline(r, 0, 255, 255);
 
-                    // Show which animation is active + collider size
                     const char* animName = "??";
                     switch (pa.currentAnim) {
                         case AnimationID::IDLE:  animName = "IDLE";  break;
@@ -1880,7 +1795,6 @@ void GameScene::Render(Window& window, float alpha) {
                     Text lbl(info, SDL_Color{0, 255, 255, 255}, sx + 2, sy - 14, 10);
                     lbl.Render(ren);
 
-                    // Show render offset if present
                     if (const auto* roff = reg.try_get<RenderOffset>(pe)) {
                         std::string offStr = "roff " + std::to_string(roff->x)
                                            + "," + std::to_string(roff->y);
@@ -1966,9 +1880,7 @@ void GameScene::Render(Window& window, float alpha) {
     window.Update();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Pause overlay
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Pause overlay ---
 void GameScene::BuildPauseUI(int W, int H) {
     int cx = W / 2, cy = H / 2;
 
@@ -2009,19 +1921,16 @@ void GameScene::RenderPauseOverlay(Window& window) {
     SDL_Renderer* ren = window.GetRenderer();
     int           W = window.GetWidth(), H = window.GetHeight();
 
-    // Dim overlay
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 160);
     SDL_FRect full = {0, 0, (float)W, (float)H};
     SDL_RenderFillRect(ren, &full);
 
-    // Panel background
     SDL_Rect panel = {W / 2 - 180, H / 2 - 160, 360, 320};
     SDL_SetRenderDrawColor(ren, 18, 20, 32, 230);
     SDL_FRect fp = {(float)panel.x, (float)panel.y, (float)panel.w, (float)panel.h};
     SDL_RenderFillRect(ren, &fp);
 
-    // Panel border
     SDL_SetRenderDrawColor(ren, 80, 120, 220, 255);
     SDL_RenderRect(ren, &fp);
 
@@ -2041,11 +1950,8 @@ void GameScene::RenderPauseOverlay(Window& window) {
         mPauseHintLbl2->Render(ren);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Turret barrel overlay — renders on top of tiles during gameplay
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Turret barrel overlay ---
 void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
-    // Find the player center for aiming
     float playerCX = 0, playerCY = 0;
     bool  havePlayer = false;
     {
@@ -2072,7 +1978,6 @@ void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
         float cx = sx + sw * 0.5f;
         float cy = sy + sh2 * 0.5f;
 
-        // Base: dark square in center
         float baseW = std::max(8.f, sw * 0.3f);
         float baseH = std::max(8.f, sh2 * 0.3f);
         SDL_FRect base = {cx - baseW / 2, cy - baseH / 2, baseW, baseH};
@@ -2101,17 +2006,14 @@ void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
         float barrelLen = std::max(6.f, std::min(sw, sh2) * 0.45f);
         float barrelThk = std::max(4.f, std::min(baseW, baseH) * 0.45f);
 
-        // Perpendicular for barrel thickness
         float perpX = -aimDy, perpY = aimDx;
 
-        // Barrel corners: a quad from base center extending outward
         float tipX = cx + aimDx * (baseW * 0.5f + barrelLen);
         float tipY = cy + aimDy * (baseH * 0.5f + barrelLen);
         float startX = cx + aimDx * baseW * 0.4f;
         float startY = cy + aimDy * baseH * 0.4f;
 
-        // Draw barrel as a thick line (two triangles via rect approximation)
-        // Since SDL doesn't have rotated rects, draw with RenderGeometry
+        // SDL has no rotated rects; draw barrel with RenderGeometry.
         SDL_Vertex verts[4];
         SDL_FColor darkGray = {15.f/255.f, 15.f/255.f, 15.f/255.f, 240.f/255.f};
         float halfThk = barrelThk * 0.5f;
@@ -2128,7 +2030,6 @@ void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
         int indices[6] = {0, 1, 2, 0, 2, 3};
         SDL_RenderGeometry(ren, nullptr, verts, 4, indices, 6);
 
-        // Barrel outline
         SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
         SDL_RenderLine(ren, verts[0].position.x, verts[0].position.y,
                             verts[1].position.x, verts[1].position.y);
@@ -2139,7 +2040,6 @@ void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
         SDL_RenderLine(ren, verts[3].position.x, verts[3].position.y,
                             verts[0].position.x, verts[0].position.y);
 
-        // Muzzle flash: orange dot at the tip
         float muzzleSz = std::max(3.f, barrelThk * 0.6f);
         SDL_FRect muzzle = {tipX - muzzleSz / 2, tipY - muzzleSz / 2, muzzleSz, muzzleSz};
         SDL_SetRenderDrawColor(ren, 255, 140, 30, 255);
@@ -2156,7 +2056,6 @@ void GameScene::RenderShield(SDL_Renderer* ren, int W, int H) {
         int n = (int)as.shields.size();
         if (n == 0) return;
 
-        // Find minimum remaining for orbit circle fade
         float minRemaining = as.shields[0].remaining;
         for (auto& se : as.shields) minRemaining = std::min(minRemaining, se.remaining);
         float circleAlpha = (minRemaining < 3.f) ? (minRemaining / 3.f) : 1.f;
@@ -2189,7 +2088,6 @@ void GameScene::RenderShield(SDL_Renderer* ren, int W, int H) {
             }
         }
 
-        // Faint blue circle outline around orbit
         SDL_SetRenderDrawColor(ren, 100, 180, 255, (Uint8)(40 * circleAlpha));
         constexpr int SEGS = 32;
         float rad = as.orbitRadius;
@@ -2220,7 +2118,6 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
         constexpr float BARREL_L  = 28.f;
         constexpr float BARREL_TH = 6.f;
 
-        // Dark base square at player center
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
         float alpha = (tp.remaining < 3.f) ? (tp.remaining / 3.f) : 1.f;
         Uint8 a = (Uint8)(alpha * 255);
@@ -2229,7 +2126,6 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
         SDL_SetRenderDrawColor(ren, 30, 30, 30, a);
         SDL_RenderFillRect(ren, &baseR);
 
-        // Barrel: rotated quad from center outward
         float tipX = cx + aimDx * BARREL_L;
         float tipY = cy + aimDy * BARREL_L;
         float hw = BARREL_TH * 0.5f;
@@ -2243,13 +2139,11 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
         int idx[6] = {0, 1, 2, 0, 2, 3};
         SDL_RenderGeometry(ren, nullptr, verts, 4, idx, 6);
 
-        // Muzzle dot (orange)
         constexpr float MUZ = 5.f;
         SDL_FRect muz = {tipX - MUZ * 0.5f, tipY - MUZ * 0.5f, MUZ, MUZ};
         SDL_SetRenderDrawColor(ren, 255, 160, 40, a);
         SDL_RenderFillRect(ren, &muz);
 
-        // Faint rotation circle
         SDL_SetRenderDrawColor(ren, 255, 160, 40, (Uint8)(30 * alpha));
         constexpr int SEGS = 24;
         float rad = BARREL_L;
@@ -2262,9 +2156,7 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Private helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Private helpers ---
 void GameScene::Spawn() {
     SDL_Renderer* ren = mWindow->GetRenderer();
 
@@ -2276,8 +2168,6 @@ void GameScene::Spawn() {
         "Enemies Stomped: 0", SDL_Color{255, 100, 100, 255}, 0, 0, 16);
 
     // Coins removed — goal tiles are now the level completion mechanic.
-    // totalGoals is computed during the tile spawn loop below.
-
     mLevelW = (float)mWindow->GetWidth();
     mLevelH = (float)mWindow->GetHeight();
     for (const auto& ts : mLevel.tiles) {
@@ -2296,9 +2186,7 @@ void GameScene::Spawn() {
     mLevelW += (float)mWindow->GetWidth() * 0.25f;
     mLevelH += (float)mWindow->GetHeight() * 0.25f;
 
-    // ── Player collider dimensions ────────────────────────────────────────────
-    // Computed early so the camera initialisation below can centre on the
-    // actual collider rather than the hardcoded frost-knight defaults.
+    // --- Player collider dimensions --- (computed early for camera centering)
     int pColW, pColH, pROffX, pROffY;
     {
         PlayerProfile tmpProfile;
@@ -2394,7 +2282,6 @@ void GameScene::Spawn() {
             base.duckRoffY = -(mPlayerSpriteH - base.duckH);
         }
 
-        // Helper: convert AnimHitbox from profile to AnimCollider
         auto toAnimCol = [](const AnimHitbox& hb) -> AnimCollider {
             if (hb.IsDefault()) return {};
             return {hb.w, hb.h, -hb.x, -hb.y};
@@ -2429,27 +2316,9 @@ void GameScene::Spawn() {
     auto slotFps = [&](PlayerAnimSlot slot) -> float {
         return mSlotFps[static_cast<int>(slot)];
     };
-    // For custom profiles, any slot that ended up with idleFrames (because it
-    // was unfilled) must also use the idle sheet texture, not the frost-knight
-    // sheet that was loaded as a fallback. Otherwise sheet and frames mismatch.
+    // Unfilled profile slots have their frames patched to idleFrames (by copy, not alias),
+    // so resolveSheet uses slot capability instead of pointer identity to pick the right texture.
     SDL_Texture* idleT = knightIdleSheet->GetTexture();
-
-    // resolveSheet: returns the correct GPU texture for a given animation slot.
-    //
-    // When a custom profile is active, any slot that the character doesn't define
-    // gets its frames patched to idleFrames (see Load()).  Because that patch is a
-    // vector *copy* (not the same object), pointer-identity (&slotFrames==&idleFrames)
-    // fails for every patched slot, so we check slot capability instead:
-    //   - If the profile has no custom sprites for this slot, the slot texture MUST
-    //     be idleT so the sheet and frames always refer to the same atlas.
-    //   - If the profile does have custom sprites, use the loaded slot texture.
-    //   - If no profile is active, use the frost-knight slot texture as-is.
-    // Pre-load profile once to know which slots have real custom sprites.
-    // resolveSheet() uses this to decide whether a slot should use idleSheet
-    // (no custom sprites -> frames were patched to idleFrames in Load()) or
-    // the slot's own texture (custom sprites exist -> frames are custom).
-    // This replaces the old pointer-identity check (&slotFrames==&idleFrames)
-    // which broke because Load() patches by *copying* idleFrames, not aliasing.
     std::unordered_set<int> customSlots;
     if (mHasProfile) {
         PlayerProfile spawnProfile;
@@ -2462,8 +2331,6 @@ void GameScene::Spawn() {
         }
     }
     auto resolveSheet = [&](SDL_Texture* slotTex, PlayerAnimSlot slot) -> SDL_Texture* {
-        // If the profile has no custom sprites for this slot, its frames were
-        // patched to idleFrames in Load() — return idleT so sheet+frames match.
         if (mHasProfile && !customSlots.count(static_cast<int>(slot)))
             return idleT;
         return slotTex;
@@ -2506,9 +2373,7 @@ void GameScene::Spawn() {
             .deathFps   = slotFps(PlayerAnimSlot::Death),
         });
 
-    // Cache-aware tile texture helper.
-    // On first Spawn: loads from disk, uploads to GPU, caches the pointer.
-    // On subsequent Spawn() calls (Respawn): returns the cached GPU texture instantly.
+    // Returns cached GPU texture on Respawn, loads from disk on first Spawn.
     auto getCachedTex =
         [&](const std::string& path, int w, int h, int rot = 0) -> SDL_Texture* {
         std::string key = TileCacheKey(path, w, h, rot);
@@ -2523,7 +2388,7 @@ void GameScene::Spawn() {
         return tex;
     };
 
-    // ── Spawn tiles ───────────────────────────────────────────────────────────
+    // --- Spawn tiles ---
     totalGoals = 0;
     for (const auto& ts : mLevel.tiles) {
         if (IsAnimatedTile(ts.imagePath)) {
@@ -2533,25 +2398,16 @@ void GameScene::Spawn() {
                 continue;
             }
 
-            // Use the tile's actual w/h from the level data so animated tiles
-            // render at the same size they appear in the editor.
             int animW = (ts.w > 0) ? ts.w : 38;
             int animH = (ts.h > 0) ? ts.h : 38;
 
-            // Upload each animation frame at NATIVE resolution so the GPU
-            // scales at render time via the dst rect. Pre-scaling to animW x
-            // animH with NEAREST destroyed detail (lava looked like a flat
-            // orange strip). Passing 0,0 skips the CPU blit in
-            // LoadScaledTexture. The Renderable's renderW/renderH (set to
-            // animW/animH below) tells RenderSystem what dst size to draw.
+            // Native-res frames (0,0) — GPU scales at render time. CPU pre-scale destroyed lava detail.
             std::vector<SDL_Texture*> frameTex;
             for (const auto& fp : def.framePaths)
                 frameTex.push_back(getCachedTex(fp, 0, 0, ts.rotation));
             if (frameTex.empty() || !frameTex[0])
                 continue;
 
-            // Build frame rects from the native-resolution textures.
-            // Each animated frame is its own texture, so src = full texture.
             std::vector<SDL_Rect> frameRects;
             frameRects.reserve(frameTex.size());
             for (auto* ft : frameTex) {
@@ -2667,9 +2523,7 @@ void GameScene::Spawn() {
             continue;
         }
 
-        // ── Normal PNG tile ────────────────────────────────────────────────
-        // Use cache: on Respawn this returns the already-uploaded GPU texture
-        // without touching disk or the CPU scaling pipeline.
+        // --- Normal PNG tile ---
         SDL_Texture* tex = getCachedTex(ts.imagePath, ts.w, ts.h, ts.rotation);
         if (!tex)
             continue;
@@ -2782,9 +2636,6 @@ void GameScene::Spawn() {
             reg.emplace<ShieldPickupTag>(tile, ts.shield->duration);
         }
 
-        // Source rect covers the full native-resolution texture.
-        // RenderSystem draws it into a dst rect of ts.w x ts.h — the GPU
-        // handles the scale with PIXELART mode for crisp results.
         float texW = 0, texH = 0;
         SDL_GetTextureSize(tex, &texW, &texH);
         std::vector<SDL_Rect> tileFrame = {{0, 0, (int)texW, (int)texH}};
@@ -2792,7 +2643,7 @@ void GameScene::Spawn() {
         reg.emplace<AnimationState>(tile, 0, 1, 0.0f, 1.0f, false);
     }
 
-    // ── Load turret fire SFX ───────────────────────────────────────────────────
+    // --- Load turret fire SFX ---
     if (Audio() && Audio()->IsReady()) {
         auto sv = reg.view<ShooterTag>();
         sv.each([&](entt::entity e, const ShooterTag& sh) {
@@ -2810,10 +2661,8 @@ void GameScene::Spawn() {
         });
     }
 
-    // ── Spawn enemies ─────────────────────────────────────────────────────────
-    // Cache loaded enemy profile sprite sheets by type name so multiple enemies
-    // of the same type share the same GPU texture.
-    // Helper: convert profile hitbox to ECS hitbox
+    // --- Spawn enemies ---
+    // Enemy type cache: share GPU textures across same-type enemies.
     auto toEnemyHitbox = [](const EnemyAnimHitbox& hb) -> EnemyHitbox {
         if (hb.IsDefault()) return {};
         return {hb.w, hb.h, hb.x, hb.y, -hb.x, -hb.y};
@@ -2860,7 +2709,6 @@ void GameScene::Spawn() {
         tc->spriteH = (prof.spriteH > 0) ? prof.spriteH : 40;
         tc->health  = (prof.health > 0)  ? prof.health  : 30.0f;
 
-        // Load a slot's sprite sheet, store it in mEnemySpriteSheets for lifetime
         auto loadSlot = [&](EnemyAnimSlot slot) -> std::pair<SpriteSheet*, std::vector<SDL_Rect>> {
             if (!prof.HasSlot(slot)) return {nullptr, {}};
             const auto& dir = prof.Slot(slot).folderPath;
@@ -2926,16 +2774,13 @@ void GameScene::Spawn() {
             }
         }
 
-        // If Move has no frames, fall back to Idle for movement animation
         if (tc->moveFrames.empty() && !tc->idleFrames.empty()) {
             tc->moveFrames = tc->idleFrames;
         }
-        // If Hurt has no frames, fall back to Idle
         if (tc->hurtFrames.empty() && !tc->idleFrames.empty()) {
             tc->hurtFrames = tc->idleFrames;
             tc->hurtSheet  = tc->idleSheet;
         }
-        // If Dead has no frames, fall back to Hurt then Idle
         if (tc->deadFrames.empty()) {
             if (!tc->hurtFrames.empty()) {
                 tc->deadFrames = tc->hurtFrames;
@@ -2960,12 +2805,10 @@ void GameScene::Spawn() {
         reg.emplace<EnemyTag>(enemy);
         reg.emplace<EnemyReaction>(enemy);
 
-        // Try loading custom enemy profile
         bool usedProfile = false;
         if (!es.enemyType.empty()) {
             auto tc = getEnemyTypeCache(es.enemyType);
             if (tc && (!tc->moveFrames.empty() || !tc->idleFrames.empty())) {
-                // Use Move frames for walking, fall back to Idle
                 const auto& frames = !tc->moveFrames.empty() ? tc->moveFrames : tc->idleFrames;
                 SDL_Texture* tex = tc->moveSheet ? tc->moveSheet->GetTexture()
                                  : tc->idleSheet ? tc->idleSheet->GetTexture()
@@ -2982,7 +2825,6 @@ void GameScene::Spawn() {
                     reg.emplace<Health>(enemy, eh);
                     reg.emplace<FaceRightTag>(enemy);
 
-                    // Build EnemyAnimData so collision system can swap anims
                     EnemyAnimData ead;
                     ead.moveSheet    = tex;
                     ead.moveFrames   = frames;
@@ -3009,15 +2851,11 @@ void GameScene::Spawn() {
                     reg.emplace<EnemyAttackState>(enemy);
                     reg.emplace<EnemyClimbState>(enemy);
 
-                    // Apply the initial move/idle hitbox from the profile.
-                    // Use move hitbox if set, else idle, else full sprite.
-                    // Uses ApplyHitbox which sets Collider + RenderOffset
-                    // (no ColliderOffset -- CollisionSystem ignores it for enemies).
+                    // Apply initial hitbox from profile (move > idle > full sprite).
                     const EnemyHitbox& initHB = !tc->moveHitbox.IsDefault() ? tc->moveHitbox
                                               : !tc->idleHitbox.IsDefault() ? tc->idleHitbox
                                               : EnemyHitbox{};
                     if (!initHB.IsDefault()) {
-                        // Need ead ref from the entity we just emplaced
                         auto& eadRef = reg.get<EnemyAnimData>(enemy);
                         eadRef.ApplyHitbox(initHB, reg, enemy);
                     }

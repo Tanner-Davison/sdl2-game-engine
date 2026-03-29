@@ -7,7 +7,6 @@
 inline void MovementSystem(entt::registry& reg, float dt, int windowW, float levelW = 0.0f) {
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
-    // ── Gamepad analog stick ─────────────────────────────────────────────
     constexpr float PAD_DEAD_ZONE = 0.25f;
     float padAxisX = 0.0f, padAxisY = 0.0f;
     {
@@ -25,7 +24,6 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         SDL_free(ids);
     }
 
-    // ── Dash tick ────────────────────────────────────────────────────────
     {
         auto dashView = reg.view<PlayerTag, Transform, DashState>();
         dashView.each([dt](Transform& t, DashState& dash) {
@@ -156,14 +154,11 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         if (!g.isGrounded) {
             g.velocity = std::min(g.velocity + GRAVITY_FORCE * dt, MAX_FALL_SPEED);
         } else if (g.direction == GravityDir::DOWN) {
-            // Ground-stick: always apply a small constant downward nudge while
-            // grounded, regardless of whether the player is moving or standing
-            // still. This guarantees oTop > 0 in CollisionSystem's floor snap
-            // every frame, so isGrounded is reliably re-set to true even when
-            // floating-point precision would otherwise produce oTop == 0 exactly
-            // and cause a spurious one-frame airborne state (jump anim flash).
-            // CollisionSystem resets g.velocity to 0 on any floor snap, so this
-            // tiny nudge never accumulates into real downward movement.
+            // Ground-stick: constant downward nudge while grounded guarantees
+            // oTop > 0 in CollisionSystem's floor snap every frame, so isGrounded
+            // is reliably re-set. Without this, FP precision can produce oTop == 0
+            // exactly, causing a spurious one-frame airborne state (jump anim flash).
+            // CollisionSystem resets g.velocity to 0 on any floor snap.
             g.velocity = std::min(g.velocity + SLOPE_STICK_VELOCITY, MAX_FALL_SPEED);
         }
 
@@ -190,7 +185,6 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
     });
 
     auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<PropTag, HazardTag>);
-    // Find player position for enemy AI targeting
     float playerX = 0.0f, playerW = 0.0f;
     float playerY = 0.0f, playerH = 0.0f;
     {
@@ -208,18 +202,14 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
     auto enemyView = reg.view<EnemyTag, Transform, Velocity, Collider, Renderable>(
         entt::exclude<DeadTag>);
     enemyView.each([&](entt::entity ent, Transform& t, Velocity& v, const Collider& c, Renderable& r) {
-        // Enemy AI: if within aggro range, walk toward the player.
-        // Skip chasing while stunned (HitFlash active = just got hit).
         bool stunned = false;
         if (auto* hf = reg.try_get<HitFlash>(ent))
             stunned = hf->timer > 0.0f;
 
         auto* climbState = reg.try_get<EnemyClimbState>(ent);
 
-        // ── Stepping off ladder ──────────────────────────────────────────
-        // Y is preserved from the climb exit. FloatingSystem skips gravity.
-        // Walk horizontally toward the player until completely clear of all
-        // ladder tiles, then release so gravity handles the landing.
+        // Stepping off ladder: walk horizontally toward player until clear of
+        // all ladder tiles, then release so gravity handles the landing.
         if (climbState && climbState->steppingOff && !reg.all_of<FloatTag>(ent)) {
             float playerCX = playerX + playerW * 0.5f;
             float enemyCX  = t.x + c.w * 0.5f;
@@ -246,20 +236,16 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             return;
         }
 
-        // ── Ladder climbing ─────────────────────────────────────────────
         if (climbState && climbState->climbing && !reg.all_of<FloatTag>(ent)) {
             constexpr float ENEMY_CLIMB_SPEED = 120.0f;
             v.dx = 0.0f;
-            // Stay centered on the ladder throughout the climb
             t.x = climbState->ladderCX - c.w * 0.5f;
 
             if (climbState->goingUp) {
                 t.y -= ENEMY_CLIMB_SPEED * dt;
 
-                // While ascending, probe for a solid platform adjacent to
-                // the ladder at the enemy's current feet level. This lets
-                // the enemy step off mid-ladder instead of climbing all
-                // the way to the very top of a tall ladder.
+                // While ascending, probe for an adjacent solid platform at
+                // feet level so the enemy can step off mid-ladder.
                 float feetY = t.y + c.h;
                 float ladL  = climbState->ladderCX - climbState->ladderW * 0.5f;
                 float ladR  = climbState->ladderCX + climbState->ladderW * 0.5f;
@@ -272,14 +258,11 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                     if (canStep) return;
                     if (feetY < tt.y || feetY > tt.y + PLAT_PROBE_H) return;
                     float tileR = tt.x + tc.w;
-                    // Platform to the LEFT of the ladder
                     if (tileR > ladL - 2.0f && tileR <= ladL + 8.0f) canStep = true;
-                    // Platform to the RIGHT of the ladder
                     if (tt.x >= ladR - 8.0f && tt.x < ladR + 2.0f)  canStep = true;
                 });
 
                 if (canStep) {
-                    // Prefer stepping toward the player
                     float playerCX = playerX + playerW * 0.5f;
                     stepDir = (playerCX > climbState->ladderCX) ? 1.0f : -1.0f;
                     t.y = feetY - c.h;
@@ -288,7 +271,7 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                     climbState->steppingOff = false;
                     v.dx = stepDir * v.speed;
                 } else if (feetY <= climbState->columnTop) {
-                    // Fallback: reached the very top with no adjacent platform
+                    // Reached the very top with no adjacent platform
                     t.y = climbState->columnTop - c.h;
                     climbState->climbing    = false;
                     climbState->steppingOff = true;
@@ -296,7 +279,6 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             } else {
                 t.y += ENEMY_CLIMB_SPEED * dt;
 
-                // While descending, also check for adjacent platforms
                 float feetY = t.y + c.h;
                 float ladL  = climbState->ladderCX - climbState->ladderW * 0.5f;
                 float ladR  = climbState->ladderCX + climbState->ladderW * 0.5f;
@@ -365,7 +347,6 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             if (std::abs(v.dx) < 1.0f) v.dx = 0.0f;
         }
 
-        // ── Check if enemy should grab a ladder ───────────────────────
         if (climbState && !stunned && !reg.all_of<FloatTag>(ent)) {
             constexpr float LADDER_AGGRO = 200.0f;
             float enemyCX   = t.x + c.w * 0.5f;
@@ -374,8 +355,7 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             float bestColTop = 1e9f, bestColBot = -1e9f;
             float ladMinX = 1e9f, ladMaxX = -1e9f;
             bool  inLadderColumn = false;
-            // Nearest ladder-tile top that the enemy can step onto for
-            // climbing down (at or just below the enemy's feet level).
+            // Nearest ladder-tile top at or below enemy feet for climb-down entry.
             float entryTop = -1e9f;
 
             ladderView.each([&](const Transform& lt, const Collider& lc) {
@@ -404,9 +384,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                     && vertDist < -40.0f
                     && enemyFeet > bestColTop + 4.0f;
 
-                // Climb down: use nearest reachable ladder entry (not the
-                // global top). Tolerance matches STEP_UP_HEIGHT so the
-                // enemy can drop in from an adjacent platform one tile above.
+                // Tolerance matches STEP_UP_HEIGHT so the enemy can drop in
+                // from an adjacent platform one tile above.
                 bool shouldClimbDown = entryTop > -1e9f
                     && hDist < LADDER_AGGRO
                     && vertDist > 40.0f
@@ -454,11 +433,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             }
         }
 
-        // ── Ledge detection ───────────────────────────────────────────────
-        // Probe below the enemy's leading foot. If no solid tile or ladder
-        // tile exists there, the enemy is about to walk off a ledge — reverse.
-        // Ladder tiles count as ground so enemies can walk over ladder
-        // columns to align themselves for climbing.
+        // Ledge detection: probe below leading foot; reverse if no ground.
+        // Ladder tiles count as ground so enemies walk over ladder columns.
         if (!reg.all_of<FloatTag>(ent) && !stunned) {
             constexpr float PROBE_DEPTH = 12.0f;
             float halfW  = c.w * 0.5f;
@@ -497,11 +473,10 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             }
         }
 
-        // Custom enemy sprites face right by default (FaceRightTag);
-        // legacy slime sprites face left by default.
+        // FaceRightTag sprites face right by default; legacy slime sprites face left.
         if (reg.all_of<FaceRightTag>(ent))
-            r.flipH = v.dx < 0.0f;   // flip when moving left
+            r.flipH = v.dx < 0.0f;
         else
-            r.flipH = v.dx > 0.0f;   // flip when moving right (legacy slime)
+            r.flipH = v.dx > 0.0f;
     });
 }

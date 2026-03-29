@@ -1,9 +1,5 @@
 #pragma once
-// PlacementTools.hpp
-//
-// Simple one-click tools: Coin, Enemy, Tile, Erase, PlayerStart.
-// These tools place or remove entities on left-click and have no
-// complex drag or state-machine behavior beyond the base entity drag.
+// PlacementTools.hpp -- simple one-click tools: Enemy, Tile, Erase, PlayerStart, MoveCam.
 
 #include "tools/EditorTool.hpp"
 #include "EditorSurfaceCache.hpp"
@@ -11,10 +7,7 @@
 #include <climits>
 #include <string>
 
-// ─── Forward declarations for palette query ──────────────────────────────────
-// The Tile tool needs to know the selected palette item. Rather than
-// including EditorPalette.hpp (which would pull in too many deps), we
-// accept a small callback struct that the orchestrator fills in.
+// Avoids including EditorPalette.hpp (too many transitive deps).
 struct TilePlacementInfo {
     bool        hasSelection = false;
     bool        isFolder     = false;
@@ -23,39 +16,28 @@ struct TilePlacementInfo {
 };
 
 // CoinTool removed -- coins are no longer standalone entities.
-// Goals are placed via GoalTool in ModifierTools.hpp.
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EnemyTool — places enemies with type selection and per-instance speed control
-//
-// Usage:
-//   LClick       = place enemy of selected type at cursor
-//   RClick enemy = open speed edit popup for that enemy
-//   Scroll       = adjust placement speed (+/- 10 px/s)
-//   Picker panel = shown at top of canvas when tool is active
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- EnemyTool ---
+
 class EnemyTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Enemy"; }
 
-    // ── Placement state (set by orchestrator or picker clicks) ────────────────
-    float       placementSpeed = 120.0f;   // speed for the NEXT placed enemy
-    std::string selectedType;              // enemy profile name (empty = legacy slime)
-    bool        placementStartLeft = false; // direction toggle for next placed enemy
+    float       placementSpeed = 120.0f;
+    std::string selectedType;
+    bool        placementStartLeft = false;
 
-    // ── Enemy type picker entries (refreshed on activate) ────────────────────
     struct PickerEntry {
-        std::string name;            // profile name
-        std::string previewPath;     // first PNG for thumbnail (may be empty)
-        SDL_Rect    rect{};          // screen rect (computed in RenderOverlay)
+        std::string name;
+        std::string previewPath;
+        SDL_Rect    rect{};
     };
     std::vector<PickerEntry> pickerEntries;
     int  pickerScroll  = 0;
-    bool pickerVisible = true;       // shown at top when Enemy tool is active
+    bool pickerVisible = true;
 
-    // ── Speed edit popup (RClick on placed enemy) ────────────────────────────
     bool        speedPopupOpen   = false;
-    int         speedPopupIdx    = -1;    // index into level.enemies
+    int         speedPopupIdx    = -1;
     bool        speedInputActive = false;
     std::string speedStr;
     SDL_Rect    speedPopupRect{};
@@ -109,9 +91,8 @@ class EnemyTool final : public EditorTool {
     bool cursorOnCanvas = false;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// EraseTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- EraseTool ---
+
 class EraseTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Erase"; }
@@ -137,9 +118,8 @@ class EraseTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// PlayerStartTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- PlayerStartTool ---
+
 class PlayerStartTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Player"; }
@@ -155,14 +135,11 @@ class PlayerStartTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// TileTool — click to place, click-and-drag to paint a row/column/area.
-//
-// During drag, tiles snap to tileW/tileH intervals relative to the first
-// placed tile so they always align edge-to-edge. Overlap detection prevents
-// placing on top of any existing tile during a drag stroke. Single clicks
+// --- TileTool ---
+// Drag tiles snap to tileW/tileH intervals relative to the first placed tile.
+// Overlap detection prevents stacking during a drag stroke; single clicks
 // preserve the old behavior (can intentionally stack).
-// ═══════════════════════════════════════════════════════════════════════════════
+
 class TileTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Tile"; }
@@ -282,17 +259,15 @@ class TileTool final : public EditorTool {
     int  mLastCellY   = INT_MIN;
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// MoveCamTool -- does nothing on click (pan is handled at the orchestrator
-// level via middle-mouse / Ctrl+left / MoveCam left-click).
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- MoveCamTool ---
+// Pan is handled by the orchestrator before tool dispatch.
+
 class MoveCamTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Pan"; }
 
     ToolResult OnMouseDown(EditorToolContext& /*ctx*/, int /*mx*/, int /*my*/,
                            Uint8 /*button*/, SDL_Keymod /*mods*/) override {
-        // Pan is handled by the orchestrator before tool dispatch.
         return ToolResult::Ignored;
     }
 };

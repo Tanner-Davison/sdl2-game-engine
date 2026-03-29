@@ -1,4 +1,4 @@
-// audio/AudioDevice.cpp -- SDL3_mixer init + mixer device lifecycle.
+// audio/AudioDevice.cpp
 #include "audio/AudioDevice.hpp"
 #include <print>
 #include <utility>

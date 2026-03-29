@@ -1,18 +1,15 @@
 #pragma once
 // ModifierTools.hpp
 //
-// Single-click toggle tools that modify tile flags: Prop, Ladder, Slope,
-// Hazard, AntiGrav. They all share the same pattern: click a tile to toggle
-// a boolean flag, with mutual-exclusion rules between certain flags.
-// After toggling, they fall through to the base entity-drag so the user
-// can reposition the entity while the modifier tool is active.
+// Single-click toggle tools that modify tile flags. They share the same
+// pattern: click a tile to toggle a flag (with mutual-exclusion rules),
+// then fall through to base entity-drag for repositioning.
 
 #include "tools/EditorTool.hpp"
 #include <string>
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// PropTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- PropTool ---
+
 class PropTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Prop"; }
@@ -56,11 +53,9 @@ class PropTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// GoalTool
-// Click a tile to toggle its goal flag. Goal tiles must be collected by
-// the player to complete the level. Any tile type can be a goal.
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- GoalTool ---
+// Click a tile to toggle its goal flag. Any tile type can be a goal.
+
 class GoalTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Goal"; }
@@ -97,9 +92,8 @@ class GoalTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// LadderTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- LadderTool ---
+
 class LadderTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Ladder"; }
@@ -141,9 +135,8 @@ class LadderTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// SlopeTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- SlopeTool ---
+
 class SlopeTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Slope"; }
@@ -208,9 +201,8 @@ class SlopeTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// HazardTool
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- HazardTool ---
+
 class HazardTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Hazard"; }
@@ -254,9 +246,8 @@ class HazardTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AntiGravTool (Float)
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- AntiGravTool (Float) ---
+
 class AntiGravTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Float"; }
@@ -285,10 +276,9 @@ class AntiGravTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ShooterTool (Turret)
-// Left-click a tile to toggle shooter, right-click to cycle side (Top/Right/Bottom/Left).
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- ShooterTool (Turret) ---
+// LClick toggles shooter, RClick cycles side (Top/Right/Bottom/Left).
+
 class ShooterTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Turret"; }
@@ -345,11 +335,10 @@ class ShooterTool final : public EditorTool {
     }
 };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// ShieldTool
-// Left-click a tile to toggle shield pickup. Automatically adds ActionTag
-// (hitsRequired=1) so the tile is slashable to pick up.
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- ShieldTool ---
+// LClick toggles shield pickup. Automatically adds ActionTag (hitsRequired=1)
+// so the tile is slashable to pick up.
+
 class ShieldTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Shield"; }

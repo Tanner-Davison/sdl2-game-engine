@@ -1,21 +1,6 @@
 #pragma once
-// TileAnimCreatorScene.hpp
-// ────────────────────────────────────────────────────────────────────────────
-// A standalone scene for creating and saving animated tile definitions.
-//
-// Layout (three panels):
-//
-//  [Frame List]  [Preview + Drop Zone]  [Saved Animations Roster]
-//
-// Workflows:
-//  A) Folder drop  → auto-import all PNGs from a folder, sorted numerically
-//  B) Manual build → drag PNGs one at a time onto the "Add frame" drop zone
-//     (they stack up in the frame list in order)
-//
-// Result: writes game_assets/tiles/animated_tiles/<name>.json
-// The Level Editor's palette will then show an "Animated Tiles" virtual
-// folder that lists every saved manifest.
-// ────────────────────────────────────────────────────────────────────────────
+// TileAnimCreatorScene.hpp — Create/save animated tile definitions.
+// Drop a folder or individual PNGs, preview, save to animated_tiles/<name>.json.
 
 #include "AnimatedTile.hpp"
 #include "Rectangle.hpp"
@@ -42,44 +27,35 @@ class TileAnimCreatorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    // ── Constants ─────────────────────────────────────────────────────────────
     static constexpr int   PAD         = 14;
     static constexpr int   PREVIEW_SZ  = 280;  // square preview area
     static constexpr int   FRAME_ROW_H = 52;
     static constexpr float DEFAULT_FPS = 8.0f;
 
-    // ── Window info ───────────────────────────────────────────────────────────
     int         mW = 0, mH = 0;
     SDL_Window* mSDLWin = nullptr;
     bool        mGoBack = false;
 
-    // ── Working definition ────────────────────────────────────────────────────
     AnimatedTileDef              mDef;
     std::vector<SDL_Surface*>    mFrameSurfs; // parallel to mDef.framePaths, owned here
 
-    // ── Name field ────────────────────────────────────────────────────────────
     bool        mNameActive = false;
     std::string mSaveMsg;   // feedback after save
 
-    // ── Preview playback ──────────────────────────────────────────────────────
     float mAnimTimer  = 0.0f;
     int   mAnimFrame  = 0;
     bool  mPaused     = false;
 
-    // FPS field editing
     bool        mFpsActive   = false;
     std::string mFpsEditStr; // string buffer while editing
 
-    // ── Drop state ────────────────────────────────────────────────────────────
     bool        mDropHover     = false;  // file hovering over drop zone
     bool        mFolderHover   = false;  // file hovering over folder-drop zone
     std::string mDropMsg;
 
-    // ── Frame list selection ──────────────────────────────────────────────────
     int  mSelectedFrame  = -1;  // highlighted frame in the list
     int  mFrameScroll    = 0;   // scroll offset for the frame list
 
-    // ── Roster (saved manifests) ──────────────────────────────────────────────
     struct RosterEntry {
         std::string name;
         std::string path;
@@ -91,7 +67,6 @@ class TileAnimCreatorScene : public Scene {
     void refreshRoster();
     void loadRosterEntry(int idx);
 
-    // ── Layout rects ──────────────────────────────────────────────────────────
     SDL_Rect mFramePanel{};    // left — frame list
     SDL_Rect mCenterPanel{};   // middle — preview + controls
     SDL_Rect mRosterPanel{};   // right — saved animations
@@ -111,24 +86,17 @@ class TileAnimCreatorScene : public Scene {
 
     void computeLayout();
 
-    // ── Import helpers ────────────────────────────────────────────────────────
-    // Import all PNGs from a directory (sorted numerically)
     void importFolder(const std::string& dir);
-    // Import a single PNG, append to frame list
     void importSingleFrame(const std::string& path);
-    // Sort frame paths numerically (handles "1.png", "02.png", etc.)
     void sortFramesNumerically();
 
-    // Free all owned frame surfaces
     void clearFrames();
 
-    // ── Text input helpers ────────────────────────────────────────────────────
     void startNameInput();
     void stopNameInput();
     void startFpsInput();
     void stopFpsInput();
 
-    // ── Draw helpers ──────────────────────────────────────────────────────────
     static void fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);
     static void drawText(SDL_Surface* s, const std::string& str,
@@ -139,7 +107,6 @@ class TileAnimCreatorScene : public Scene {
                                  SDL_Color col = {220, 220, 220, 255});
     static void blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect);
 
-    // ── Colours ───────────────────────────────────────────────────────────────
     static constexpr SDL_Color BG         = {18,  20,  30,  255};
     static constexpr SDL_Color PANEL_BG   = {28,  32,  50,  255};
     static constexpr SDL_Color PANEL_OUT  = {60,  70, 110,  255};

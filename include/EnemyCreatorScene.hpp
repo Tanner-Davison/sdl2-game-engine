@@ -16,24 +16,6 @@
 
 namespace fs = std::filesystem;
 
-// ────────────────────────────────────────────────────────────────────────────
-// EnemyCreatorScene
-//
-// Full-screen enemy-type creation UI.  Layout (left -> right):
-//
-//   [Slot List Panel]  [Preview + Hitbox Editor + Fields]  [Roster Panel]
-//
-// Workflow:
-//   1. User types an enemy name in the name field.
-//   2. User clicks a slot row to select it (Idle, Move, Hit, Dead).
-//   3. User drops a folder of PNGs (or a single PNG) onto the Drop Zone.
-//   4. The preview starts playing the animation frames.
-//   5. User drags the hitbox handles in the preview to define a custom rect.
-//   6. User sets speed, health, and sprite size in the fields.
-//   7. User clicks Save -> written to enemies/<name>.json.
-//   8. Saved enemies appear in the Roster panel on the right.
-//   9. Back button -> returns to TitleScene.
-// ────────────────────────────────────────────────────────────────────────────
 class EnemyCreatorScene : public Scene {
   public:
     void Load(Window& window) override;
@@ -44,7 +26,7 @@ class EnemyCreatorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    // ── Layout constants ──────────────────────────────────────────────────────
+    // --- Layout constants ---
     static constexpr int PANEL_PAD     = 14;
     static constexpr int SLOT_ROW_H    = 46;
     static constexpr int PREVIEW_W     = 160;
@@ -53,21 +35,18 @@ class EnemyCreatorScene : public Scene {
     static constexpr float ANIM_FPS    = 10.0f;
     static constexpr int HB_HANDLE_SZ  = 14;
 
-    // ── State flags ───────────────────────────────────────────────────────────
+    // --- State ---
     bool mGoBack         = false;
     int  mW              = 0;
     int  mH              = 0;
     SDL_Window* mSDLWin  = nullptr;
 
-    // ── Active profile being edited ───────────────────────────────────────────
     EnemyProfile mProfile;
 
-    // ── Name field ────────────────────────────────────────────────────────────
     bool        mNameActive    = false;
     std::string mNameError;
     std::string mLoadedName;
 
-    // ── Numeric fields (sprite size, speed, health) ───────────────────────────
     enum class NumField { None, Width, Height, Speed, Health };
     NumField    mNumFieldActive = NumField::None;
     std::string mWidthStr   = "40";
@@ -79,14 +58,14 @@ class EnemyCreatorScene : public Scene {
     SDL_Rect    mSpeedRect{};
     SDL_Rect    mHealthRect{};
 
-    // ── Per-slot FPS stepper ──────────────────────────────────────────────────
+    // --- Per-slot FPS stepper ---
     struct SlotFpsButtons {
         SDL_Rect minusRect{};
         SDL_Rect plusRect{};
     };
     std::array<SlotFpsButtons, ENEMY_ANIM_SLOT_COUNT> mFpsBtns;
 
-    // ── Per-file SFX UI ──────────────────────────────────────────────────────
+    // --- Per-file SFX UI ---
     struct SfxFileUI {
         SDL_Rect nameRect{};
         SDL_Rect clearRect{};
@@ -117,15 +96,13 @@ class EnemyCreatorScene : public Scene {
         return ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac";
     }
 
-    // ── Slot selection ────────────────────────────────────────────────────────
     int  mSelectedSlot = 0;
 
-    // ── Drop zone ─────────────────────────────────────────────────────────────
     SDL_Rect    mDropZone{};
     bool        mDropHover    = false;
     std::string mDropMsg;
 
-    // ── Animation preview ─────────────────────────────────────────────────────
+    // --- Animation preview ---
     struct SlotPreview {
         std::unique_ptr<SpriteSheet>  sheet;
         std::vector<SDL_Rect>         frames;
@@ -143,13 +120,13 @@ class EnemyCreatorScene : public Scene {
     void clearPreview(int slotIdx);
     void deleteFrame(int slotIdx, int frameIdx);
 
-    // ── Frame strip ───────────────────────────────────────────────────────────
+    // --- Frame strip ---
     int  mFrameStripScroll = 0;
     static constexpr int FRAME_THUMB_SZ = 48;
     static constexpr int FRAME_STRIP_H  = 68;
     std::vector<SDL_Rect> mFrameDelRects;
 
-    // ── Hitbox editor ─────────────────────────────────────────────────────────
+    // --- Hitbox editor ---
     SDL_Rect mHBRect{};
     bool     mHBEditing = false;
     int      mHBDragHandle = -1;
@@ -165,7 +142,7 @@ class EnemyCreatorScene : public Scene {
     int  hitboxHandleAt(int mx, int my) const;
     void renderHitboxOverlay(SDL_Surface* surf) const;
 
-    // ── Roster (right panel) ──────────────────────────────────────────────────
+    // --- Roster ---
     struct RosterEntry {
         std::string name;
         std::string path;
@@ -177,7 +154,7 @@ class EnemyCreatorScene : public Scene {
     void refreshRoster();
     void loadRosterEntry(int idx);
 
-    // ── Layout rects ──────────────────────────────────────────────────────────
+    // --- Layout rects ---
     SDL_Rect mSlotPanel{};
     SDL_Rect mCenterPanel{};
     SDL_Rect mRosterPanel{};
@@ -201,11 +178,10 @@ class EnemyCreatorScene : public Scene {
         }
     }
 
-    // ── Text input ────────────────────────────────────────────────────────────
     void startTextInput();
     void stopTextInput();
 
-    // ── Draw helpers ──────────────────────────────────────────────────────────
+    // --- Draw helpers ---
     static void fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);
     static void drawText(SDL_Surface* s, const std::string& str,
@@ -216,7 +192,7 @@ class EnemyCreatorScene : public Scene {
                                  SDL_Color col = {220, 220, 220, 255});
     static void blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect);
 
-    // ── Colours ───────────────────────────────────────────────────────────────
+    // --- Colours ---
     static constexpr SDL_Color BG          = {18,  20,  30,  255};
     static constexpr SDL_Color PANEL_BG    = {28,  32,  50,  255};
     static constexpr SDL_Color PANEL_OUT   = {60,  70, 110,  255};
@@ -231,6 +207,5 @@ class EnemyCreatorScene : public Scene {
     static constexpr SDL_Color BTN_DEL     = {160, 50,  50,  255};
     static constexpr SDL_Color BTN_LOAD    = {180, 100, 40,  255};
 
-    // ── Clamp helper ──────────────────────────────────────────────────────────
     static SDL_Rect normaliseRect(SDL_Rect r);
 };

@@ -16,23 +16,6 @@
 
 namespace fs = std::filesystem;
 
-// ────────────────────────────────────────────────────────────────────────────
-// PlayerCreatorScene
-//
-// Full-screen character-creation UI.  Layout (left → right):
-//
-//   [Slot List Panel]  [Animation Preview + Hitbox Editor]  [Roster Panel]
-//
-// Workflow:
-//   1. User types a character name in the name field.
-//   2. User clicks a slot row to select it.
-//   3. User drops a folder of PNGs onto the Drop Zone — slot gets the path.
-//   4. The preview starts playing the animation frames at 12 fps.
-//   5. User drags the hitbox handles in the preview to define a custom rect.
-//   6. User clicks Save → written to players/<name>.json.
-//   7. Saved characters appear in the Roster panel on the right.
-//   8. Back button → returns to TitleScene.
-// ────────────────────────────────────────────────────────────────────────────
 class PlayerCreatorScene : public Scene {
   public:
     void Load(Window& window) override;
@@ -43,98 +26,87 @@ class PlayerCreatorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    // ── Layout constants ──────────────────────────────────────────────────────
+    // --- Layout constants ---
     static constexpr int PANEL_PAD     = 14;
     static constexpr int SLOT_ROW_H    = 64;  // 46 base + 18 for SFX strip
-    static constexpr int PREVIEW_W     = 160;  // fallback cell size
+    static constexpr int PREVIEW_W     = 160;
     static constexpr int PREVIEW_H     = 160;
-    static constexpr int PREVIEW_PAD   = 16;   // padding around sprite in cell
+    static constexpr int PREVIEW_PAD   = 16;
     static constexpr float ANIM_FPS    = 10.0f;
-    static constexpr int HB_HANDLE_SZ  = 14;  // hitbox corner handle size in px (render + hit test)
+    static constexpr int HB_HANDLE_SZ  = 14;
 
-    // ── State flags ───────────────────────────────────────────────────────────
+    // --- State ---
     bool mGoBack         = false;
     int  mW              = 0;
     int  mH              = 0;
     SDL_Window* mSDLWin  = nullptr;
 
-    // ── Active profile being edited ───────────────────────────────────────────
     PlayerProfile mProfile;
 
-    // ── Name field ────────────────────────────────────────────────────────────
-    bool        mNameActive    = false;  // true while name text field is focused
+    bool        mNameActive    = false;
     std::string mNameError;
-    std::string mLoadedName;             // original name when loaded from roster (empty = new character)
+    std::string mLoadedName;  // original name when loaded (empty = new character)
 
-    // ── Sprite size fields ────────────────────────────────────────────────────
     enum class SizeField { None, Width, Height };
     SizeField   mSizeActive   = SizeField::None;
-    std::string mWidthStr     = "120";   // display string while editing
+    std::string mWidthStr     = "120";
     std::string mHeightStr    = "160";
     SDL_Rect    mWidthRect{};
     SDL_Rect    mHeightRect{};
 
-    // ── Per-slot FPS stepper ──────────────────────────────────────────────────
-    // Displayed in the slot list rows as  "- 12 fps +"  click buttons
+    // --- Per-slot FPS stepper ---
     struct SlotFpsButtons {
         SDL_Rect minusRect{};
         SDL_Rect plusRect{};
     };
     std::array<SlotFpsButtons, PLAYER_ANIM_SLOT_COUNT> mFpsBtns;
 
-    // ── Per-file SFX UI ──────────────────────────────────────────────────────
+    // --- Per-file SFX UI ---
     struct SfxFileUI {
         SDL_Rect nameRect{};
         SDL_Rect clearRect{};
         SDL_Rect stretchRect{};
-        SDL_Rect sliderRect{};     // volume slider track (blue)
-        SDL_Rect trimSliderRect{}; // trim range slider track (orange)
+        SDL_Rect sliderRect{};
+        SDL_Rect trimSliderRect{};
     };
     std::array<std::vector<SfxFileUI>, PLAYER_ANIM_SLOT_COUNT> mSfxFileUI;
     int  mVolDragSlot   = -1;
     int  mVolDragFile   = -1;
-    int  mTrimDragSlot  = -1;     // which slot's trim slider is being dragged
+    int  mTrimDragSlot  = -1;
     int  mTrimDragFile  = -1;
-    int  mTrimDragHandle = -1;    // 0 = start handle, 1 = end handle
+    int  mTrimDragHandle = -1;  // 0 = start handle, 1 = end handle
 
-    // SFX preview (loops trimmed audio while slot is selected)
-    int  mSelectedSfxFile = 0;    // which SFX file in the slot is selected for preview
+    int  mSelectedSfxFile = 0;
     std::string mPreviewSfxId;
     std::string mPreviewPath;
     int  mPreviewSlot  = -1;
     int  mPreviewFile  = -1;
     float mPreviewTimer = 0.0f;
     bool  mPreviewPlaying = false;
-    // mSfxDropRect[slot] = the "drop audio file" zone at the bottom of each slot
     std::array<SDL_Rect, PLAYER_ANIM_SLOT_COUNT> mSfxDropRect;
     int  mSfxDropHoverSlot = -1;
 
-    // Returns true if the file extension is an audio format we support
     static bool isAudioFile(const std::filesystem::path& p) {
         auto ext = p.extension().string();
-        // lowercase compare
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         return ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac";
     }
 
-    // ── Slot selection ────────────────────────────────────────────────────────
-    int  mSelectedSlot = 0;   // which PlayerAnimSlot row is highlighted
+    int  mSelectedSlot = 0;
 
-    // ── Drop zone ────────────────────────────────────────────────────────────
     SDL_Rect    mDropZone{};
-    bool        mDropHover    = false;  // file is being dragged over the zone
-    std::string mDropMsg;              // feedback after a drop
+    bool        mDropHover    = false;
+    std::string mDropMsg;
 
-    // ── Animation preview ────────────────────────────────────────────────────
+    // --- Animation preview ---
     struct SlotPreview {
-        std::unique_ptr<SpriteSheet>  sheet;  // stitched sprite sheet for this slot
-        std::vector<SDL_Rect>         frames; // frame rects inside sheet->GetSurface()
-        std::vector<std::string>      paths;  // sorted PNG file paths (parallel to frames)
+        std::unique_ptr<SpriteSheet>  sheet;
+        std::vector<SDL_Rect>         frames;
+        std::vector<std::string>      paths;
         int                           frameW = 0;
         int                           frameH = 0;
     };
 
-    // One preview per slot (lazily built when a folder is assigned)
     std::array<std::optional<SlotPreview>, PLAYER_ANIM_SLOT_COUNT> mPreviews;
 
     float mAnimTimer  = 0.0f;
@@ -145,32 +117,31 @@ class PlayerCreatorScene : public Scene {
     void deleteFrame(int slotIdx, int frameIdx);
     void duplicateFrame(int slotIdx, int frameIdx);
 
-    // ── Frame strip ───────────────────────────────────────────────────────────
-    int  mFrameStripScroll = 0;   // horizontal scroll offset (in frames)
-    static constexpr int FRAME_THUMB_SZ = 48;  // thumbnail size in the strip
-    static constexpr int FRAME_STRIP_H  = 68;  // total height of strip area
-    std::vector<SDL_Rect> mFrameDelRects; // per-frame delete button rects (rebuilt each render)
-    std::vector<SDL_Rect> mFrameDupRects; // per-frame duplicate button rects
+    // --- Frame strip ---
+    int  mFrameStripScroll = 0;
+    static constexpr int FRAME_THUMB_SZ = 48;
+    static constexpr int FRAME_STRIP_H  = 68;
+    std::vector<SDL_Rect> mFrameDelRects;
+    std::vector<SDL_Rect> mFrameDupRects;
 
-    // ── Hitbox editor ────────────────────────────────────────────────────────
-    // The hitbox rect is drawn/edited in *preview-local* coordinates.
-    // Preview-local (0,0) = top-left of the scaled sprite frame displayed on screen.
-    SDL_Rect mHBRect{};         // current hitbox in preview-local px
-    bool     mHBEditing = false; // user is actively dragging a corner/edge
-    int      mHBDragHandle = -1; // which handle is being dragged (-1 = none, 0=TL,1=TR,2=BR,3=BL,4=body)
+    // --- Hitbox editor ---
+    // Hitbox rect is in preview-local coordinates (0,0 = top-left of scaled sprite)
+    SDL_Rect mHBRect{};
+    bool     mHBEditing = false;
+    int      mHBDragHandle = -1; // -1=none, 0=TL, 1=TR, 2=BR, 3=BL, 4=body
     int      mHBDragStartMX = 0, mHBDragStartMY = 0;
     SDL_Rect mHBDragStartRect{};
-    bool     mHBInitialised = false; // has mHBRect been populated for current slot?
-    SDL_Rect mPreviewCellRect{};     // fixed PREVIEW_W x PREVIEW_H cell in the centre panel
-    SDL_Rect mPreviewRenderRect{};   // actual sprite draw rect (bottom-aligned inside cell)
+    bool     mHBInitialised = false;
+    SDL_Rect mPreviewCellRect{};
+    SDL_Rect mPreviewRenderRect{};
 
-    void recomputePreviewRect();   // called when spriteW/H changes
+    void recomputePreviewRect();
     void initHBFromProfile(int slotIdx);
     void commitHBToProfile(int slotIdx);
-    int  hitboxHandleAt(int mx, int my) const; // -1 = none
+    int  hitboxHandleAt(int mx, int my) const;
     void renderHitboxOverlay(SDL_Surface* surf) const;
 
-    // ── Roster (right panel) ──────────────────────────────────────────────────
+    // --- Roster ---
     struct RosterEntry {
         std::string           name;
         std::string           path;
@@ -178,26 +149,24 @@ class PlayerCreatorScene : public Scene {
         SDL_Rect              delRect{};
     };
     std::vector<RosterEntry> mRoster;
-    int                      mRosterScroll = 0;  // row offset for scrolling
+    int                      mRosterScroll = 0;
     void refreshRoster();
     void loadRosterEntry(int idx);
 
-    // ── Layout rects (computed in Load / resize) ──────────────────────────────
-    SDL_Rect mSlotPanel{};    // left
-    SDL_Rect mCenterPanel{};  // middle
-    SDL_Rect mRosterPanel{};  // right
+    // --- Layout rects ---
+    SDL_Rect mSlotPanel{};
+    SDL_Rect mCenterPanel{};
+    SDL_Rect mRosterPanel{};
 
     SDL_Rect mNameFieldRect{};
     SDL_Rect mSaveBtnRect{};
     SDL_Rect mBackBtnRect{};
     SDL_Rect mClearSlotRect{};
 
-    std::vector<SDL_Rect> mSlotRowRects;  // one per slot
+    std::vector<SDL_Rect> mSlotRowRects;
 
     void computeLayout();
 
-    // Returns the engine's built-in FPS for a slot (used as starting point when
-    // the user first clicks + on a slot that has no override yet)
     static float defaultFps(PlayerAnimSlot s) {
         switch (s) {
             case PlayerAnimSlot::Walk:   return 24.0f;
@@ -208,11 +177,10 @@ class PlayerCreatorScene : public Scene {
         }
     }
 
-    // ── Text input ───────────────────────────────────────────────────────────
     void startTextInput();
     void stopTextInput();
 
-    // ── Draw helpers (same pattern as TitleScene) ─────────────────────────────
+    // --- Draw helpers ---
     static void fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);
     static void drawText(SDL_Surface* s, const std::string& str,
@@ -221,11 +189,9 @@ class PlayerCreatorScene : public Scene {
     static void drawTextCentered(SDL_Surface* s, const std::string& str,
                                  SDL_Rect r, int ptSize,
                                  SDL_Color col = {220, 220, 220, 255});
-
-    // Blit a scaled copy of src into dst rect on surface, keeping aspect ratio
     static void blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect);
 
-    // ── Colours ───────────────────────────────────────────────────────────────
+    // --- Colours ---
     static constexpr SDL_Color BG          = {18,  20,  30,  255};
     static constexpr SDL_Color PANEL_BG    = {28,  32,  50,  255};
     static constexpr SDL_Color PANEL_OUT   = {60,  70, 110,  255};
@@ -240,6 +206,5 @@ class PlayerCreatorScene : public Scene {
     static constexpr SDL_Color BTN_DEL     = {160, 50,  50,  255};
     static constexpr SDL_Color BTN_LOAD    = {40, 100, 180,  255};
 
-    // ── Clamp helper ──────────────────────────────────────────────────────────
     static SDL_Rect normaliseRect(SDL_Rect r);
 };

@@ -4,9 +4,7 @@
 #include <cmath>
 #include <print>
 
-// =========================================================================
-// Construction / destruction / move
-// =========================================================================
+// --- Construction / destruction / move ---
 
 Image::Image(std::string File, FitMode mode)
     : mFitMode(mode) {
@@ -66,9 +64,7 @@ Image& Image::operator=(Image&& o) noexcept {
     return *this;
 }
 
-// =========================================================================
-// Private helpers
-// =========================================================================
+// --- Private helpers ---
 
 void Image::UploadSurface(SDL_Renderer* renderer) {
     if (!mPendingSurface) return;
@@ -82,24 +78,17 @@ void Image::UploadSurface(SDL_Renderer* renderer) {
 }
 
 static void GetLogicalSize(SDL_Renderer* renderer, int& w, int& h) {
-    // Get the LOGICAL window size — the coordinate space that all
-    // SDL_Render* calls operate in when SetRenderLogicalPresentation
-    // is active. We query the window directly because
-    // SDL_GetCurrentRenderOutputSize may still return physical pixels
-    // on some platforms/configurations.
+    // Query window directly for logical coords (output size may be physical pixels)
     SDL_Window* win = SDL_GetRenderWindow(renderer);
     if (win) {
         SDL_GetWindowSize(win, &w, &h);
         return;
     }
-    // Fallback if no window (software renderer, etc.)
     if (!SDL_GetCurrentRenderOutputSize(renderer, &w, &h))
         SDL_GetRenderOutputSize(renderer, &w, &h);
 }
 
-// =========================================================================
-// ComputeDest - static (non-scrolling) fit modes
-// =========================================================================
+// --- ComputeDest ---
 
 SDL_FRect Image::ComputeDest(int vw, int vh) const {
     if (mHasExplicitDest) return mExplicitDest;
@@ -136,9 +125,7 @@ SDL_FRect Image::ComputeDest(int vw, int vh) const {
     }
 }
 
-// =========================================================================
-// Render - static modes
-// =========================================================================
+// --- Render ---
 
 void Image::Render(SDL_Renderer* renderer) {
     if (!renderer) return;
@@ -153,43 +140,9 @@ void Image::Render(SDL_Renderer* renderer) {
     SDL_RenderTextureRotated(renderer, mTexture, nullptr, &dst, 0.0, nullptr, flip);
 }
 
-// =========================================================================
-// ScrollHelper - shared logic for SCROLL and SCROLL_WIDE
-// =========================================================================
-//
-// Both scroll modes use the same rendering approach:
-//
-//   1. Scale the image so it FILLS the viewport (no black bars, ever).
-//      This uses COVER-fit: scale = max(vpW/imgW, vpH/imgH).
-//
-//      - If the image is wider than the viewport ratio: height-fill wins,
-//        the width extends past the viewport = horizontal scroll range.
-//
-//      - If the image is taller than the viewport ratio: width-fill wins,
-//        height extends past viewport (excess cropped top/bottom, centred).
-//        The width exactly matches the viewport = no horizontal scroll,
-//        but the image fills the screen with no black bars.
-//
-//      - If the image exactly matches the viewport ratio: perfect fit,
-//        no scroll, no crop.
-//
-//   2. Slide the dst rect horizontally based on camera position.
-//
-//      Gameplay (levelW > vpW):
-//        t = cameraX / (levelW - vpW), maps [0..1] to [0..scrollRange]
-//
-//      Editor (levelW == 0):
-//        Map camera world-space to background world-space. The background
-//        occupies [0..imgW] in world units. The camera sees vpW/scale
-//        world-units of width. So the camera's scrollable world range is
-//        imgW - vpW/scale. Map that to the display scroll range.
-//
-// SCROLL vs SCROLL_WIDE difference:
-//   SCROLL:      parallaxFactor = 1.0 (background scrolls at full speed)
-//   SCROLL_WIDE: parallaxFactor = 0.5 (background scrolls at half speed,
-//                creating a depth/parallax effect for extra-wide images)
-//
-// =========================================================================
+// --- ScrollHelper ---
+// COVER-fit (no black bars), then slide horizontally with camera.
+// SCROLL uses parallaxFactor=1.0, SCROLL_WIDE uses 0.5 for depth effect.
 
 static void ScrollHelper(SDL_Renderer* renderer, SDL_Texture* texture,
                          int origW, int origH, bool flipH, bool repeat,
@@ -204,37 +157,27 @@ static void ScrollHelper(SDL_Renderer* renderer, SDL_Texture* texture,
     const float imgH = static_cast<float>(origH);
     if (imgW < 1.f || imgH < 1.f || vpW < 1.f || vpH < 1.f) return;
 
-    // COVER-fit: always fill the viewport. No black bars ever.
     float scale = std::max(vpW / imgW, vpH / imgH);
     float dispW = imgW * scale;
     float dispH = imgH * scale;
 
-    // Centre vertically (crops top/bottom equally for tall images).
     float offsetY = (vpH - dispH) * 0.5f;
 
     SDL_FlipMode flip = flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
     if (repeat) {
-        // ── Tiling / infinite scroll ──────────────────────────────────────
-        // The camera scrolls 1:1 with the background (scaled to display
-        // coordinates). We compute which tile index is visible and draw
-        // enough copies to fill the viewport.
         float camDisplay = cameraX * scale * parallaxFactor;
 
-        // fmod to get the offset within one tile period.
-        // Use fmod that works for negative values too.
         float raw = std::fmod(camDisplay, dispW);
         if (raw < 0.0f) raw += dispW;
         float startX = -raw;
 
-        // Draw tiles from startX until we pass the right edge of the viewport.
         for (float x = startX; x < vpW; x += dispW) {
             SDL_FRect dst = {x, offsetY, dispW, dispH};
             SDL_RenderTextureRotated(renderer, texture, nullptr, &dst,
                                      0.0, nullptr, flip);
         }
     } else {
-        // ── Single image, clamped scroll ──────────────────────────────────
         float scrollRange = dispW - vpW;
         float offsetX = 0.0f;
 
@@ -258,13 +201,7 @@ static void ScrollHelper(SDL_Renderer* renderer, SDL_Texture* texture,
     }
 }
 
-// =========================================================================
-// RenderScrolling  (SCROLL mode)
-// =========================================================================
-// Full-speed scrolling. Background scrolls 1:1 with camera.
-// Image fills viewport (COVER-fit). Excess width scrolls horizontally.
-// Excess height is cropped and centred vertically.
-// =========================================================================
+// --- RenderScrolling ---
 
 void Image::RenderScrolling(SDL_Renderer* renderer, float cameraX, float levelW) {
     if (!renderer) return;
@@ -274,13 +211,7 @@ void Image::RenderScrolling(SDL_Renderer* renderer, float cameraX, float levelW)
                  cameraX, levelW, 1.0f);
 }
 
-// =========================================================================
-// RenderScrollingWide  (SCROLL_WIDE mode)
-// =========================================================================
-// Half-speed parallax scrolling for extra-wide panoramic images.
-// Image fills viewport (COVER-fit). Excess width scrolls at 50% speed
-// relative to camera, creating a depth effect.
-// =========================================================================
+// --- RenderScrollingWide ---
 
 void Image::RenderScrollingWide(SDL_Renderer* renderer, float cameraX, float levelW) {
     if (!renderer) return;
@@ -289,10 +220,6 @@ void Image::RenderScrollingWide(SDL_Renderer* renderer, float cameraX, float lev
     ScrollHelper(renderer, mTexture, mOrigW, mOrigH, mFlipH, mRepeat,
                  cameraX, levelW, 0.5f);
 }
-
-// =========================================================================
-// Setters / getters / utilities
-// =========================================================================
 
 void Image::SetDestinationRectangle(SDL_FRect dest) {
     mExplicitDest    = dest;

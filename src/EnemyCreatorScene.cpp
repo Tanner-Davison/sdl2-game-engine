@@ -11,17 +11,11 @@
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small inline helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 static bool hit(const SDL_Rect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scene interface
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Scene interface ---
 
 void EnemyCreatorScene::Load(Window& window) {
     mW      = window.GetWidth();
@@ -47,9 +41,7 @@ void EnemyCreatorScene::Unload() {
     stopTextInput();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Layout
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Layout ---
 
 void EnemyCreatorScene::computeLayout() {
     const int PAD   = PANEL_PAD;
@@ -64,19 +56,15 @@ void EnemyCreatorScene::computeLayout() {
     mCenterPanel = {PAD * 2 + LEFT_W,        40,  MID_W,   H - 80};
     mRosterPanel = {PAD * 3 + LEFT_W + MID_W, 40, RIGHT_W, H - 80};
 
-    // Name field
     mNameFieldRect = {mCenterPanel.x, mCenterPanel.y + 40, MID_W - 2, 36};
 
-    // Sprite size fields (with room for labels above)
     const int sfW = (MID_W - 6) / 2;
     mWidthRect  = {mCenterPanel.x,           mCenterPanel.y + 96, sfW, 32};
     mHeightRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 96, sfW, 32};
 
-    // Speed and Health fields — row below sprite size (with room for labels above)
     mSpeedRect  = {mCenterPanel.x,           mCenterPanel.y + 148, sfW, 32};
     mHealthRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 148, sfW, 32};
 
-    // Save & Back buttons
     mSaveBtnRect = {mCenterPanel.x,                mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
     mBackBtnRect = {mCenterPanel.x + MID_W - 130,  mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
 
@@ -85,7 +73,6 @@ void EnemyCreatorScene::computeLayout() {
     mDropZone          = {};
     mClearSlotRect     = {};
 
-    // Slot rows
     mSlotRowRects.resize(ENEMY_ANIM_SLOT_COUNT);
     int ry = mSlotPanel.y + 40;
     for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
@@ -131,18 +118,14 @@ void EnemyCreatorScene::computeLayout() {
     recomputePreviewRect();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Events
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Events ---
 
 bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) return false;
 
-    // ── File drag enter/hover ─────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_BEGIN) { mDropHover = true; return true; }
     if (e.type == SDL_EVENT_DROP_COMPLETE) { mDropHover = false; return true; }
 
-    // ── File / directory drop ─────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_FILE || e.type == SDL_EVENT_DROP_TEXT) {
         mDropHover = false;
         mSfxDropHoverSlot = -1;
@@ -177,13 +160,11 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
 
             std::string dir;
 
-            // Support both single PNG files and directories of PNGs
             if (fs::is_directory(p)) {
                 dir = dropped;
             } else if (fs::is_regular_file(p)) {
                 auto ext = p.extension().string();
                 if (ext == ".png" || ext == ".PNG") {
-                    // Single file drop: use parent directory
                     dir = p.parent_path().string();
                 }
             }
@@ -213,7 +194,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // ── Numeric field input ───────────────────────────────────────────────────
     if (mNumFieldActive != NumField::None) {
         std::string* str = nullptr;
         switch (mNumFieldActive) {
@@ -234,7 +214,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         if (e.type == SDL_EVENT_KEY_DOWN) {
             if (e.key.key == SDLK_BACKSPACE && !str->empty()) { str->pop_back(); return true; }
             if (e.key.key == SDLK_RETURN || e.key.key == SDLK_ESCAPE) {
-                // Commit value
                 float val = str->empty() ? 0.0f : std::stof(*str);
                 switch (mNumFieldActive) {
                     case NumField::Width:  mProfile.spriteW = (int)val; break;
@@ -253,7 +232,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // ── Name field input ──────────────────────────────────────────────────────
     if (mNameActive) {
         if (e.type == SDL_EVENT_TEXT_INPUT) {
             for (char c : std::string(e.text.text))
@@ -276,7 +254,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // ── Keyboard ──────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_KEY_DOWN) {
         if (e.key.key == SDLK_DOWN || e.key.key == SDLK_S) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
@@ -295,7 +272,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         if (e.key.key == SDLK_ESCAPE) { mGoBack = true; }
     }
 
-    // ── Mouse motion ──────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx = (int)e.motion.x, my = (int)e.motion.y;
         if (mVolDragSlot >= 0 && mVolDragFile >= 0) {
@@ -331,11 +307,9 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Mouse down ────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
 
-        // Per-file SFX controls (TS, slider, remove) — clicking any part selects it for preview
         for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
             for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
                 const auto& ui = mSfxFileUI[i][fi];
@@ -382,7 +356,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // FPS +/- buttons
         for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
             auto slot = static_cast<EnemyAnimSlot>(i);
             float& fps = mProfile.Slot(slot).fps;
@@ -396,7 +369,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Slot row click
         for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
             if (hit(mSlotRowRects[i], mx, my)) {
                 if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
@@ -408,7 +380,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Numeric field clicks
         auto activateNumField = [&](NumField f, const SDL_Rect& r, std::string& s, auto getter) {
             if (hit(r, mx, my)) {
                 s = std::to_string((int)getter());
@@ -436,7 +407,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Name field click
         if (hit(mNameFieldRect, mx, my)) {
             mProfile.name.clear();
             mNameError.clear();
@@ -445,7 +415,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         } else {
             if (mNameActive) stopTextInput();
-            // Commit numeric field on blur
             if (mNumFieldActive != NumField::None) {
                 std::string* str = nullptr;
                 switch (mNumFieldActive) {
@@ -472,14 +441,12 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Back button
         if (hit(mBackBtnRect, mx, my)) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mGoBack = true;
             return true;
         }
 
-        // Save button
         if (hit(mSaveBtnRect, mx, my)) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             if (mProfile.name.empty()) {
@@ -499,7 +466,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Clear slot button
         if (hit(mClearSlotRect, mx, my)) {
             auto& slot = mProfile.Slot(static_cast<EnemyAnimSlot>(mSelectedSlot));
             slot.folderPath.clear();
@@ -511,7 +477,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Frame strip delete buttons
         if (!mFrameDelRects.empty()) {
             for (int i = 0; i < (int)mFrameDelRects.size(); ++i) {
                 if (mFrameDelRects[i].w > 0 && hit(mFrameDelRects[i], mx, my)) {
@@ -521,7 +486,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Hitbox handle
         int handle = hitboxHandleAt(mx, my);
         if (handle >= 0 && mHBInitialised) {
             mHBEditing       = true;
@@ -532,7 +496,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Roster entry buttons
         for (int i = mRosterScroll; i < (int)mRoster.size(); ++i) {
             auto& entry = mRoster[i];
             if (hit(entry.loadRect, mx, my)) { loadRosterEntry(i); return true; }
@@ -544,7 +507,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Mouse up ──────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
         if (mVolDragSlot >= 0) {
             mVolDragSlot = -1;
@@ -562,7 +524,6 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Scroll ────────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy;
         SDL_GetMouseState(&fmx, &fmy);
@@ -587,9 +548,7 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Update
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Update ---
 
 void EnemyCreatorScene::Update(float dt) {
     const auto& prev = mPreviews[mSelectedSlot];
@@ -658,9 +617,7 @@ void EnemyCreatorScene::Update(float dt) {
     sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Render
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Render ---
 
 void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
     window.Render();
@@ -669,11 +626,9 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
     if (!s) { window.Update(); return; }
 
     fillRect(s, {0, 0, mW, mH}, BG);
-
-    // Title
     drawTextCentered(s, "Enemy Creator", {0, 4, mW, 32}, 24, {255, 180, 160, 255});
 
-    // ── LEFT: Slot panel ──────────────────────────────────────────────────────
+    // --- Left: Slot panel ---
     fillRect(s, mSlotPanel, PANEL_BG);
     outlineRect(s, mSlotPanel, PANEL_OUT);
     drawText(s, "Animation Slots", mSlotPanel.x + 6, mSlotPanel.y + 8, 14, {220, 160, 140, 255});
@@ -703,7 +658,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
                      mSlotRowRects[i].y + (SLOT_ROW_H - 14) / 2, 11, {80, 90, 100, 255});
         }
 
-        // FPS stepper
         {
             float curFps = mProfile.Slot(slot).fps;
             std::string fpsStr = (curFps > 0.0f)
@@ -719,7 +673,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             drawText(s, fpsStr, labelX, mFpsBtns[i].minusRect.y + 2, 10, {160, 170, 200, 255});
         }
 
-        // Per-file SFX rows (name + controls, then slider)
         for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
             const auto& ui = mSfxFileUI[i][fi];
             const auto& entry = mProfile.slots[i].sfx[fi];
@@ -773,7 +726,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             fillRect(s, endKnob,   {255, 200, 100, 255});
         }
 
-        // Drop zone at bottom
         {
             bool sfxHover = (mSfxDropHoverSlot == i);
             SDL_Color dzBg  = sfxHover ? SDL_Color{40, 60, 120, 255} : SDL_Color{25, 30, 45, 255};
@@ -784,11 +736,10 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // ── CENTRE panel ──────────────────────────────────────────────────────────
+    // --- Centre panel ---
     fillRect(s, mCenterPanel, PANEL_BG);
     outlineRect(s, mCenterPanel, PANEL_OUT);
 
-    // Name field
     drawText(s, "Enemy Name:", mCenterPanel.x + 4, mCenterPanel.y + 10, 14, {220, 160, 140, 255});
     SDL_Color fieldOutCol = mNameActive ? SDL_Color{255, 120, 100, 255} : PANEL_OUT;
     fillRect(s, mNameFieldRect, {18, 18, 32, 255});
@@ -799,7 +750,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         drawText(s, mNameError, mNameFieldRect.x, mNameFieldRect.y + mNameFieldRect.h + 2,
                  12, {255, 80, 80, 255});
 
-    // Sprite size fields
     {
         bool wActive = (mNumFieldActive == NumField::Width);
         bool hActive = (mNumFieldActive == NumField::Height);
@@ -815,7 +765,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         drawText(s, hDisplay, mHeightRect.x + 8, mHeightRect.y + 8, 14);
     }
 
-    // Speed and Health fields
     {
         bool sActive = (mNumFieldActive == NumField::Speed);
         bool hlActive = (mNumFieldActive == NumField::Health);
@@ -831,7 +780,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         drawText(s, hlDisplay, mHealthRect.x + 8, mHealthRect.y + 8, 14);
     }
 
-    // Slot label above preview
     std::string slotLabel = std::string(EnemyAnimSlotName(static_cast<EnemyAnimSlot>(mSelectedSlot)))
                           + " Preview";
     if (mProfile.spriteW > 0 && mProfile.spriteH > 0)
@@ -840,7 +788,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
                      {mPreviewCellRect.x, mPreviewCellRect.y - 24, mPreviewCellRect.w, 20},
                      13, {255, 200, 180, 255});
 
-    // Preview area
     fillRect(s, mPreviewCellRect, {10, 12, 22, 255});
     outlineRect(s, mPreviewCellRect, PANEL_OUT);
 
@@ -859,10 +806,8 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         drawTextCentered(s, "No sprite", mPreviewCellRect, 14, {80, 80, 100, 255});
     }
 
-    // Hitbox overlay
     renderHitboxOverlay(s);
 
-    // Drop zone
     {
         SDL_Color dzBg = mDropHover ? DROP_HOVER : DROP_IDLE;
         fillRect(s, mDropZone, dzBg);
@@ -872,13 +817,11 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
                          {mDropZone.x, mDropZone.y, mDropZone.w - 104, mDropZone.h},
                          13, {200, 180, 160, 255});
 
-        // Clear slot button inside drop zone
         fillRect(s, mClearSlotRect, BTN_DEL);
         outlineRect(s, mClearSlotRect, {200, 80, 80, 255});
         drawTextCentered(s, "Clear Slot", mClearSlotRect, 12, {255, 200, 200, 255});
     }
 
-    // Frame strip (thumbnail grid)
     if (prev.has_value() && !prev->frames.empty()) {
         int stripY   = mDropZone.y + mDropZone.h + 8;
         int availW   = mCenterPanel.w - 8;
@@ -905,7 +848,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
                 SDL_BlitSurfaceScaled(sheet, &src, s, &dst, SDL_SCALEMODE_LINEAR);
             }
             outlineRect(s, dst, {60, 60, 80, 255});
-            // Delete button
             SDL_Rect delBtn = {tx + FRAME_THUMB_SZ - 12, ty, 12, 12};
             fillRect(s, delBtn, {180, 40, 40, 220});
             drawTextCentered(s, "x", delBtn, 9, {255, 200, 200, 255});
@@ -913,7 +855,6 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Save & Back buttons
     fillRect(s, mSaveBtnRect, BTN_SAVE);
     outlineRect(s, mSaveBtnRect, {60, 200, 100, 255});
     drawTextCentered(s, "Save Enemy", mSaveBtnRect, 16);
@@ -922,7 +863,7 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
     outlineRect(s, mBackBtnRect, {100, 100, 200, 255});
     drawTextCentered(s, "< Back", mBackBtnRect, 16);
 
-    // ── RIGHT: Roster panel ───────────────────────────────────────────────────
+    // --- Right: Roster panel ---
     fillRect(s, mRosterPanel, PANEL_BG);
     outlineRect(s, mRosterPanel, PANEL_OUT);
     drawText(s, "Saved Enemies", mRosterPanel.x + 6, mRosterPanel.y + 8, 14, {220, 160, 100, 255});
@@ -946,8 +887,7 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Upload surface to texture and render.
-    // LINEAR keeps anti-aliased text smooth on Retina/HiDPI displays.
+    // LINEAR keeps anti-aliased text smooth on HiDPI
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
     SDL_DestroySurface(s);
     if (tex) {
@@ -958,9 +898,7 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
     window.Update();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NextScene
-// ─────────────────────────────────────────────────────────────────────────────
+// --- NextScene ---
 
 std::unique_ptr<Scene> EnemyCreatorScene::NextScene() {
     if (mGoBack) {
@@ -970,9 +908,7 @@ std::unique_ptr<Scene> EnemyCreatorScene::NextScene() {
     return nullptr;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Preview building
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Preview building ---
 
 void EnemyCreatorScene::rebuildPreview(int slotIdx) {
     clearPreview(slotIdx);
@@ -1073,15 +1009,12 @@ void EnemyCreatorScene::deleteFrame(int slotIdx, int frameIdx) {
     mFrameStripScroll = 0;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Hitbox editor helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Hitbox editor ---
 
 void EnemyCreatorScene::recomputePreviewRect() {
     const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
 
-    // Preview top anchored below speed/health fields
     const int previewTop = mCenterPanel.y + 192;
     const int MID_W      = mCenterPanel.w;
 
@@ -1161,7 +1094,6 @@ void EnemyCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
     if (!mHBInitialised) return;
     SDL_Rect r = normaliseRect(mHBRect);
 
-    // Semi-transparent fill
     {
         SDL_Rect pr = mPreviewCellRect;
         SDL_Rect fill = r;
@@ -1186,7 +1118,6 @@ void EnemyCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
 
     outlineRect(surf, r, HB_COLOR, 2);
 
-    // Center crosshair
     {
         int cx = r.x + r.w / 2, cy = r.y + r.h / 2;
         const int CL = 6;
@@ -1198,7 +1129,6 @@ void EnemyCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
         SDL_FillSurfaceRect(surf, &vLine, col);
     }
 
-    // Corner handles
     const int HSZ = HB_HANDLE_SZ;
     SDL_Rect corners[4] = {
         {r.x - HSZ/2,       r.y - HSZ/2,       HSZ, HSZ},
@@ -1212,9 +1142,7 @@ void EnemyCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Roster
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Roster ---
 
 void EnemyCreatorScene::refreshRoster() {
     mRoster.clear();
@@ -1252,9 +1180,7 @@ void EnemyCreatorScene::loadRosterEntry(int idx) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Text input
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Text input ---
 
 void EnemyCreatorScene::startTextInput() {
     if (!mNameActive) {
@@ -1270,9 +1196,7 @@ void EnemyCreatorScene::stopTextInput() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Draw helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Draw helpers ---
 
 void EnemyCreatorScene::fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);

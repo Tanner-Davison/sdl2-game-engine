@@ -11,8 +11,7 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-// ── Animation slot indices ────────────────────────────────────────────────────
-// Maps to the 8 named animation states the player creator exposes.
+// --- Animation slot indices ---
 enum class PlayerAnimSlot : int {
     Idle   = 0,
     Walk   = 1,
@@ -31,7 +30,7 @@ inline const char* PlayerAnimSlotName(PlayerAnimSlot s) {
     switch (s) {
         case PlayerAnimSlot::Idle:   return "Idle";
         case PlayerAnimSlot::Walk:   return "Walk";
-        case PlayerAnimSlot::Crouch: return "Crouch";  // Ctrl in-game
+        case PlayerAnimSlot::Crouch: return "Crouch";
         case PlayerAnimSlot::Jump:   return "Jump";
         case PlayerAnimSlot::Fall:   return "Fall";
         case PlayerAnimSlot::Slash:  return "Slash";
@@ -41,9 +40,9 @@ inline const char* PlayerAnimSlotName(PlayerAnimSlot s) {
     }
 }
 
-// ── Per-animation hitbox ──────────────────────────────────────────────────────
-// x/y are offsets from the sprite's top-left; w/h are the hitbox dimensions.
-// If w == 0 and h == 0, the system falls back to the default global hitbox.
+// --- Per-animation hitbox ---
+// x/y offset from sprite top-left; w/h are hitbox dimensions.
+// w == 0 && h == 0 means "use the default global hitbox".
 struct AnimHitbox {
     int x = 0;
     int y = 0;
@@ -53,10 +52,8 @@ struct AnimHitbox {
     bool IsDefault() const { return w == 0 && h == 0; }
 };
 
-// ── Player profile ────────────────────────────────────────────────────────────
-// Describes a fully configured custom character: name, per-slot sprite folder
-// paths, and per-slot hitbox overrides.  Any slot with an empty folderPath is
-// treated as missing — the runtime should gracefully skip or fall back to Idle.
+// --- Player profile ---
+// Empty folderPath = missing slot; runtime falls back to Idle.
 struct PlayerProfile {
     std::string name     = "Unnamed";
     int         spriteW  = 0;   // render width  in px (0 = use engine default)
@@ -74,18 +71,16 @@ struct PlayerProfile {
         std::string folderPath;
         AnimHitbox  hitbox;
         float       fps = 0.0f;
-        std::vector<SfxEntry> sfx; // per-file SFX — multiple = round-robin on each trigger
+        std::vector<SfxEntry> sfx; // multiple = round-robin on each trigger
     };
 
     std::array<SlotData, PLAYER_ANIM_SLOT_COUNT> slots;
 
-    // Convenience accessors
     SlotData&       Slot(PlayerAnimSlot s)       { return slots[static_cast<int>(s)]; }
     const SlotData& Slot(PlayerAnimSlot s) const { return slots[static_cast<int>(s)]; }
 
-    // HasSlot: true if this slot has custom sprite frames to load.
-    // Distinct from HasHitbox/HasFps — a profile can override hitbox and fps
-    // without providing custom sprites (falls back to frost knight visuals).
+    // HasSlot = has custom sprites. Distinct from HasHitbox/HasFps — a profile
+    // can override hitbox/fps without providing sprites (falls back to frost knight).
     bool HasSlot(PlayerAnimSlot s) const {
         return !Slot(s).folderPath.empty();
     }
@@ -100,24 +95,15 @@ struct PlayerProfile {
     }
 };
 
-// ── Serialization ─────────────────────────────────────────────────────────────
-
-// ── Path portability helpers ─────────────────────────────────────────────────
-//
-// Sprite folders are stored as paths RELATIVE to the project root (CWD at
-// runtime). On save, any absolute path is copied into
-//   game_assets/char_sprites/<charName>/<slotName>/
-// and the stored path becomes that relative path.  This makes profiles
-// portable across Mac, WSL, and Windows with no manual path editing.
+// --- Path portability ---
+// Paths stored relative to CWD. On save, absolute paths are copied into
+// game_assets/char_sprites/<charName>/<slotName>/ and made relative.
 
 inline std::string CharSpriteRelDir(const std::string& charName,
                                     const std::string& slotName) {
-    // Forward slashes — works on all platforms as a relative path.
     return "game_assets/char_sprites/" + charName + "/" + slotName;
 }
 
-// Copy every PNG from srcDir into dstDir, creating dstDir if needed.
-// Returns true if at least one PNG was copied successfully.
 inline bool CopySpritePNGs(const fs::path& srcDir, const fs::path& dstDir) {
     std::error_code ec;
     if (!fs::is_directory(srcDir, ec) || ec) return false;
@@ -128,7 +114,6 @@ inline bool CopySpritePNGs(const fs::path& srcDir, const fs::path& dstDir) {
     for (const auto& entry : fs::directory_iterator(srcDir, ec)) {
         if (ec) break;
         const auto& ext = entry.path().extension().string();
-        // Copy .png and .PNG
         if (ext == ".png" || ext == ".PNG") {
             fs::path dst = dstDir / entry.path().filename();
             fs::copy_file(entry.path(), dst,
@@ -139,24 +124,20 @@ inline bool CopySpritePNGs(const fs::path& srcDir, const fs::path& dstDir) {
     return copied;
 }
 
-// Resolve a stored folderPath to a usable absolute path on the current machine:
-//   - Empty  → return ""
-//   - Relative → resolve from CWD (the project root at runtime)
-//   - Absolute + exists + is_directory → use as-is
-//   - Absolute + missing/not-dir → return "" (stale cross-machine path)
+// Resolve stored path: relative passes through, stale absolute returns "".
 inline std::string ResolveFolderPath(const std::string& stored) {
     if (stored.empty()) return "";
     fs::path p(stored);
     std::error_code ec;
     if (p.is_relative()) {
-        // Relative paths are always valid — rebuildPreview will catch missing dirs
         return stored;
     }
-    // Absolute path: only usable if it's actually a directory on THIS machine
     if (fs::is_directory(p, ec) && !ec)
         return stored;
-    return ""; // stale absolute path from another machine
+    return "";
 }
+
+// --- Serialization ---
 
 inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
     json j;
@@ -169,8 +150,7 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
         const auto& s    = p.slots[i];
         std::string savePath = s.folderPath;
 
-        // If the stored path is absolute, copy sprites to a portable relative
-        // location inside game_assets and switch to that relative path.
+        // Copy absolute-path sprites into a portable relative location
         if (!savePath.empty()) {
             fs::path fp(savePath);
             if (fp.is_absolute()) {
@@ -179,10 +159,9 @@ inline bool SavePlayerProfile(const PlayerProfile& p, const std::string& path) {
                 fs::path    dstDir(relDir);
                 std::error_code ec;
                 if (fs::is_directory(fp, ec) && !ec && CopySpritePNGs(fp, dstDir)) {
-                    savePath = relDir; // store relative from now on
+                    savePath = relDir;
                 } else {
-                    // Source didn't copy — keep absolute so Mac still works,
-                    // but WSL/Windows will gracefully skip it on load.
+                    // Keep absolute so Mac still works; WSL/Windows will skip on load
                     std::print("PlayerProfile: could not copy sprites for slot {} — keeping absolute path\n", slotName);
                 }
             }
@@ -238,7 +217,6 @@ inline bool LoadPlayerProfile(const std::string& path, PlayerProfile& out) {
         int idx = entry.value("slot", -1);
         if (idx < 0 || idx >= PLAYER_ANIM_SLOT_COUNT) continue;
         auto& s      = out.slots[idx];
-        // ResolveFolderPath silently drops stale absolute paths from other machines
         s.folderPath = ResolveFolderPath(entry.value("folderPath", ""));
         s.fps        = entry.value("fps", 0.0f);
         if (entry.contains("sfx") && entry["sfx"].is_array()) {
@@ -275,7 +253,7 @@ inline bool LoadPlayerProfile(const std::string& path, PlayerProfile& out) {
     return true;
 }
 
-// ── Roster helpers ────────────────────────────────────────────────────────────
+// --- Roster helpers ---
 
 inline std::vector<fs::path> ScanPlayerProfiles() {
     std::vector<fs::path> result;

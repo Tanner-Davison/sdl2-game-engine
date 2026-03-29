@@ -1,8 +1,5 @@
 #pragma once
-// SelectTool.hpp
-//
-// Rubber-band marquee selection + multi-entity drag-move.
-// Supports both tiles and enemies as selectable, movable entities.
+// SelectTool.hpp -- rubber-band marquee selection + multi-entity drag-move.
 
 #include "tools/EditorTool.hpp"
 #include "EnemyProfile.hpp"
@@ -191,7 +188,6 @@ class SelectTool final : public EditorTool {
         (void)canvasW;
         float camX = ctx.CamX(), camY = ctx.CamY(), zoom = ctx.Zoom();
 
-        // Highlight selected tiles
         for (int idx : selIndices) {
             if (idx < 0 || idx >= (int)ctx.level.tiles.size()) continue;
             const auto& t = ctx.level.tiles[idx];
@@ -203,7 +199,6 @@ class SelectTool final : public EditorTool {
             EditorToolContext::DrawOutline(screen, {sx, sy, sw, sh}, {0, 255, 255, 220}, 2);
         }
 
-        // Highlight selected enemies
         for (int idx : selEnemyIndices) {
             if (idx < 0 || idx >= (int)ctx.level.enemies.size()) continue;
             const auto& en = ctx.level.enemies[idx];
@@ -224,7 +219,6 @@ class SelectTool final : public EditorTool {
             }
         }
 
-        // Bounding box around all selected entities
         if (!selIndices.empty() || !selEnemyIndices.empty()) {
             int bx0 = INT_MAX, by0 = INT_MAX, bx1 = INT_MIN, by1 = INT_MIN;
             for (int idx : selIndices) {
@@ -261,7 +255,6 @@ class SelectTool final : public EditorTool {
             }
         }
 
-        // Rubber-band marquee
         if (selBoxing) {
             int rx0 = (int)((std::min(selBoxX0, selBoxX1) - camX) * zoom);
             int ry0 = (int)((std::min(selBoxY0, selBoxY1) - camY) * zoom);

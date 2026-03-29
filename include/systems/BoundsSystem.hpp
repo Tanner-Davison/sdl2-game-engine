@@ -2,15 +2,10 @@
 #include <Components.hpp>
 #include <entt/entt.hpp>
 
-// PLAYER_STAND_WIDTH / PLAYER_STAND_HEIGHT come from GameConfig via Components.hpp.
-
-// levelW/levelH: total world size in pixels. Pass 0 to use windowW/windowH (single-screen).
-// In a scrolling level, pass the actual world dimensions so the player can walk
-// past the initial viewport without being clamped to the screen edge.
+// levelW/levelH: total world size in pixels. Pass 0 to use windowW/windowH.
 inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH,
                          bool wallRunEnabled = false,
                          float levelW = 0.0f, float levelH = 0.0f) {
-    // Fall back to screen size when no explicit level bounds are given
     if (levelW <= 0.0f) levelW = static_cast<float>(windowW);
     if (levelH <= 0.0f) levelH = static_cast<float>(windowH);
 
@@ -18,7 +13,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
     view.each(
         [&](entt::entity ent, Transform& t, Collider& c, GravityState& g,
             Velocity& v, AnimationState& anim) {
-            // ── Open-world: clamp to level bounds, no gravity logic ───────────
             if (reg.all_of<OpenWorldTag>(ent)) {
                 if (t.x < 0.0f)             t.x = 0.0f;
                 if (t.x + c.w > levelW)     t.x = levelW - c.w;
@@ -27,7 +21,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                 return;
             }
 
-            // ── Punishment timer tick ─────────────────────────────────────────
             if (g.punishmentTimer > 0.0f) {
                 g.punishmentTimer -= dt;
                 if (g.punishmentTimer <= 0.0f) {
@@ -36,7 +29,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                 }
             }
 
-            // Activate gravity toward a wall, resetting motion and crouch state.
             auto activate = [&](GravityDir dir) {
                 if (g.punishmentTimer > 0.0f) return;
                 if (g.active && g.isGrounded && g.direction == dir) return;
@@ -55,7 +47,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                 v.dy         = 0.0f;
             };
 
-            // ── Wall-run: trigger gravity flip at level edges ─────────────────
             if (wallRunEnabled) {
                 if (t.x < 0.0f) {
                     t.x = 0.0f;
@@ -84,7 +75,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                     }
                 }
             } else {
-                // Platformer — clamp to level bounds, no gravity flip
                 if (t.x < 0.0f)             t.x = 0.0f;
                 if (t.x + c.w > levelW)     t.x = levelW - c.w;
                 if (t.y < 0.0f)             t.y = 0.0f;
@@ -95,7 +85,6 @@ inline void BoundsSystem(entt::registry& reg, float dt, int windowW, int windowH
                 }
             }
 
-            // ── Ground-clamp per gravity direction ────────────────────────────
             if (g.active) {
                 switch (g.direction) {
                     case GravityDir::DOWN:

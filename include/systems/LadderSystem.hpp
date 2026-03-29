@@ -4,18 +4,9 @@
 #include <algorithm>
 #include <entt/entt.hpp>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LadderSystem
-//
-// Ladder top acts like a solid floor — the player walks over it freely and
-// only descends when S is pressed. W grabs the ladder mid-column during a
-// jump or from the ground. Space always jumps off.
-//
-// States:
-//   idle    — normal gravity; ladder top acts as a floor clamp
-//   climbing — gravity off, W moves up, S moves down, no input = frozen
-//   atTop   — gravity off, locked to topRestY, S descends, Space jumps off
-// ─────────────────────────────────────────────────────────────────────────────
+// States: idle (gravity on, ladder top = floor), climbing (gravity off,
+// W/S moves, no input = frozen), atTop (locked to topRestY, S descends,
+// Space jumps off). Ladder top acts as a solid floor in idle.
 inline void LadderSystem(entt::registry& reg, float dt) {
     const bool* keys      = SDL_GetKeyboardState(nullptr);
     bool        spaceHeld = keys[SDL_SCANCODE_SPACE];
@@ -29,7 +20,6 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                         GravityState&   g,
                         Velocity&       v,
                         ClimbState&     climb) {
-        // ── Build column extents ──────────────────────────────────────────────
         constexpr float inset = 8.0f;
         float columnTop = 1e9f;
         float columnBot = -1e9f;
@@ -48,23 +38,20 @@ inline void LadderSystem(entt::registry& reg, float dt) {
 
         if (!inColumn) { columnTop = 0.0f; columnBot = 0.0f; }
 
-        float topRestY = columnTop - pc.h;  // feet-level when standing at top
+        float topRestY = columnTop - pc.h;
 
         climb.onLadder = touching;
 
         bool wHeld = climb.wPressed;
         bool sHeld = climb.sPressed;
 
-        // ─────────────────────────────────────────────────────────────────────
-        // atTop — locked to top, S descends, Space jumps, walk off freely
-        // ─────────────────────────────────────────────────────────────────────
+        // --- atTop ---
         if (climb.atTop) {
             g.active   = false;
             g.velocity = 0.0f;
             v.dy       = 0.0f;
 
             if (!inColumn) {
-                // Walked off the side — restore gravity
                 climb.atTop  = false;
                 g.active     = true;
                 g.velocity   = 0.0f;
@@ -72,7 +59,7 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                 return;
             }
 
-            pt.y = topRestY; // hard-lock Y, allow dx freely
+            pt.y = topRestY;
 
             if (spaceHeld) {
                 climb.atTop  = false;
@@ -82,25 +69,21 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                 return;
             }
             if (sHeld) {
-                // Don't teleport — just release the top-lock and let the
-                // climbing branch's sHeld path move the player down smoothly.
+                // Release top-lock and let climbing branch move down smoothly.
                 climb.atTop    = false;
                 climb.climbing = true;
                 g.active       = false;
                 g.velocity     = 0.0f;
             }
-            // W or no input — stay at top, walk freely horizontally
             return;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // climbing — gravity off, W up, S down, no input = frozen
-        // ─────────────────────────────────────────────────────────────────────
+        // --- climbing ---
         if (climb.climbing) {
             g.velocity   = 0.0f;
-            g.isGrounded = true; // prevent fall/jump animation while on ladder
+            g.isGrounded = true; // suppress fall/jump animation while on ladder
             v.dy         = 0.0f;
-            v.dx        *= 0.6f; // slow horizontal movement while climbing
+            v.dx        *= 0.6f;
 
             if (spaceHeld) {
                 climb.climbing = false;
@@ -127,7 +110,6 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                 }
             } else if (sHeld) {
                 pt.y += CLIMB_SPEED * dt;
-                // Reached the bottom — release ladder and restore gravity
                 if (pt.y + pc.h >= columnBot) {
                     pt.y           = columnBot - pc.h;
                     climb.climbing = false;
@@ -136,28 +118,17 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                     g.isGrounded   = false;
                 }
             }
-            // No input — frozen mid-ladder
             return;
         }
 
-        // ─────────────────────────────────────────────────────────────────────
-        // idle — treat ladder top as a solid floor.
-        // The player walks over the ladder freely. When they step off the
-        // platform edge so their feet are above the column top AND S is pressed,
-        // drop into climbing. If their feet land on the column top from above
-        // (falling), snap them onto it like a floor.
-        // W mid-column grabs the ladder to climb up.
-        // ─────────────────────────────────────────────────────────────────────
+        // --- idle: ladder top acts as solid floor ---
         float feetY = pt.y + pc.h;
 
-        // Floor clamp: player's feet are at or just below columnTop while
-        // horizontally aligned — treat it as solid ground.
         bool overColumnTop = inColumn
                              && feetY >= columnTop - 2.0f
                              && feetY <= columnTop + STEP_UP_HEIGHT;
         if (overColumnTop) {
             if (sHeld) {
-                // S pressed — drop into ladder
                 climb.climbing = true;
                 climb.atTop    = false;
                 g.active       = false;
@@ -165,8 +136,7 @@ inline void LadderSystem(entt::registry& reg, float dt) {
                 v.dy           = 0.0f;
                 pt.y           = columnTop + 1.0f;
             } else {
-                // No S — treat ladder top as solid floor AND mark atTop so
-                // PlayerStateSystem always sees a valid ladder state.
+                // Mark atTop so PlayerStateSystem always sees a valid ladder state.
                 pt.y           = topRestY;
                 climb.atTop    = true;
                 climb.climbing = false;

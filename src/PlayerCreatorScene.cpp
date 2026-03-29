@@ -11,10 +11,6 @@
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small inline helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
 static bool hit(const SDL_Rect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
@@ -27,20 +23,16 @@ static SDL_Color lerp(SDL_Color a, SDL_Color b, float t) {
             cl(a.a + (b.a - a.a) * t)};
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Scene interface
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Scene interface ---
 
 void PlayerCreatorScene::Load(Window& window) {
     mW      = window.GetWidth();
     mH      = window.GetHeight();
     mSDLWin = window.GetRaw();
 
-    // Ensure players/ directory exists
     if (!fs::exists("players"))
         fs::create_directory("players");
 
-    // Default profile
     mProfile = PlayerProfile{};
     mProfile.name = "MyCharacter";
 
@@ -57,19 +49,13 @@ void PlayerCreatorScene::Unload() {
     stopTextInput();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Layout
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Layout ---
 
 void PlayerCreatorScene::computeLayout() {
     const int PAD   = PANEL_PAD;
     const int TOTAL = mW;
     const int H     = mH;
 
-    // Three columns:
-    //  slot panel  = 240 px wide
-    //  center      = flexible
-    //  roster      = 250 px wide
     const int LEFT_W   = 240;
     const int RIGHT_W  = 260;
     const int MID_W    = TOTAL - LEFT_W - RIGHT_W - PAD * 4;
@@ -78,28 +64,21 @@ void PlayerCreatorScene::computeLayout() {
     mCenterPanel = {PAD * 2 + LEFT_W,         40,  MID_W,   H - 80};
     mRosterPanel = {PAD * 3 + LEFT_W + MID_W, 40,  RIGHT_W, H - 80};
 
-    // Name field — top of centre panel
     mNameFieldRect = {mCenterPanel.x, mCenterPanel.y + 40, MID_W - 2, 36};
 
-    // Sprite size fields — one row below name field, side by side
     const int sfW = (MID_W - 6) / 2;
     mWidthRect  = {mCenterPanel.x,         mCenterPanel.y + 84, sfW, 32};
     mHeightRect = {mCenterPanel.x + sfW + 6, mCenterPanel.y + 84, sfW, 32};
 
-    // Save & Back buttons — bottom of centre panel
     mSaveBtnRect = {mCenterPanel.x,            mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
     mBackBtnRect = {mCenterPanel.x + MID_W - 130, mCenterPanel.y + mCenterPanel.h - 50, 130, 40};
 
-    // Preview cell, drop zone, and clear button are all computed by
-    // recomputePreviewRect() which runs immediately after computeLayout().
-    // Initialize to zero here so they're never used uninitialized.
+    // Initialized to zero; recomputePreviewRect() populates these right after
     mPreviewCellRect   = {};
     mPreviewRenderRect = {};
     mDropZone          = {};
     mClearSlotRect     = {};
 
-    // Slot rows — left panel (dynamic height based on SFX file count)
-    // Each SFX entry has two sub-rows: name/controls (14px) + slider (10px)
     static constexpr int BASE_ROW_H   = 44;
     static constexpr int SFX_NAME_H   = 14;
     static constexpr int SFX_SLIDER_H = 10;
@@ -145,14 +124,11 @@ void PlayerCreatorScene::computeLayout() {
     recomputePreviewRect();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Events
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Events ---
 
 bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) return false;
 
-    // ── File drag enter/hover ─────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_BEGIN) {
         mDropHover = true;
         return true;
@@ -162,7 +138,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // ── File / directory drop ─────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_FILE || e.type == SDL_EVENT_DROP_TEXT) {
         mDropHover = false;
         mSfxDropHoverSlot = -1;
@@ -171,7 +146,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         if (!dropped.empty()) {
             fs::path p(dropped);
 
-            // Audio file drop: assign to SFX slot
             if (fs::is_regular_file(p) && isAudioFile(p)) {
                 float fmx, fmy;
                 SDL_GetMouseState(&fmx, &fmy);
@@ -196,13 +170,11 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
                 return true;
             }
 
-            // Folder / PNG drop: existing sprite folder logic
             std::string dir;
             if (fs::is_directory(p))      dir = dropped;
             else if (fs::is_regular_file(p)) dir = p.parent_path().string();
 
             if (!dir.empty()) {
-                // Check it has at least one PNG
                 bool hasPng = false;
                 try {
                     for (const auto& entry : fs::directory_iterator(dir)) {
@@ -215,9 +187,9 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
 
                 if (hasPng) {
                     mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).folderPath = dir;
-                    rebuildPreview(mSelectedSlot);    // may auto-fill spriteW/H
-                    recomputePreviewRect();            // resize cell to match new sprite dims
-                    initHBFromProfile(mSelectedSlot); // reposition hitbox in updated cell
+                    rebuildPreview(mSelectedSlot);
+                    recomputePreviewRect();
+                    initHBFromProfile(mSelectedSlot);
                     mDropMsg = "Loaded: " + fs::path(dir).filename().string();
                 } else {
                     mDropMsg = "No PNGs found in that folder.";
@@ -229,8 +201,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // ── Keyboard ─────────────────────────────────────────────────────────────
-    // Size field input (digits only, max 4 chars)
     if (mSizeActive != SizeField::None) {
         std::string& str = (mSizeActive == SizeField::Width) ? mWidthStr : mHeightStr;
         if (e.type == SDL_EVENT_TEXT_INPUT) {
@@ -279,7 +249,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     }
 
     if (e.type == SDL_EVENT_KEY_DOWN) {
-        // Arrow keys to cycle slots
         if (e.key.key == SDLK_DOWN || e.key.key == SDLK_S) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mSelectedSlot = (mSelectedSlot + 1) % PLAYER_ANIM_SLOT_COUNT;
@@ -299,12 +268,10 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Mouse ─────────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx = (int)e.motion.x;
         int my = (int)e.motion.y;
 
-        // Volume slider drag
         if (mVolDragSlot >= 0 && mVolDragFile >= 0) {
             auto& entry = mProfile.slots[mVolDragSlot].sfx[mVolDragFile];
             const auto& sr = mSfxFileUI[mVolDragSlot][mVolDragFile].sliderRect;
@@ -312,7 +279,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             entry.volume = t;
             return true;
         }
-        // Trim slider drag
         if (mTrimDragSlot >= 0 && mTrimDragFile >= 0) {
             auto& entry = mProfile.slots[mTrimDragSlot].sfx[mTrimDragFile];
             const auto& tr = mSfxFileUI[mTrimDragSlot][mTrimDragFile].trimSliderRect;
@@ -324,7 +290,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Hitbox drag
         if (mHBEditing && mHBDragHandle >= 0) {
             int dx = mx - mHBDragStartMX;
             int dy = my - mHBDragStartMY;
@@ -337,7 +302,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
                 case 3: r.x += dx; r.w -= dx; r.h += dy; break;             // BL
                 case 4: r.x += dx; r.y += dy; break;                        // body move
             }
-            // Clamp to preview area
             r.w = std::max(r.w, 4);
             r.h = std::max(r.h, 4);
             mHBRect = r;
@@ -348,7 +312,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         int mx = (int)e.button.x;
         int my = (int)e.button.y;
 
-        // Per-file SFX controls (TS, slider, remove) — clicking any part selects it for preview
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
             for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
                 const auto& ui = mSfxFileUI[i][fi];
@@ -395,7 +358,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // FPS +/- buttons (check before slot row so they don't also select)
+        // FPS +/- (check before slot row so they don't also trigger selection)
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
             auto slot = static_cast<PlayerAnimSlot>(i);
             float& fps = mProfile.Slot(slot).fps;
@@ -409,7 +372,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Slot row click
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
             if (hit(mSlotRowRects[i], mx, my)) {
                 if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
@@ -422,7 +384,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Size field clicks
         if (hit(mWidthRect, mx, my)) {
             mWidthStr   = (mProfile.spriteW > 0) ? std::to_string(mProfile.spriteW) : "";
             mSizeActive = SizeField::Width;
@@ -437,9 +398,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             SDL_StartTextInput(mSDLWin);
             return true;
         }
-        // Commit size fields on click-away (handled below in blur logic)
 
-        // Name field click — clear the name so the user types a fresh one
         if (hit(mNameFieldRect, mx, my)) {
             mProfile.name.clear();
             mNameError.clear();
@@ -449,7 +408,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         } else {
             if (mNameActive) stopTextInput();
             if (mSizeActive != SizeField::None) {
-                // Commit on blur
                 auto& str = (mSizeActive == SizeField::Width) ? mWidthStr : mHeightStr;
                 int val = str.empty() ? 0 : std::stoi(str);
                 if (mSizeActive == SizeField::Width)  mProfile.spriteW = val;
@@ -461,27 +419,25 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Back button
         if (hit(mBackBtnRect, mx, my)) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mGoBack = true;
             return true;
         }
 
-        // Save button
         if (hit(mSaveBtnRect, mx, my)) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             if (mProfile.name.empty()) {
                 mNameError = "Name required!";
             } else {
                 if (!fs::exists("players")) fs::create_directory("players");
-                // If the name changed, delete the old file so no stale copy remains
+                // Delete old file if name changed so no stale copy remains
                 if (!mLoadedName.empty() && mLoadedName != mProfile.name) {
                     std::error_code ec;
                     fs::remove(PlayerProfilePath(mLoadedName), ec);
                 }
                 SavePlayerProfile(mProfile, PlayerProfilePath(mProfile.name));
-                mLoadedName = mProfile.name;  // update so a second save doesn't re-delete
+                mLoadedName = mProfile.name;
                 refreshRoster();
                 mNameError.clear();
                 mDropMsg = "Saved as: " + mProfile.name;
@@ -489,7 +445,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Clear slot button
         if (hit(mClearSlotRect, mx, my)) {
             mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).folderPath.clear();
             mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).hitbox = {};
@@ -499,7 +454,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Frame strip duplicate buttons
         if (!mFrameDupRects.empty()) {
             for (int i = 0; i < (int)mFrameDupRects.size(); ++i) {
                 if (mFrameDupRects[i].w > 0 && hit(mFrameDupRects[i], mx, my)) {
@@ -509,7 +463,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Frame strip delete buttons
         if (!mFrameDelRects.empty()) {
             for (int i = 0; i < (int)mFrameDelRects.size(); ++i) {
                 if (mFrameDelRects[i].w > 0 && hit(mFrameDelRects[i], mx, my)) {
@@ -519,7 +472,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Hitbox handle hit test — always active once initialised, no sprite required
         int handle = hitboxHandleAt(mx, my);
         if (handle >= 0 && mHBInitialised) {
             mHBEditing       = true;
@@ -530,7 +482,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Roster entry buttons
         int ry = mRosterPanel.y + 40;
         for (int i = mRosterScroll; i < (int)mRoster.size(); ++i) {
             auto& entry = mRoster[i];
@@ -565,7 +516,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // Scroll roster
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy;
         SDL_GetMouseState(&fmx, &fmy);
@@ -574,7 +524,6 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             mRosterScroll = std::clamp(mRosterScroll - (int)e.wheel.y,
                                        0, std::max(0, (int)mRoster.size() - 1));
         }
-        // Scroll frame strip (row-based) when hovering the centre panel
         if (hit(mCenterPanel, mx, my) && !hit(mRosterPanel, mx, my)) {
             const auto& sp = mPreviews[mSelectedSlot];
             if (sp.has_value() && !sp->frames.empty()) {
@@ -591,12 +540,9 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     return true;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Update
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Update ---
 
 void PlayerCreatorScene::Update(float dt) {
-    // Advance animation preview for selected slot.
     const auto& prev = mPreviews[mSelectedSlot];
     if (prev.has_value() && !prev->frames.empty()) {
         float slotFps = mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).fps;
@@ -608,7 +554,6 @@ void PlayerCreatorScene::Update(float dt) {
         }
     }
 
-    // ── SFX trim preview loop ────────────────────────────────────────────
     if (!Audio()) return;
     auto& sfx = Audio()->Sfx();
     const auto& slotSfx = mProfile.slots[mSelectedSlot].sfx;
@@ -664,25 +609,18 @@ void PlayerCreatorScene::Update(float dt) {
     sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Render
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Render ---
 
 void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
     window.Render();
     SDL_Renderer* ren = window.GetRenderer();
-    // Render this scene to an intermediate surface, then upload to renderer.
-    // This preserves all pixel-exact surface-based hitbox drawing.
     SDL_Surface* s = SDL_CreateSurface(mW, mH, SDL_PIXELFORMAT_ARGB8888);
     if (!s) { window.Update(); return; }
 
-    // Background
     fillRect(s, {0, 0, mW, mH}, BG);
-
-    // ── Title bar ─────────────────────────────────────────────────────────────
     drawTextCentered(s, "Player Creator", {0, 4, mW, 32}, 24, {200, 210, 255, 255});
 
-    // ── LEFT: Slot panel ──────────────────────────────────────────────────────
+    // --- Left: Slot panel ---
     fillRect(s, mSlotPanel, PANEL_BG);
     outlineRect(s, mSlotPanel, PANEL_OUT);
     drawText(s, "Animation Slots", mSlotPanel.x + 6, mSlotPanel.y + 8, 14, {160, 170, 220, 255});
@@ -696,13 +634,11 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         fillRect(s, mSlotRowRects[i], bg);
         outlineRect(s, mSlotRowRects[i], sel ? SDL_Color{120, 160, 255, 255} : PANEL_OUT);
 
-        // Slot name
         drawText(s, PlayerAnimSlotName(slot),
                  mSlotRowRects[i].x + 8,
                  mSlotRowRects[i].y + (SLOT_ROW_H - 20) / 2,
                  16, sel ? SDL_Color{255, 255, 255, 255} : SDL_Color{180, 190, 210, 255});
 
-        // Folder name (truncated)
         const auto& path = mProfile.Slot(slot).folderPath;
         if (!path.empty()) {
             std::string fname = fs::path(path).filename().string();
@@ -718,32 +654,26 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                      11, {80, 90, 100, 255});
         }
 
-        // FPS stepper: "- 12 +" on the right side of each row
         {
             float curFps = mProfile.Slot(slot).fps;
             std::string fpsStr = (curFps > 0.0f)
                 ? std::to_string((int)curFps) + "fps"
                 : "default";
-            // minus button
             fillRect(s, mFpsBtns[i].minusRect, {50, 50, 80, 255});
             outlineRect(s, mFpsBtns[i].minusRect, {80, 80, 130, 255});
             drawTextCentered(s, "-", mFpsBtns[i].minusRect, 13, {200, 200, 255, 255});
-            // plus button
             fillRect(s, mFpsBtns[i].plusRect, {50, 50, 80, 255});
             outlineRect(s, mFpsBtns[i].plusRect, {80, 80, 130, 255});
             drawTextCentered(s, "+", mFpsBtns[i].plusRect, 13, {200, 200, 255, 255});
-            // value label between them
             int labelX = mFpsBtns[i].minusRect.x - 2 - (int)fpsStr.size() * 6;
             drawText(s, fpsStr, labelX,
                      mFpsBtns[i].minusRect.y + 2, 10, {160, 170, 200, 255});
         }
 
-        // Per-file SFX rows (name + controls, then slider)
         for (int fi = 0; fi < (int)mSfxFileUI[i].size(); ++fi) {
             const auto& ui = mSfxFileUI[i][fi];
             const auto& entry = mProfile.slots[i].sfx[fi];
 
-            // Top row: filename + TS + remove
             bool isSelected = (i == mSelectedSlot && fi == mSelectedSfxFile);
             fillRect(s, ui.nameRect, isSelected ? SDL_Color{50, 65, 95, 255} : SDL_Color{35, 55, 80, 255});
             outlineRect(s, ui.nameRect, isSelected ? SDL_Color{200, 140, 40, 255} : SDL_Color{60, 120, 180, 255});
@@ -763,8 +693,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             outlineRect(s, ui.clearRect, {180, 60, 60, 255});
             drawTextCentered(s, "x", ui.clearRect, 8, {255, 180, 180, 255});
 
-            // Bottom row: volume slider
-            // Volume slider (blue)
             int pct = (int)(entry.volume * 100.0f + 0.5f);
             const SDL_Rect& sr = ui.sliderRect;
             fillRect(s, sr, {20, 22, 36, 255});
@@ -780,7 +708,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             std::string volStr = std::to_string(pct) + "%";
             drawText(s, volStr, sr.x + sr.w / 2 - (int)volStr.size() * 3, sr.y + 1, 7, {200, 210, 230, 255});
 
-            // Trim range slider (orange)
             const SDL_Rect& tr = ui.trimSliderRect;
             fillRect(s, tr, {30, 22, 16, 255});
             outlineRect(s, tr, {80, 60, 30, 255});
@@ -796,7 +723,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             fillRect(s, endKnob,   {255, 200, 100, 255});
         }
 
-        // Drop zone at bottom
         {
             bool sfxHover = (mSfxDropHoverSlot == i);
             SDL_Color dzBg  = sfxHover ? SDL_Color{40, 60, 120, 255} : SDL_Color{25, 30, 45, 255};
@@ -807,11 +733,10 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // ── CENTRE panel ──────────────────────────────────────────────────────────
+    // --- Centre panel ---
     fillRect(s, mCenterPanel, PANEL_BG);
     outlineRect(s, mCenterPanel, PANEL_OUT);
 
-    // Character name label + field
     drawText(s, "Character Name:",
              mCenterPanel.x + 4, mCenterPanel.y + 10, 14, {160, 170, 220, 255});
     SDL_Color fieldOutCol = mNameActive ? SDL_Color{100, 150, 255, 255} : PANEL_OUT;
@@ -823,26 +748,21 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         drawText(s, mNameError, mNameFieldRect.x, mNameFieldRect.y + mNameFieldRect.h + 2,
                  12, {255, 80, 80, 255});
 
-    // Sprite size fields
     {
         bool wActive = (mSizeActive == SizeField::Width);
         bool hActive = (mSizeActive == SizeField::Height);
-        // Labels
         drawText(s, "W:", mWidthRect.x + 4,  mWidthRect.y + 8, 13, {160, 170, 220, 255});
         drawText(s, "H:", mHeightRect.x + 4, mHeightRect.y + 8, 13, {160, 170, 220, 255});
-        // Width field
         fillRect(s, mWidthRect, {18, 18, 32, 255});
         outlineRect(s, mWidthRect, wActive ? SDL_Color{100, 150, 255, 255} : PANEL_OUT, 2);
         std::string wDisplay = (wActive ? mWidthStr : (mProfile.spriteW > 0 ? std::to_string(mProfile.spriteW) : "120")) + (wActive ? "|" : "");
         drawText(s, wDisplay, mWidthRect.x + 22, mWidthRect.y + 8, 14);
-        // Height field
         fillRect(s, mHeightRect, {18, 18, 32, 255});
         outlineRect(s, mHeightRect, hActive ? SDL_Color{100, 150, 255, 255} : PANEL_OUT, 2);
         std::string hDisplay = (hActive ? mHeightStr : (mProfile.spriteH > 0 ? std::to_string(mProfile.spriteH) : "160")) + (hActive ? "|" : "");
         drawText(s, hDisplay, mHeightRect.x + 22, mHeightRect.y + 8, 14);
     }
 
-    // Slot label above preview — show actual pixel size so you can verify it
     std::string slotLabel = std::string(PlayerAnimSlotName(static_cast<PlayerAnimSlot>(mSelectedSlot)))
                           + " Preview";
     if (mProfile.spriteW > 0 && mProfile.spriteH > 0)
@@ -851,26 +771,15 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                      {mPreviewCellRect.x, mPreviewCellRect.y - 24, mPreviewCellRect.w, 20},
                      13, {200, 210, 255, 255});
 
-    // Preview area — draw the fixed cell background, not the sprite draw rect
     fillRect(s, mPreviewCellRect, {10, 12, 22, 255});
     outlineRect(s, mPreviewCellRect, PANEL_OUT);
 
     const auto& prev = mPreviews[mSelectedSlot];
     if (prev.has_value() && !prev->frames.empty()) {
-        // ── Game-accurate preview ─────────────────────────────────────────────
-        // The game bottom-aligns the sprite to the collider bottom (floor).
-        // We replicate that here: fix a floor Y at the preview bottom, scale the
-        // sprite to fit the preview width while keeping aspect ratio, anchor its
-        // bottom to that floor, then derive the hitbox rect from sprite-local
-        // coords using the same scale — so the overlay matches the game exactly.
-
-        // mPreviewRenderRect = sprite draw rect (set by initHBFromProfile, collider-first).
-        // Just blit the current animation frame into it directly.
+        // Game bottom-aligns sprite to collider bottom (floor). Preview
+        // replicates that at 1:1 scale so the hitbox overlay matches exactly.
         SDL_Surface* sheet = prev->sheet->GetSurface();
         const SDL_Rect& fr = prev->frames[std::min(mAnimFrame, (int)prev->frames.size() - 1)];
-        // Extract just this frame into a temp surface, then scale-blit into
-        // mPreviewRenderRect. This handles the case where the raw PNG is a
-        // different size than spriteW/H (e.g. new character with no size set yet).
         SDL_Surface* frameSurf = SDL_CreateSurface(fr.w, fr.h, sheet->format);
         if (frameSurf) {
             SDL_BlitSurface(sheet, &fr, frameSurf, nullptr);
@@ -878,15 +787,13 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             SDL_DestroySurface(frameSurf);
         }
 
-        // Floor line = collider bottom = where physics plants the player on a tile.
-        // This is the ground line in-game: the sprite may extend below it.
+        // Floor line = collider bottom = physics ground
         {
             const SDL_Rect hbNorm = normaliseRect(mHBRect);
             const int colBottom = hbNorm.y + hbNorm.h;
             SDL_Rect floorLine = {mPreviewCellRect.x, colBottom, mPreviewCellRect.w, 2};
             const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
             SDL_FillSurfaceRect(s, &floorLine, SDL_MapRGBA(fmt, nullptr, 80, 200, 80, 200));
-            // Dim line at sprite bottom so you can see any sprite overflow below the floor
             const int spriteBottom = mPreviewRenderRect.y + mPreviewRenderRect.h;
             if (spriteBottom != colBottom) {
                 SDL_Rect spriteLine = {mPreviewCellRect.x, spriteBottom, mPreviewCellRect.w, 1};
@@ -894,11 +801,8 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             }
         }
 
-        // Render() never overwrites mPreviewRenderRect or mHBRect.
-        // Both are owned by initHBFromProfile (collider-first layout).
         renderHitboxOverlay(s);
 
-        // Frame counter at bottom-left of sprite
         drawText(s,
                  std::to_string(mAnimFrame + 1) + "/" + std::to_string(prev->frames.size()),
                  mPreviewRenderRect.x + 4,
@@ -910,7 +814,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         renderHitboxOverlay(s);
     }
 
-    // Drop zone
     SDL_Color dzCol = mDropHover ? DROP_HOVER : DROP_IDLE;
     fillRect(s, mDropZone, dzCol);
     outlineRect(s, mDropZone, mDropHover ? SDL_Color{100, 180, 255, 255} : PANEL_OUT, 2);
@@ -919,22 +822,18 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                      mDropZone, 15,
                      mDropHover ? SDL_Color{200, 230, 255, 255} : SDL_Color{140, 150, 180, 255});
 
-    // Clear slot button (overlaps right side of drop zone)
     fillRect(s, mClearSlotRect, {80, 50, 50, 255});
     outlineRect(s, mClearSlotRect, {160, 80, 80, 255});
     drawTextCentered(s, "Clear", mClearSlotRect, 13, {255, 180, 180, 255});
 
-    // Hitbox editor hint + live sprite-local readout
     {
         int hintY = mDropZone.y + mDropZone.h + 8;
         drawText(s, "Hitbox Editor — drag corners/edges of the red box",
                  mCenterPanel.x + 4, hintY, 12, {120, 130, 160, 255});
 
-        // Compute live sprite-local values from the current screen rect
-        // (same math as commitHBToProfile so what you see = what gets saved)
+        // Live sprite-local readout (same math as commitHBToProfile)
         const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
         const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
-        // 1:1 scale: screen px == sprite px, no conversion needed
         SDL_Rect nr = normaliseRect(mHBRect);
         int liveX = nr.x - mPreviewRenderRect.x;
         int liveY = nr.y - mPreviewRenderRect.y;
@@ -945,14 +844,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         liveW = std::clamp(liveW, 1, srcW - liveX);
         liveH = std::clamp(liveH, 1, srcH - liveY);
 
-        // Line 1: sprite-local coords (what gets saved to JSON)
         std::string spriteStr = "sprite-local: x:" + std::to_string(liveX)
                               + " y:" + std::to_string(liveY)
                               + " w:" + std::to_string(liveW)
                               + " h:" + std::to_string(liveH);
         drawText(s, spriteStr, mCenterPanel.x + 4, hintY + 16, 12, {100, 220, 120, 255});
 
-        // Line 2: render offset GameScene will use
         // roffX = -hb.x, roffY = -hb.y  (sprite origin offset from collider origin)
         int gameRoffX = -liveX;
         int gameRoffY = -liveY;
@@ -961,14 +858,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                            + "   col: " + std::to_string(liveW) + "x" + std::to_string(liveH);
         drawText(s, offStr, mCenterPanel.x + 4, hintY + 30, 12, {180, 160, 100, 255});
 
-        // Line 3: prominent hitbox size for the current animation slot
         std::string slotName = PlayerAnimSlotName(static_cast<PlayerAnimSlot>(mSelectedSlot));
         std::string hbSizeStr = slotName + " hitbox: "
                               + std::to_string(liveW) + "w x " + std::to_string(liveH) + "h"
                               + "  (sprite: " + std::to_string(srcW) + "x" + std::to_string(srcH) + ")";
         drawText(s, hbSizeStr, mCenterPanel.x + 4, hintY + 44, 13, {255, 200, 80, 255});
 
-        // ── Frame strip: wrapping grid of thumbnails (up to 3 rows, then scroll) ──
         int stripY = hintY + 64;
         const auto& stripPrev = mPreviews[mSelectedSlot];
         if (stripPrev.has_value() && !stripPrev->frames.empty()) {
@@ -984,14 +879,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             int totalRows = (nFrames + cols - 1) / cols;
             int visRows   = std::min(totalRows, MAX_VIS_ROWS);
 
-            // Header
             std::string hdr = "Frames (" + std::to_string(nFrames) + ")";
             if (totalRows > MAX_VIS_ROWS)
                 hdr += "  scroll for more";
             drawText(s, hdr, mCenterPanel.x + 4, stripY, 11, {140, 150, 180, 255});
             stripY += 16;
 
-            // Background
             SDL_Rect stripBg = {mCenterPanel.x + 2, stripY, availW + 4, visRows * CELLH + PAD};
             fillRect(s, stripBg, {14, 16, 28, 255});
             outlineRect(s, stripBg, {50, 55, 80, 255});
@@ -1010,7 +903,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                     int fx = mCenterPanel.x + 4 + col * CELLW;
                     int fy = stripY + PAD + row * CELLH;
 
-                    // Thumbnail
                     const SDL_Rect& fr = stripPrev->frames[fi];
                     SDL_Rect thumbDst = {fx, fy, TH, TH};
                     SDL_Surface* frameSurf = SDL_CreateSurface(fr.w, fr.h, sheet->format);
@@ -1030,14 +922,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
                     int btnY = fy + TH + 2;
                     int halfW = TH / 2;
 
-                    // Duplicate button (left half)
                     SDL_Rect dupBtn = {fx, btnY, halfW, DELH};
                     mFrameDupRects[fi] = dupBtn;
                     fillRect(s, dupBtn, {30, 90, 130, 220});
                     outlineRect(s, dupBtn, {60, 150, 200, 255});
                     drawTextCentered(s, "+", dupBtn, 9, {180, 220, 255, 255});
 
-                    // Delete button (right half)
                     SDL_Rect delBtn = {fx + halfW, btnY, TH - halfW, DELH};
                     mFrameDelRects[fi] = delBtn;
                     fillRect(s, delBtn, {120, 30, 30, 220});
@@ -1048,7 +938,6 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Save & Back buttons
     fillRect(s, mSaveBtnRect, BTN_SAVE);
     outlineRect(s, mSaveBtnRect, {60, 200, 100, 255});
     drawTextCentered(s, "Save Character", mSaveBtnRect, 16);
@@ -1057,7 +946,7 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
     outlineRect(s, mBackBtnRect, {100, 100, 200, 255});
     drawTextCentered(s, "< Back", mBackBtnRect, 16);
 
-    // ── RIGHT: Roster panel ───────────────────────────────────────────────────
+    // --- Right: Roster panel ---
     fillRect(s, mRosterPanel, PANEL_BG);
     outlineRect(s, mRosterPanel, PANEL_OUT);
     drawText(s, "Saved Characters",
@@ -1082,8 +971,7 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // Upload the completed surface to a texture and render it.
-    // LINEAR keeps anti-aliased text smooth on Retina/HiDPI displays.
+    // LINEAR keeps anti-aliased text smooth on HiDPI
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
     SDL_DestroySurface(s);
     if (tex) {
@@ -1094,9 +982,7 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
     window.Update();
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NextScene
-// ─────────────────────────────────────────────────────────────────────────────
+// --- NextScene ---
 
 std::unique_ptr<Scene> PlayerCreatorScene::NextScene() {
     if (mGoBack) {
@@ -1106,25 +992,21 @@ std::unique_ptr<Scene> PlayerCreatorScene::NextScene() {
     return nullptr;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Preview building
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Preview building ---
 
 void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     clearPreview(slotIdx);
     const std::string& dir = mProfile.slots[slotIdx].folderPath;
     if (dir.empty()) return;
 
-    // Guard against stale/missing/non-directory paths (e.g. moved folders, cross-machine paths)
     std::error_code ec;
     bool isDir = fs::is_directory(dir, ec);
     if (!isDir || ec) {
         mDropMsg = "Folder not found (path may be from another machine): " + fs::path(dir).filename().string();
-        mProfile.slots[slotIdx].folderPath.clear(); // clear so it doesn't crash on next load
+        mProfile.slots[slotIdx].folderPath.clear();
         return;
     }
 
-    // Collect sorted PNGs
     std::vector<fs::path> pngs;
     try {
         for (const auto& e : fs::directory_iterator(dir))
@@ -1137,7 +1019,6 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     if (pngs.empty()) return;
     std::sort(pngs.begin(), pngs.end());
 
-    // Load first frame to get dimensions
     SDL_Surface* first = IMG_Load(pngs[0].string().c_str());
     if (!first) {
         mDropMsg = "Failed to load: " + pngs[0].filename().string();
@@ -1146,9 +1027,8 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     int fw = first->w, fh = first->h;
     SDL_DestroySurface(first);
 
-    // Auto-fill spriteW/H from the raw frame size if not yet set by the user.
-    // This sizes the preview cell correctly on first drop so the hitbox editor
-    // is immediately accurate without requiring a manual size entry.
+    // Auto-fill spriteW/H from raw frame size so the hitbox editor is
+    // immediately accurate without requiring manual size entry.
     if (mProfile.spriteW <= 0) {
         mProfile.spriteW = fw;
         mWidthStr = std::to_string(fw);
@@ -1161,10 +1041,8 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     try {
         const int tW = (mProfile.spriteW > 0) ? mProfile.spriteW : 0;
         const int tH = (mProfile.spriteH > 0) ? mProfile.spriteH : 0;
-        // Use the explicit path-list constructor so every PNG in the folder is
-        // loaded in alphabetical order regardless of filename prefix. This matches
-        // GameScene's loadSlot behaviour: reusing the same folder for two slots
-        // (e.g. Walk reused as Crouch at a different fps) previews correctly.
+        // Explicit path-list constructor loads PNGs in alphabetical order,
+        // matching GameScene's loadSlot behaviour for shared folders.
         std::vector<std::string> pathStrs;
         pathStrs.reserve(pngs.size());
         for (const auto& p : pngs) pathStrs.push_back(p.string());
@@ -1200,7 +1078,6 @@ void PlayerCreatorScene::deleteFrame(int slotIdx, int frameIdx) {
     if (!prev.has_value() || frameIdx < 0 || frameIdx >= (int)prev->paths.size())
         return;
 
-    // Delete the actual PNG file from disk
     const std::string& path = prev->paths[frameIdx];
     std::error_code ec;
     fs::remove(path, ec);
@@ -1210,12 +1087,10 @@ void PlayerCreatorScene::deleteFrame(int slotIdx, int frameIdx) {
     }
     mDropMsg = "Deleted: " + fs::path(path).filename().string();
 
-    // Rebuild the preview from the folder (which now has one fewer PNG)
     rebuildPreview(slotIdx);
     recomputePreviewRect();
     initHBFromProfile(slotIdx);
 
-    // Clamp animation frame
     if (mPreviews[slotIdx].has_value()) {
         int n = (int)mPreviews[slotIdx]->frames.size();
         if (mAnimFrame >= n) mAnimFrame = std::max(0, n - 1);
@@ -1235,7 +1110,6 @@ void PlayerCreatorScene::duplicateFrame(int slotIdx, int frameIdx) {
     const std::string stem = src.stem().string();
     const std::string ext  = src.extension().string();
 
-    // Find a unique name: <stem>_dup1, _dup2, ...
     fs::path dst;
     for (int n = 1; ; ++n) {
         dst = dir / (stem + "_dup" + std::to_string(n) + ext);
@@ -1256,16 +1130,13 @@ void PlayerCreatorScene::duplicateFrame(int slotIdx, int frameIdx) {
     mFrameStripScroll = 0;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Hitbox editor helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Hitbox editor ---
 
 void PlayerCreatorScene::recomputePreviewRect() {
     const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
 
-    // Preview top is always anchored relative to the centre panel, never
-    // derived from the old mPreviewCellRect.y (which may be stale/zero).
+    // Anchor preview top relative to centre panel, not the old (possibly stale) cell rect
     const int previewTop = mCenterPanel.y + 126;
     const int MID_W      = mCenterPanel.w;
 
@@ -1273,7 +1144,6 @@ void PlayerCreatorScene::recomputePreviewRect() {
     const int cellH = srcH + PREVIEW_PAD * 2;
     mPreviewCellRect = {mCenterPanel.x + (MID_W - cellW) / 2, previewTop, cellW, cellH};
 
-    // Sprite sits at cell top-left + padding, 1:1
     mPreviewRenderRect = {mPreviewCellRect.x + PREVIEW_PAD,
                           mPreviewCellRect.y + PREVIEW_PAD,
                           srcW, srcH};
@@ -1283,27 +1153,8 @@ void PlayerCreatorScene::recomputePreviewRect() {
 }
 
 void PlayerCreatorScene::initHBFromProfile(int slotIdx) {
-    // ── Sprite-first layout ────────────────────────────────────────────────────
-    //
-    // Game model (GameScene::Spawn):
-    //   Transform  = collider top-left
-    //   roffX = -hb.x   (sprite left is hb.x px to the LEFT of the collider left)
-    //   roffY = -hb.y   (sprite top  is hb.y px ABOVE the collider top)
-    //   Physics floor = collider BOTTOM = transform.y + hb.h
-    //   Sprite bottom = transform.y - hb.y + spriteH  (may extend below floor)
-    //
-    // Editor preview mirrors this exactly:
-    //   1. Sprite bottom-aligned to cell floor (sprite bottom = floorY)
-    //      => spriteY = floorY - drawH
-    //   2. Sprite centered horizontally
-    //      => spriteX = cellX + (cellW - drawW) / 2
-    //   3. Collider placed at sprite + hb offset
-    //      => colScreenX = spriteX + hbX*scale
-    //      => colScreenY = spriteY + hbY*scale
-    //   4. Green floor line drawn at collider bottom (= physics floor)
-    //      => dim line at sprite bottom shows any sprite overflow below floor
-    //
-    // Round-trip: hb.x = (col.x - sprite.x) / scale  (no drift, no circularity)
+    // Game model: Transform = collider top-left, roffX = -hb.x, roffY = -hb.y,
+    // physics floor = collider bottom. Editor mirrors this at 1:1 scale.
 
     const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
@@ -1314,19 +1165,16 @@ void PlayerCreatorScene::initHBFromProfile(int slotIdx) {
                        ? mPreviewCellRect.y + cellH
                        : mPreviewRenderRect.y + mPreviewRenderRect.h;
 
-    // Always render at 1:1 pixel scale so the editor exactly matches the game.
-    // The cell (300x300) is large enough to contain any reasonable sprite size.
     const float scale = 1.0f;
     const int   drawW = srcW;
     const int   drawH = srcH;
 
-    // Resolve effective hitbox (sprite-local px)
     const auto& hb = mProfile.slots[slotIdx].hitbox;
     int hbX, hbY, hbW, hbH;
     if (!hb.IsDefault()) {
         hbX = hb.x;  hbY = hb.y;  hbW = hb.w;  hbH = hb.h;
     } else {
-        // Mirror game fallback: proportional frost-knight insets
+        // Proportional frost-knight insets as fallback
         const float baseW = 120.0f, baseH = 160.0f;
         hbX = (int)std::round(32.0f * srcW / baseW);
         hbY = (int)std::round(33.0f * srcH / baseH);
@@ -1334,12 +1182,10 @@ void PlayerCreatorScene::initHBFromProfile(int slotIdx) {
         hbH = (int)std::round(srcH - 33.0f * srcH / baseH - 26.0f * srcH / baseH);
     }
 
-    // ── Step 1: sprite rect — inset by padding inside the cell at 1:1 scale ──
     const int spriteX = mPreviewCellRect.x + PREVIEW_PAD;
     const int spriteY = mPreviewCellRect.y + PREVIEW_PAD;
     mPreviewRenderRect = {spriteX, spriteY, drawW, drawH};
 
-    // ── Step 2: collider rect — offset from sprite by hb.x/hb.y in scaled px ───
     const int colW_px  = (int)std::round(hbW * scale);
     const int colH_px  = (int)std::round(hbH * scale);
     const int colScreenX = spriteX + (int)std::round(hbX * scale);
@@ -1354,22 +1200,14 @@ void PlayerCreatorScene::commitHBToProfile(int slotIdx) {
     SDL_Rect nr = normaliseRect(mHBRect);
     auto& hb = mProfile.slots[slotIdx].hitbox;
 
-    // mHBRect   = COLLIDER in screen coords  (dragged by the user)
-    // mPreviewRenderRect = SPRITE in screen coords  (set once by initHBFromProfile,
-    //             NEVER overwritten by Render() or drag handlers — it is stable).
-    //
-    // The sprite position is invariant while editing: only the collider box moves.
-    // So mPreviewRenderRect.x/y is always the correct sprite origin for conversion.
+    // mPreviewRenderRect = stable sprite origin (set once by initHBFromProfile,
+    // never overwritten by drags or Render). Only the collider box moves.
 
     const int srcW = (mProfile.spriteW > 0) ? mProfile.spriteW : PREVIEW_W;
     const int srcH = (mProfile.spriteH > 0) ? mProfile.spriteH : PREVIEW_H;
-    // 1:1 scale — no conversion needed, screen px == sprite px
     const float scale    = 1.0f;
     const float invScale = 1.0f;
 
-    // Convert collider screen coords to sprite-local px.
-    // mPreviewRenderRect is the stable sprite origin (set once at init, never
-    // overwritten by drags or Render). Collider offset from sprite origin = hb.x/y.
     int localX = nr.x - mPreviewRenderRect.x;
     int localY = nr.y - mPreviewRenderRect.y;
 
@@ -1378,7 +1216,6 @@ void PlayerCreatorScene::commitHBToProfile(int slotIdx) {
     hb.w = std::max(1, (int)std::round(nr.w * invScale));
     hb.h = std::max(1, (int)std::round(nr.h * invScale));
 
-    // Clamp to sprite bounds
     hb.x = std::clamp(hb.x, 0, srcW - 1);
     hb.y = std::clamp(hb.y, 0, srcH - 1);
     hb.w = std::clamp(hb.w, 1, srcW - hb.x);
@@ -1390,27 +1227,24 @@ int PlayerCreatorScene::hitboxHandleAt(int mx, int my) const {
     SDL_Rect r = normaliseRect(mHBRect);
     const int HSZ = HB_HANDLE_SZ;
 
-    // Corner handles (priority over body)
     SDL_Rect corners[4] = {
-        {r.x - HSZ/2,           r.y - HSZ/2,           HSZ, HSZ}, // TL=0
-        {r.x + r.w - HSZ/2,     r.y - HSZ/2,           HSZ, HSZ}, // TR=1
-        {r.x + r.w - HSZ/2,     r.y + r.h - HSZ/2,     HSZ, HSZ}, // BR=2
-        {r.x - HSZ/2,           r.y + r.h - HSZ/2,     HSZ, HSZ}, // BL=3
+        {r.x - HSZ/2,           r.y - HSZ/2,           HSZ, HSZ},
+        {r.x + r.w - HSZ/2,     r.y - HSZ/2,           HSZ, HSZ},
+        {r.x + r.w - HSZ/2,     r.y + r.h - HSZ/2,     HSZ, HSZ},
+        {r.x - HSZ/2,           r.y + r.h - HSZ/2,     HSZ, HSZ},
     };
     for (int i = 0; i < 4; ++i)
         if (hit(corners[i], mx, my)) return i;
 
-    // Body
     if (hit(r, mx, my)) return 4;
     return -1;
 }
 
 void PlayerCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
     if (!mHBInitialised) return;
-    SDL_Rect r = normaliseRect(mHBRect);  // true logical rect — never clip this
+    SDL_Rect r = normaliseRect(mHBRect);
 
-    // Semi-transparent fill — clip fill to the cell (not the sprite rect) so it
-    // doesn't bleed outside the preview area. The collider can be smaller than the sprite.
+    // Semi-transparent fill clipped to the cell
     {
         SDL_Rect pr = mPreviewCellRect;
         SDL_Rect fill = r;
@@ -1433,14 +1267,12 @@ void PlayerCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
         }
     }
 
-    // Outline drawn at true rect position (may extend 1px outside preview — fine)
     outlineRect(surf, r, HB_COLOR, 2);
 
-    // Center crosshair — shows the hitbox midpoint so you can verify body alignment
     {
         int cx = r.x + r.w / 2;
         int cy = r.y + r.h / 2;
-        const int CL = 6; // crosshair arm length
+        const int CL = 6;
         SDL_Rect hLine = {cx - CL, cy, CL * 2 + 1, 1};
         SDL_Rect vLine = {cx,      cy - CL, 1, CL * 2 + 1};
         const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(surf->format);
@@ -1449,13 +1281,12 @@ void PlayerCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
         SDL_FillSurfaceRect(surf, &vLine, col);
     }
 
-    // Corner handles — always drawn at true logical corners so click targets match visuals
-    const int HSZ = HB_HANDLE_SZ;  // larger handles = easier to grab
+    const int HSZ = HB_HANDLE_SZ;
     SDL_Rect corners[4] = {
-        {r.x - HSZ/2,       r.y - HSZ/2,       HSZ, HSZ},  // TL
-        {r.x + r.w - HSZ/2, r.y - HSZ/2,       HSZ, HSZ},  // TR
-        {r.x + r.w - HSZ/2, r.y + r.h - HSZ/2, HSZ, HSZ},  // BR
-        {r.x - HSZ/2,       r.y + r.h - HSZ/2, HSZ, HSZ},  // BL
+        {r.x - HSZ/2,       r.y - HSZ/2,       HSZ, HSZ},
+        {r.x + r.w - HSZ/2, r.y - HSZ/2,       HSZ, HSZ},
+        {r.x + r.w - HSZ/2, r.y + r.h - HSZ/2, HSZ, HSZ},
+        {r.x - HSZ/2,       r.y + r.h - HSZ/2, HSZ, HSZ},
     };
     for (auto& c : corners) {
         fillRect(surf, c, {255, 220, 80, 255});
@@ -1463,9 +1294,7 @@ void PlayerCreatorScene::renderHitboxOverlay(SDL_Surface* surf) const {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Roster
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Roster ---
 
 void PlayerCreatorScene::refreshRoster() {
     mRoster.clear();
@@ -1482,10 +1311,8 @@ void PlayerCreatorScene::loadRosterEntry(int idx) {
     if (idx < 0 || idx >= (int)mRoster.size()) return;
     PlayerProfile loaded;
     if (LoadPlayerProfile(mRoster[idx].path, loaded)) {
-        // Only commit if we have a valid layout — avoid writing garbage on first load
         if (mHBInitialised && mPreviewCellRect.w > 0)
             commitHBToProfile(mSelectedSlot);
-        // Clear old previews
         for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) mPreviews[i].reset();
         mProfile = std::move(loaded);
         mLoadedName  = mProfile.name;
@@ -1503,9 +1330,7 @@ void PlayerCreatorScene::loadRosterEntry(int idx) {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Text input
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Text input ---
 
 void PlayerCreatorScene::startTextInput() {
     if (!mNameActive) {
@@ -1521,9 +1346,7 @@ void PlayerCreatorScene::stopTextInput() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Draw helpers
-// ─────────────────────────────────────────────────────────────────────────────
+// --- Draw helpers ---
 
 void PlayerCreatorScene::fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
     const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
@@ -1558,7 +1381,6 @@ void PlayerCreatorScene::drawTextCentered(SDL_Surface* s, const std::string& str
 
 void PlayerCreatorScene::blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect) {
     if (!src || !dst) return;
-    // Maintain aspect ratio, centre in dstRect
     float scaleX = (float)dstRect.w / src->w;
     float scaleY = (float)dstRect.h / src->h;
     float scale  = std::min(scaleX, scaleY);

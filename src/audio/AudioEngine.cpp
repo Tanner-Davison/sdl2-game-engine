@@ -1,4 +1,4 @@
-// audio/AudioEngine.cpp -- High-level audio facade implementation (SDL3_mixer).
+// audio/AudioEngine.cpp
 #include "audio/AudioEngine.hpp"
 #include <print>
 
@@ -7,12 +7,11 @@ namespace audio {
 bool AudioEngine::Init() {
     if (!mDevice.Open()) return false;
 
-    // Wire the mixer into sub-components
     mSfx.SetMixer(mDevice.GetMixer());
 
     if (!mMusic.Init(mDevice.GetMixer())) {
-        std::print("[AudioEngine] MusicPlayer init failed (non-fatal)\n");
         // Non-fatal: SFX still work even if music track creation fails
+        std::print("[AudioEngine] MusicPlayer init failed (non-fatal)\n");
     }
 
     std::print("[AudioEngine] Initialized\n");

@@ -364,7 +364,6 @@ class TitleScene : public Scene {
     }
 
     void Update(float dt) override {
-        // Loading animation for editor transition
         if (mLoadingEditor) {
             mLoadingTimer += dt;
             if (mLoadingTimer >= 0.35f) {
@@ -376,7 +375,7 @@ class TitleScene : public Scene {
 
         if (!mCharPickerOpen || mCharCards.empty()) return;
 
-        // Lazy-load one walk frame per card per tick (spread cost across frames)
+        // Lazy-load one walk frame per card per tick
         for (auto& c : mCharCards) {
             if (c.walkLoadIdx < (int)c.walkPaths.size()) {
                 SDL_Surface* raw = IMG_Load(c.walkPaths[c.walkLoadIdx].string().c_str());
@@ -396,7 +395,6 @@ class TitleScene : public Scene {
             }
         }
 
-        // Advance walk animation on the highlighted card
         if (mCharPickerHighlight >= 0 && mCharPickerHighlight < (int)mCharCards.size()) {
             auto& active = mCharCards[mCharPickerHighlight];
             if (!active.walkFrames.empty()) {
@@ -424,14 +422,12 @@ class TitleScene : public Scene {
         if (createEnemyButton)  { createEnemyButton->Render(ren);  createEnemyBtnText->Render(ren); }
         if (tileAssetsButton)   { tileAssetsButton->Render(ren);   tileAssetsBtnText->Render(ren); }
 
-        // Character selector — single "Choose Character" button
         if (mProfileSelectorBg.w > 0) {
             fillRect(ren, mProfileSelectorBg, {28, 32, 52, 255});
             outlineRect(ren, mProfileSelectorBg, {80, 100, 180, 255});
         }
         if (mProfileLabel)    mProfileLabel->Render(ren);
         if (mProfileNameText) mProfileNameText->Render(ren);
-        // Replace arrow buttons with a single "Choose..." button
         if (mProfileSelectorBg.w > 0) {
             fillRect(ren, mChooseCharBtnRect, {55, 40, 110, 255});
             outlineRect(ren, mChooseCharBtnRect, {120, 80, 220, 255});
@@ -442,7 +438,6 @@ class TitleScene : public Scene {
 
         if (viewLevelsButton) { viewLevelsButton->Render(ren); viewLevelsBtnText->Render(ren); }
 
-        // Gamepad focus indicator
         if (mPadFocus >= 0) {
             SDL_Rect fr = padFocusRect();
             if (fr.w > 0) {
@@ -451,12 +446,12 @@ class TitleScene : public Scene {
             }
         }
 
-        // ── Character picker popup ─────────────────────────────────────────────
+        // --- Character picker popup ---
         if (mCharPickerOpen) {
             renderCharPicker(ren);
         }
 
-        // ── Delete confirmation modal ─────────────────────────────────────────
+        // --- Delete confirmation modal ---
         if (mDelConfirmOpen) {
             int W = window.GetWidth(), H = window.GetHeight();
             SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
@@ -503,7 +498,7 @@ class TitleScene : public Scene {
             hint.Render(ren);
         }
 
-        // ── Name prompt modal overlay ─────────────────────────────────────────
+        // --- Name prompt modal ---
         if (mNamingActive) {
             int W = window.GetWidth(), H = window.GetHeight();
             SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
@@ -526,7 +521,7 @@ class TitleScene : public Scene {
             if (promptHint)  promptHint->Render(ren);
         }
 
-        // ── Level browser modal overlay ───────────────────────────────────────
+        // --- Level browser modal ---
         if (mLevelBrowserOpen && !mDelConfirmOpen) {
             int W = window.GetWidth(), H = window.GetHeight();
             SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
@@ -539,7 +534,6 @@ class TitleScene : public Scene {
             fillRect(ren, panel, {18, 20, 32, 245});
             outlineRect(ren, panel, {60, 90, 180, 255}, 2);
 
-            // Header
             fillRect(ren, {px + 2, py + 2, pw - 4, 44}, {28, 32, 52, 255});
             Text hdr("Levels", {255, 215, 0, 255}, px + 16, py + 10, 22);
             hdr.Render(ren);
@@ -549,7 +543,6 @@ class TitleScene : public Scene {
                 cnt.Render(ren);
             }
 
-            // Close button
             mBrowserCloseRect = {px + pw - 38, py + 6, 32, 32};
             fillRect(ren, mBrowserCloseRect, {120, 35, 35, 255});
             outlineRect(ren, mBrowserCloseRect, {200, 70, 70, 255});
@@ -557,7 +550,6 @@ class TitleScene : public Scene {
             Text closeX("X", {255, 220, 220, 255}, cxx, cxy, 14);
             closeX.Render(ren);
 
-            // New Level button
             int newBtnY = py + 54;
             mBrowserNewRect = {px + 16, newBtnY, pw - 32, 34};
             fillRect(ren, mBrowserNewRect, {45, 50, 100, 255});
@@ -566,7 +558,6 @@ class TitleScene : public Scene {
             Text newLbl("+ New Level", {160, 180, 255, 255}, nlx, nly, 16);
             newLbl.Render(ren);
 
-            // List area
             int listTop = py + 96, listBottom = py + ph - 8;
             mBrowserListY = listTop;
             int rowH = 44, rowGap = 4, pad = 16;
@@ -575,7 +566,6 @@ class TitleScene : public Scene {
             int editW = 56, delW = 46, btnGap = 4;
             int playW = rowW - editW - delW - btnGap * 2;
 
-            // Clip to list area
             SDL_Rect clipRect = {px + 2, listTop, pw - 4, listBottom - listTop};
             SDL_SetRenderClipRect(ren, (SDL_Rect*)&clipRect);
 
@@ -587,7 +577,6 @@ class TitleScene : public Scene {
                 bool isHover = (i == mHoverRow) || (i == mBrowserPadRow && mPadFocus >= 0);
                 bool isLoading = (mLoadingEditor && i == mLoadingIdx);
 
-                // Play/name button
                 SDL_Rect pr = {rowX, ry, playW, rowH};
                 SDL_Color playBg  = isLoading ? SDL_Color{60,60,60,255}
                                    : (isHover && mHoverPlay) ? SDL_Color{40,140,70,255}
@@ -602,7 +591,6 @@ class TitleScene : public Scene {
                 Text lbl(nm, {255,255,255,255}, lx, ly, 16);
                 lbl.Render(ren);
 
-                // Edit button
                 SDL_Rect er = {rowX + playW + btnGap, ry, editW, rowH};
                 SDL_Color editBg  = isLoading ? SDL_Color{80,80,80,255}
                                     : (isHover && mHoverEdit) ? SDL_Color{70,110,200,255}
@@ -612,8 +600,7 @@ class TitleScene : public Scene {
                 fillRect(ren, er, editBg);
                 outlineRect(ren, er, editBdr);
                 if (isLoading) {
-                    // Spinning dots loading indicator
-                    const char* dots[] = {".  ", ".. ", "...", " ..", "  ."};
+                            const char* dots[] = {".  ", ".. ", "...", " ..", "  ."};
                     int dotIdx = (int)(mLoadingTimer * 8.0f) % 5;
                     auto [ldx, ldy] = Text::CenterInRect(dots[dotIdx], 14, er);
                     Text ldots(dots[dotIdx], {200,220,255,255}, ldx, ldy, 14);
@@ -624,7 +611,6 @@ class TitleScene : public Scene {
                     elbl.Render(ren);
                 }
 
-                // Delete button
                 SDL_Rect dr = {rowX + playW + btnGap + editW + btnGap, ry, delW, rowH};
                 SDL_Color delBg  = (isHover && mHoverDel) ? SDL_Color{180,45,45,255}
                                    : SDL_Color{120,30,30,255};
@@ -687,7 +673,7 @@ class TitleScene : public Scene {
         return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
     }
 
-    // ── Renderer-based draw helpers ───────────────────────────────────────────
+    // --- Draw helpers ---
     static void fillRect(SDL_Renderer* ren, SDL_Rect r, SDL_Color c) {
         SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
         SDL_FRect fr = {(float)r.x, (float)r.y, (float)r.w, (float)r.h};
@@ -695,7 +681,6 @@ class TitleScene : public Scene {
     }
     static void outlineRect(SDL_Renderer* ren, SDL_Rect r, SDL_Color c, int t = 1) {
         SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
-        // Draw t-pixel border as filled rects on each side
         SDL_FRect sides[4] = {
             {(float)r.x,           (float)r.y,           (float)r.w, (float)t},
             {(float)r.x,           (float)(r.y+r.h-t),   (float)r.w, (float)t},
@@ -705,7 +690,7 @@ class TitleScene : public Scene {
         for (auto& s : sides) SDL_RenderFillRect(ren, &s);
     }
 
-    // ── Name prompt helpers ───────────────────────────────────────────────────
+    // --- Name prompt helpers ---
     void openNamePrompt() {
         mNamingActive = true; mNewLevelName.clear(); mNameError.clear();
         mLevelBrowserOpen = false;
@@ -731,14 +716,14 @@ class TitleScene : public Scene {
             promptError.reset();
     }
 
-    // ── Level button list ─────────────────────────────────────────────────────
+    // --- Level button list ---
     struct LevelButton {
         std::string path;
         SDL_Rect    rect     = {-1,-1,0,0};
         SDL_Rect    editRect = {-1,-1,0,0};
         SDL_Rect    delRect  = {-1,-1,0,0};
     };
-    int  mHoverRow       = -1;  // row under cursor (-1 = none)
+    int  mHoverRow       = -1;
     bool mHoverEdit      = false;
     bool mHoverDel       = false;
     bool mHoverPlay      = false;
@@ -763,7 +748,7 @@ class TitleScene : public Scene {
         if (mLevelBrowserScroll > maxScroll) mLevelBrowserScroll = maxScroll;
     }
 
-    // ── Profile selector helpers ──────────────────────────────────────────────
+    // --- Profile selector helpers ---
     void scanProfiles() {
         mProfiles.clear();
         mProfiles.push_back("");
@@ -785,16 +770,15 @@ class TitleScene : public Scene {
                                                   cx - selW/2 + 90, selY + 7, 14);
     }
 
-    // ── Character picker popup ────────────────────────────────────────────────
+    // --- Character picker popup ---
     struct CharCard {
         std::string  name;
-        std::string  profilePath;            // empty = default frost knight
-        SDL_Texture* previewTex = nullptr;   // first idle frame, pre-uploaded to GPU
-        SDL_Rect     rect{};                 // card rect (before scroll offset)
+        std::string  profilePath;
+        SDL_Texture* previewTex = nullptr;
+        SDL_Rect     rect{};
 
-        // Walk animation (active card only) ─ lazily loaded after open
-        std::vector<SDL_Texture*> walkFrames;   // uploaded walk textures
-        std::vector<fs::path>     walkPaths;    // all walk PNGs (sorted)
+        std::vector<SDL_Texture*> walkFrames;
+        std::vector<fs::path>     walkPaths;
         int  walkLoadIdx  = 0;    // next walkPaths index to upload
         int  walkAnimFrame = 0;   // current display frame
         float walkAnimTimer = 0.f;
@@ -804,25 +788,20 @@ class TitleScene : public Scene {
     bool                  mCharPickerOpen        = false;
     int                   mCharPickerScroll      = 0;
     int                   mCharPickerMaxScroll   = 0;
-    int                   mCharPickerHighlight   = 0;  // card being previewed (not yet committed)
+    int                   mCharPickerHighlight   = 0;
     SDL_Rect              mCharPickerPanel{};
     SDL_Rect              mCharPickerCloseRect{};
-    SDL_Rect              mCharPickerSelectRect{};     // "Select Player" button
+    SDL_Rect              mCharPickerSelectRect{};
     SDL_Rect              mChooseCharBtnRect{};
     SDL_Renderer*         mRenderer = nullptr;
 
     void openCharPicker();
     void renderCharPicker(SDL_Renderer* ren);
 
-    // ── Gamepad navigation ───────────────────────────────────────────────────
-    // Main menu: 2-column grid of 7 buttons
-    //   [0] Level Editor    [1] Play Level
-    //   [2] Create Player   [3] Tile Animator
-    //   [4] Create Enemy    [5] Tile Assets
-    //   [6] Choose Character (full width)
-    int   mPadFocus       = -1;    // -1 = mouse mode, 0-6 = focused button
-    int   mBrowserPadRow  = 0;     // focused row in level browser
-    bool  mDelPadOnYes    = false; // delete dialog: true=Delete, false=Cancel
+    // --- Gamepad navigation ---
+    int   mPadFocus       = -1;
+    int   mBrowserPadRow  = 0;
+    bool  mDelPadOnYes    = false;
 
     void padNavigate(int dx, int dy) {
         if (mPadFocus < 0) mPadFocus = 0;
@@ -893,7 +872,7 @@ class TitleScene : public Scene {
         return false;
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // --- State ---
     SDL_Window*   mSDLWindow           = nullptr;
     bool          startGame            = false;
     bool          openEditor           = false;

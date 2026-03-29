@@ -20,20 +20,11 @@
 #include <vector>
 #include <array>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GameScene — Level 1
-//
-// Owns the EnTT registry and orchestrates all systems for a single game level.
-// Implementation lives in GameScene.cpp to keep compile times manageable.
-// ─────────────────────────────────────────────────────────────────────────────
 class GameScene : public Scene {
   public:
-    // Default constructor — uses hardcoded / random level data
     GameScene() = default;
 
-    // Load from a saved level file (produced by LevelEditorScene).
-    // fromEditor=true means ESC pause menu offers "Back to Editor" instead of "Back to Title".
-    // profilePath: path to a saved PlayerProfile JSON (empty = use default frost knight)
+    // fromEditor=true → pause menu offers "Back to Editor" instead of "Back to Title"
     explicit GameScene(const std::string& levelPath, bool fromEditor = false,
                        const std::string& profilePath = "");
 
@@ -48,7 +39,7 @@ class GameScene : public Scene {
   private:
     entt::registry reg;
     Camera         mCamera;
-    float          mLevelW            = 0.0f; // computed from tile extents on Spawn
+    float          mLevelW            = 0.0f;
     float          mLevelH            = 0.0f;
     bool           gameOver           = false;
     bool           mPlayerDying       = false;
@@ -60,18 +51,18 @@ class GameScene : public Scene {
     int            stompCount         = 0;
     Window*        mWindow            = nullptr;
     std::string    mLevelPath;
-    std::string    mProfilePath;               // path to PlayerProfile JSON (empty = frost knight)
-    int            mPlayerSpriteW = 0;         // resolved sprite width  (set in Load, used in Spawn)
-    int            mPlayerSpriteH = 0;         // resolved sprite height (set in Load, used in Spawn)
-    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};     // per-slot fps from profile (0 = engine default)
+    std::string    mProfilePath;
+    int            mPlayerSpriteW = 0;
+    int            mPlayerSpriteH = 0;
+    std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};
     struct SfxFileInfo { float volume = 1.0f; bool timeStretch = false; float trimStart = 0.0f; float trimEnd = 1.0f; };
     std::array<std::vector<SfxFileInfo>, PLAYER_ANIM_SLOT_COUNT> mSlotSfx{};
     std::array<int, PLAYER_ANIM_SLOT_COUNT> mSlotSfxNext{};
-    bool           mHasProfile        = false;  // true = a valid PlayerProfile was loaded
-    bool           mFromEditor        = false;  // true = launched via editor Play button
-    bool           mPaused            = false;  // true = pause overlay active, simulation frozen
-    bool           mGoBackFromPause   = false;  // set by pause overlay "Back" button
-    bool           mDebugHitboxes     = false;  // F1 toggles hitbox overlay
+    bool           mHasProfile        = false;
+    bool           mFromEditor        = false;
+    bool           mPaused            = false;
+    bool           mGoBackFromPause   = false;
+    bool           mDebugHitboxes     = false;
 
     // Pause overlay UI (built lazily on first pause, reused)
     SDL_Rect                   mPauseResumeRect{};
@@ -100,16 +91,14 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     // Custom enemy type sprite sheets — kept alive so GPU textures remain valid
     std::vector<std::unique_ptr<SpriteSheet>> mEnemySpriteSheets;
-    SDL_Texture*                 mBulletTex = nullptr; // 4x4 black square for turret bullets
-    std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload only
+    SDL_Texture*                 mBulletTex = nullptr;
+    std::vector<SDL_Texture*>    tileScaledTextures;
     // Tile texture cache: key = "path|WxH|rROT" → non-owning ptr into tileScaledTextures.
     // Populated in Spawn(), never cleared between Respawn() calls — only in Unload().
     std::unordered_map<std::string, SDL_Texture*> tileTextureCache;
-    // Animated tile frame textures, keyed by entity. Each vector is parallel to
-    // the entity's AnimationState frame count.
+    // Animated tile frame textures, keyed by entity (parallel to AnimationState frame count)
     std::unordered_map<entt::entity, std::vector<SDL_Texture*>> tileAnimFrameMap;
-    // Pre-sorted render list for tile Pass 1 (built in Spawn, updated when action
-    // tiles are destroyed).  Avoids per-frame allocation + sort in RenderSystem.
+    // Pre-sorted render list for tile Pass 1 (avoids per-frame allocation + sort in RenderSystem)
     std::vector<entt::entity> mSortedTileRenderList;
     std::vector<SDL_Rect>        walkFrames;
     std::vector<SDL_Rect>        jumpFrames;

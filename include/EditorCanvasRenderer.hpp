@@ -1,17 +1,7 @@
 #pragma once
-// EditorCanvasRenderer.hpp
-//
-// Renders the canvas region of the level editor:
-//   - Background (delegated to Image)
-//   - Grid lines
-//   - Placed tiles (with rotation, color-mod, badges, slope lines, overlays)
-//   - Moving-platform overlay (paths, ghost tiles, config popup)
-//   - Enemies / player marker
-//   - Tool overlay dispatch (SelectTool marquee, ResizeTool/HitboxTool handles)
-//   - Tile ghost (placement preview under cursor)
-//
-// Receives non-owning references to every shared object it needs so it
-// remains dependency-free from LevelEditorScene directly.
+// EditorCanvasRenderer.hpp — renders the canvas region: background, grid,
+// tiles, enemies, player marker, tool overlays, and tile ghost preview.
+// Holds no state beyond the movplat popup rect; receives everything via Render().
 
 #include "EditorCamera.hpp"
 #include "EditorPalette.hpp"
@@ -31,9 +21,6 @@
 
 class EditorCanvasRenderer {
   public:
-    // All fields are non-owning references / pointers set before each Render call.
-    // LevelEditorScene owns the actual objects.
-
     struct MovPlatState {
         const std::vector<int>* indices = nullptr;
         int   curGroupId  = 1;
@@ -48,7 +35,6 @@ class EditorCanvasRenderer {
         SDL_Rect    popupRect{};
     };
 
-    // ── Call once per frame from LevelEditorScene::Render ───────────────────
     void Render(Window&              window,
                 SDL_Surface*         screen,
                 int                  canvasW,
@@ -68,11 +54,9 @@ class EditorCanvasRenderer {
                 const std::vector<std::unique_ptr<Image>>* parallaxImages = nullptr,
                 const std::vector<float>* parallaxFactors = nullptr);
 
-    // Returns the updated popup rect (computed each frame when popup is open)
     [[nodiscard]] SDL_Rect MovPlatPopupRect() const { return mMovPlatPopupRect; }
 
   private:
-    // ── Internal helpers ─────────────────────────────────────────────────────
     static void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void DrawRectAlpha(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void DrawOutline(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);

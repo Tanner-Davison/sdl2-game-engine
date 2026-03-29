@@ -6,9 +6,9 @@ inline void CenterPullSystem(entt::registry& reg, float dt, int windowW, int win
     auto view = reg.view<Transform, Velocity, GravityState, ClimbState, PlayerTag>();
     view.each([dt, windowW, windowH](Transform& t, Velocity& v, GravityState& g, const ClimbState& climb) {
         if (g.active)
-            return; // only runs in free mode (gravity off)
+            return;
         if (climb.climbing || climb.atTop)
-            return; // ladder system owns position — don't fight it
+            return; // ladder system owns position
 
         float centerX = windowW / 2.0f;
         float centerY = windowH / 2.0f;

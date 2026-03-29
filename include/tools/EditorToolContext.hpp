@@ -1,14 +1,9 @@
 #pragma once
 // EditorToolContext.hpp
 //
-// Non-owning view of the shared editor state that every tool needs.
-// Passed by reference into tool methods so tools can read/write level data,
-// query camera transforms, update the status bar, and access caches
-// without knowing about LevelEditorScene directly.
-//
-// Design: tools never include LevelEditorScene.hpp -- they only see this
-// lightweight context. This breaks the circular dependency chain and keeps
-// each tool's compilation unit small.
+// Non-owning view of shared editor state passed to every tool method.
+// Tools never include LevelEditorScene.hpp -- they only see this context,
+// breaking the circular dependency and keeping compilation units small.
 
 #include "EditorCamera.hpp"
 #include "EditorSurfaceCache.hpp"
@@ -21,29 +16,18 @@
 #include <string>
 
 struct EditorToolContext {
-    // ── Level data (read/write) ──────────────────────────────────────────────
     Level& level;
-
-    // ── Camera (read/write for pan, read for coord transforms) ───────────────
     EditorCamera& camera;
-
-    // ── Surface cache (read for thumbnails, badges, rotations) ───────────────
     EditorSurfaceCache& surfaceCache;
 
-    // ── Layout constants ─────────────────────────────────────────────────────
     int grid     = 38;
     int toolbarH = 48;
 
-    // ── Status callback — tool calls this to update the bottom status bar ────
     std::function<void(const std::string&)> setStatus;
-
-    // ── Canvas width callback — depends on palette collapsed state ────────────
     std::function<int()> canvasW;
 
-    // ── SDL window handle — needed for SDL_StartTextInput / SDL_StopTextInput ─
+    // Needed for SDL_StartTextInput / SDL_StopTextInput
     SDL_Window* sdlWindow = nullptr;
-
-    // ── Convenience wrappers ─────────────────────────────────────────────────
 
     [[nodiscard]] SDL_Point ScreenToWorld(int sx, int sy) const {
         return camera.ScreenToWorld(sx, sy);
@@ -64,8 +48,6 @@ struct EditorToolContext {
     void SetStatus(const std::string& msg) {
         if (setStatus) setStatus(msg);
     }
-
-    // ── Hit-testing helpers ──────────────────────────────────────────────────
 
     [[nodiscard]] static bool HitTest(const SDL_Rect& r, int x, int y) {
         return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
@@ -99,8 +81,6 @@ struct EditorToolContext {
         }
         return -1;
     }
-
-    // ── Surface drawing helpers (thin wrappers so tools can render overlays) ─
 
     static void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
         const auto* fmt = SDL_GetPixelFormatDetails(s->format);

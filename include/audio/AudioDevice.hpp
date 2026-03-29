@@ -1,8 +1,5 @@
 // audio/AudioDevice.hpp -- RAII wrapper for SDL3_mixer init + mixer device.
-//
-// Owns the MIX_Mixer* (the top-level SDL3_mixer object that drives an
-// audio device). Exactly one instance should exist, created early in
-// main() and destroyed at shutdown. Non-copyable, movable.
+// Owns MIX_Mixer*; exactly one instance, created early in main(). Non-copyable, movable.
 #pragma once
 
 #include <SDL3_mixer/SDL_mixer.h>
@@ -21,7 +18,6 @@ class AudioDevice {
     ~AudioDevice();
 
     /// Initialize SDL3_mixer and open the default playback device.
-    /// @return true on success.
     bool Open();
 
     /// Close the mixer device and quit SDL3_mixer.
@@ -29,8 +25,7 @@ class AudioDevice {
 
     [[nodiscard]] bool IsOpen() const { return mMixer != nullptr; }
 
-    /// Raw access to the MIX_Mixer — needed by SoundBank and MusicPlayer
-    /// to load audio and create tracks.
+    /// Needed by SoundBank and MusicPlayer to load audio and create tracks.
     [[nodiscard]] MIX_Mixer* GetMixer() const { return mMixer; }
 
   private:

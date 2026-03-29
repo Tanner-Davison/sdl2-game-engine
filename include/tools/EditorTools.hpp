@@ -1,8 +1,5 @@
 #pragma once
-// EditorTools.hpp
-//
-// Convenience header: includes every tool and provides a factory function
-// that creates the right tool subclass for a given ToolId.
+// EditorTools.hpp -- convenience header + factory for all editor tools.
 
 #include "tools/EditorTool.hpp"
 #include "tools/PlacementTools.hpp"
@@ -12,12 +9,7 @@
 #include "tools/HitboxTool.hpp"
 #include <memory>
 
-// ─── Factory ─────────────────────────────────────────────────────────────────
-// Creates a new tool instance for the given ToolId.
-// The ActionTool, PowerUpTool, and MovingPlatTool are complex tools that
-// remain in LevelEditorScene for now (they have heavy popup/state coupling).
-// This factory returns nullptr for those IDs, signaling the orchestrator
-// to keep handling them inline.
+// Returns nullptr for Action/PowerUp/MovingPlat (handled inline by orchestrator).
 inline std::unique_ptr<EditorTool> MakeEditorTool(ToolId id) {
     switch (id) {
         case ToolId::Goal:        return std::make_unique<GoalTool>();
@@ -37,7 +29,6 @@ inline std::unique_ptr<EditorTool> MakeEditorTool(ToolId id) {
         case ToolId::Shooter:     return std::make_unique<ShooterTool>();
         case ToolId::Shield:      return std::make_unique<ShieldTool>();
 
-        // Complex tools -- handled inline by the orchestrator for now.
         case ToolId::Action:
         case ToolId::PowerUp:
         case ToolId::MovingPlat:

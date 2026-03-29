@@ -4,11 +4,8 @@
 #include <entt/entt.hpp>
 #include <cmath>
 
-// ─────────────────────────────────────────────────────────────────────────────
 // Gamepad polling — called once per physics tick (not per-event).
-// Reads held-state buttons (jump, crouch, sprint, ladder climb).
 // Movement is handled by MovementSystem which reads the stick directly.
-// ─────────────────────────────────────────────────────────────────────────────
 inline SDL_Gamepad* GetFirstGamepad() {
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
@@ -50,15 +47,11 @@ inline void GamepadPollSystem(entt::registry& reg) {
     });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Gamepad event handler — called from the SDL event loop for button presses.
-// Handles discrete actions: attack, dash, ladder climb overrides.
-// ─────────────────────────────────────────────────────────────────────────────
+// Gamepad event handler — discrete actions: attack, dash, ladder climb overrides.
 inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
     constexpr float TRIGGER_THRESHOLD = 0.3f;
     constexpr float STICK_DEAD_ZONE   = 0.25f;
 
-    // ── Attack — Right Trigger ─────────────────────────────────────────
     if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION &&
         e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
         float val = e.gaxis.value / 32767.0f;
@@ -70,7 +63,6 @@ inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
         }
     }
 
-    // ── Dash — X (West face) + stick direction ─────────────────────────
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
         SDL_Gamepad* pad = GetFirstGamepad();
@@ -96,14 +88,12 @@ inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
         });
     }
 
-    // ── Jump release (button up) — clear jumpHeld ────────────────────────
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
         auto view = reg.view<PlayerTag, GravityState>();
         view.each([](GravityState& g) { g.jumpHeld = false; });
     }
 
-    // ── Crouch release (left stick click up) ─────────────────────────────
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
         auto view = reg.view<PlayerTag, GravityState>();
@@ -112,7 +102,6 @@ inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
 }
 
 inline void InputSystem(entt::registry& reg, SDL_Event& e) {
-    // F key — set attackPressed on the player's AttackState
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F) {
         auto atk = reg.view<PlayerTag, AttackState>();
         atk.each([](AttackState& a) {
@@ -120,7 +109,7 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         });
     }
 
-    // ── Double-tap dash detection ───────────────────────────────────────
+    // --- Double-tap dash detection ---
     if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
         auto dashView = reg.view<PlayerTag, DashState, GravityState, ClimbState>();
         dashView.each([&e](DashState& dash, const GravityState& g, const ClimbState& climb) {
@@ -178,7 +167,6 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                 case SDLK_A: case SDLK_LEFT:
                     if (!g.isCrouching) {
                         v.dx    = -v.speed;
-                        // Only set flip for horizontal movement on horizontal-gravity walls
                         if (g.direction == GravityDir::DOWN || g.direction == GravityDir::UP)
                             r.flipH = !invertFlip;
                     }
@@ -193,22 +181,18 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                 case SDLK_W: case SDLK_UP:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
-                            // 90CW: flipH=true (face left) -> face up the left wall
-                            r.flipH = true;
+                            r.flipH = true;   // 90CW: face up the left wall
                         } else if (g.direction == GravityDir::RIGHT) {
-                            // 90CCW: flipH=false (face right) -> face up the right wall
-                            r.flipH = false;
+                            r.flipH = false;  // 90CCW: face up the right wall
                         }
                     }
                     break;
                 case SDLK_S: case SDLK_DOWN:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
-                            // 90CW: flipH=false (face right) -> face down the left wall
-                            r.flipH = false;
+                            r.flipH = false;  // 90CW: face down the left wall
                         } else if (g.direction == GravityDir::RIGHT) {
-                            // 90CCW: flipH=true (face left) -> face down the right wall
-                            r.flipH = true;
+                            r.flipH = true;   // 90CCW: face down the right wall
                         }
                     }
                     break;
@@ -228,9 +212,7 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
             if (e.key.key == SDLK_LSHIFT) g.sprinting   = false;
         }
 
-        // ── Event-driven W/S tracking for ladder climbing ─────────────────────────
-        // These flags are set/cleared by events so LadderSystem never polls the
-        // keyboard state — a tap only moves for exactly the frames the key is down.
+        // Event-driven W/S for ladder: tap only moves for the frames the key is down.
         if (e.type == SDL_EVENT_KEY_DOWN) {
             if (e.key.key == SDLK_W || e.key.key == SDLK_UP)   climb.wPressed = true;
             if (e.key.key == SDLK_S || e.key.key == SDLK_DOWN) climb.sPressed = true;
@@ -252,8 +234,8 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                 }
             }
         } else {
-            // Track spacebar held state via events — actual jump fires each frame
-            // in MovementSystem after CollisionSystem has settled isGrounded.
+            // Track spacebar held — actual jump fires each frame in MovementSystem
+            // after CollisionSystem has settled isGrounded.
             if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
                 g.jumpHeld = true;
             if (e.type == SDL_EVENT_KEY_UP && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))

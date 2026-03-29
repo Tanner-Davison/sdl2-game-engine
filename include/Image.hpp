@@ -1,40 +1,11 @@
 #pragma once
-// Image.hpp
+// Image.hpp — GPU-backed image with multiple viewport fit modes.
 //
-// GPU-backed image with multiple viewport fit modes.
-//
-// ── Fit mode reference ──────────────────────────────────────────────────────
-//
-//   CONTAIN      Scale to fit inside viewport, preserving aspect ratio.
-//                May produce letterbox/pillarbox bars. Centred.
-//
-//   COVER        Scale to fill viewport, preserving aspect ratio.
-//                Excess is cropped. Centred.
-//
-//   STRETCH      Ignore aspect ratio, fill viewport exactly.
-//
-//   SRCSIZE      Render at native pixel dimensions at explicit position.
-//
-//   PRESCALED    Same as STRETCH (legacy alias for "tile" in JSON).
-//
-//   FILL         Aspect-preserving fill that never over-zooms large images.
-//                Small images: scale up to cover. Large images (both axes
-//                bigger than viewport): render at 1:1, centred.
-//
-//   SCROLL       Parallax scrolling background for side-scrollers.
-//                Image is scaled so its HEIGHT fills the viewport (width
-//                scales proportionally). The image scrolls horizontally
-//                with the camera. If the scaled image is narrower than
-//                the viewport, it is centred with no scroll.
-//
-//   SCROLL_WIDE  Source-rect scrolling for extra-wide panoramic images.
-//                A viewport-shaped window slides across the texture.
-//                The visible portion always fills the screen perfectly.
-//                For images close to viewport aspect ratio, scroll range
-//                is minimal (which is correct). For very wide panoramas,
-//                there is extensive horizontal scroll.
-//
-// ────────────────────────────────────────────────────────────────────────────
+// Fit modes: CONTAIN (fit inside, letterbox), COVER (fill, crop excess),
+// STRETCH (ignore aspect), SRCSIZE (native dims at explicit pos),
+// PRESCALED (legacy alias for "tile"), FILL (cover but never over-zoom 1:1),
+// SCROLL (height-fill + horizontal camera scroll),
+// SCROLL_WIDE (half-speed parallax for extra-wide panoramas).
 
 #include <SDL3/SDL.h>
 #include <string>
@@ -51,7 +22,6 @@ enum class FitMode {
     FILL,
 };
 
-// Convert a level JSON string to the matching FitMode.
 inline FitMode FitModeFromString(const std::string& s) {
     if (s == "contain")     return FitMode::CONTAIN;
     if (s == "cover")       return FitMode::COVER;
@@ -79,39 +49,20 @@ inline const char* FitModeToString(FitMode m) {
 
 class Image {
   public:
-    // Load from file
     Image(std::string File, FitMode mode = FitMode::CONTAIN);
-
-    // Take ownership of an existing surface
     Image(SDL_Surface* surface, FitMode mode);
 
     ~Image();
 
-    // Non-copyable (owns GPU texture)
     Image(const Image&)            = delete;
     Image& operator=(const Image&) = delete;
 
-    // Movable
     Image(Image&&) noexcept;
     Image& operator=(Image&&) noexcept;
 
-    // ── Rendering ────────────────────────────────────────────────────────────
-
-    // Render for all static (non-scrolling) fit modes.
     void Render(SDL_Renderer* renderer);
-
-    // SCROLL mode: image height fills viewport, scrolls horizontally with camera.
-    //   cameraX : current camera world-space X offset (pixels).
-    //   levelW  : total world width in pixels. 0 = use image's own display width
-    //             as the scrollable extent (editor free-pan mode).
     void RenderScrolling(SDL_Renderer* renderer, float cameraX, float levelW = 0.0f);
-
-    // SCROLL_WIDE mode: source-rect sliding for wide panoramas.
-    //   cameraX : current camera world-space X offset (pixels).
-    //   levelW  : total world width in pixels. 0 = derive from image dimensions.
     void RenderScrollingWide(SDL_Renderer* renderer, float cameraX, float levelW = 0.0f);
-
-    // ── Configuration ────────────────────────────────────────────────────────
 
     void SetDestinationRectangle(SDL_FRect dest);
 

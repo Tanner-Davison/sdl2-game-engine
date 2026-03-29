@@ -46,13 +46,10 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<Scene> NextScene() override;
 
   private:
-    // Toolbar type aliases for brevity at call sites
     using TBBtn = EditorToolbar::ButtonId;
     using TBGrp = EditorToolbar::Group;
 
-    // -------------------------------------------------------------------------
-    // Constants
-    // -------------------------------------------------------------------------
+    // --- Constants ---
     static constexpr int   GRID          = 38;
     static constexpr int   TOOLBAR_H     = EditorToolbar::TOOLBAR_H;
     static constexpr int   PALETTE_W     = EditorPalette::PALETTE_W;
@@ -63,7 +60,7 @@ class LevelEditorScene : public Scene {
     static constexpr int   TAB_H         = EditorPalette::TAB_H;
     static constexpr float ENEMY_SPEED   = 120.0f;
 
-    // Toolbar layout constants -- canonical source is EditorToolbar
+    // Canonical source is EditorToolbar
     static constexpr int BTN_H      = EditorToolbar::BTN_H;
     static constexpr int BTN_Y      = EditorToolbar::BTN_Y;
     static constexpr int BTN_TOOL_W = EditorToolbar::BTN_TOOL_W;
@@ -74,14 +71,11 @@ class LevelEditorScene : public Scene {
     static constexpr const char* TILE_ROOT = EditorPalette::TILE_ROOT;
     static constexpr const char* BG_ROOT   = EditorPalette::BG_ROOT;
 
-    // -------------------------------------------------------------------------
-    // Tool system
-    // -------------------------------------------------------------------------
+    // --- Tool system ---
     ToolId                      mActiveToolId = ToolId::MoveCam;
-    std::unique_ptr<EditorTool> mTool;        // active tool (nullptr for complex inline tools)
+    std::unique_ptr<EditorTool> mTool;
 
-    // Build a fresh EditorToolContext pointing at current state.
-    // Called before every tool dispatch so the context is always up-to-date.
+    // Build a fresh EditorToolContext from current state.
     EditorToolContext MakeToolCtx() {
         return EditorToolContext{
             .level        = mLevel,
@@ -95,8 +89,6 @@ class LevelEditorScene : public Scene {
         };
     }
 
-    // Switch to a new tool. Deactivates the old tool, creates the new one,
-    // and activates it. Updates the toolbar label.
     void SwitchTool(ToolId id) {
         if (mTool) {
             auto ctx = MakeToolCtx();
@@ -113,7 +105,6 @@ class LevelEditorScene : public Scene {
         // The orchestrator sets lblTool manually in those cases.
     }
 
-    // Map ToolId -> TBBtn for toolbar active-state highlighting
     static TBBtn ToolIdToBtn(ToolId id) {
         switch (id) {
             case ToolId::Goal:        return TBBtn::Goal;
@@ -139,9 +130,7 @@ class LevelEditorScene : public Scene {
         return TBBtn::COUNT;
     }
 
-    // -------------------------------------------------------------------------
-    // Editor state
-    // -------------------------------------------------------------------------
+    // --- Editor state ---
     std::string mOpenPath;
     bool        mForceNew = false;
     std::string mPresetName;
@@ -150,7 +139,6 @@ class LevelEditorScene : public Scene {
     bool        mLaunchGame = false;
     bool        mGoBack     = false;
 
-    // ── Cached static UI text ────────────────────────────────────────────────
     std::unique_ptr<Text> lblPalHeader;
     std::unique_ptr<Text> lblPalHint1;
     std::unique_ptr<Text> lblPalHint2;
@@ -167,48 +155,39 @@ class LevelEditorScene : public Scene {
     int         mLastTileSizeW  = -1;
     std::string mLastPalHeaderPath;
 
-    // ── Generic state still used by inline complex tools ─────────────────────
     std::string          mStatusMsg       = "New level";
     std::string          mLevelName       = "level1";
     float mScrollAccum = 0.0f;
 
-    // Surface cache
     EditorSurfaceCache mSurfaceCache;
     int mActionAnimDropHover = -1;
 
-    // ── Popup subsystem ───────────────────────────────────────────────────────
     EditorPopups mPopups;
 
-    // Convenience shims so existing call-sites don't all need updating
     void OpenAnimPicker(int tileIdx);
     void CloseAnimPicker();
 
-    // Build a populated Popups::Ctx from current scene state
     EditorPopups::Ctx MakePopupCtx();
-    bool ImportPath(const std::string& srcPath); // delegates to EditorFileOps
+    bool ImportPath(const std::string& srcPath);
 
-    // ── Toolbar subsystem ─────────────────────────────────────────────────────
     EditorToolbar         mToolbar;
     EditorCanvasRenderer  mCanvasRenderer;
     EditorUIRenderer      mUIRenderer;
 
-    // Status / active tool display
     std::unique_ptr<Text> lblStatus, lblTool;
 
-    // Drop state (stays in scene — tightly coupled to Action tool hover)
+    // Tightly coupled to Action tool hover rendering
     bool mDropActive = false;
 
-    // Editor camera
     EditorCamera mCamera;
 
     Level mLevel;
 
-    // ── Palette ──────────────────────────────────────────────────────────────
     using PaletteItem = EditorPalette::PaletteItem;
     using BgItem      = EditorPalette::BgItem;
     EditorPalette mPalette;
 
-    // ── Assets ──────────────────────────────────────────────────────────────
+    // --- Assets ---
     std::unique_ptr<Image>                  background;
     std::vector<std::unique_ptr<Image>>     mParallaxImages;
     void RebuildParallaxImages();
@@ -224,9 +203,7 @@ class LevelEditorScene : public Scene {
     // Power-up registry — single source of truth shared with GameScene
     static const std::vector<EditorPopups::PowerUpEntry>& GetPowerUpRegistry();
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    // --- Helpers ---
     int CanvasW() const {
         if (!mWindow)
             return 800;
@@ -291,16 +268,12 @@ class LevelEditorScene : public Scene {
     void LoadBgPalette() { mPalette.LoadBgPalette(mLevel); }
     void ApplyBackground(int idx);
 
-    // ── Tile tool helpers (used by Render for ghost preview) ─────────────────
-    // These delegate to the TileTool if it's the active tool.
+    // Tile tool helpers — delegate to TileTool if active.
     int  GetTileW() const;
     int  GetTileH() const;
     int  GetGhostRotation() const;
 
-    // =========================================================================
-    // COMPAT SHIM — remaining state for inline tools (Action, PowerUp,
-    // MovingPlat) that haven't been extracted yet.
-    // =========================================================================
+    // --- Compat shim: remaining state for inline tools not yet extracted ---
 
     // Generic entity drag (used by Action/PowerUp/MovingPlat inline tools)
     bool mIsDragging  = false;
@@ -312,11 +285,9 @@ class LevelEditorScene : public Scene {
     int mTileH         = GRID;
     int mGhostRotation = 0;
 
-    // Music volume slider
     SDL_Rect mMusicVolSlider{};
     bool     mMusicVolDragging = false;
 
-    // Music change confirmation popup
     bool        mMusicConfirmActive = false;
     std::string mMusicConfirmNewPath;
     SDL_Rect    mMusicConfirmYes{};

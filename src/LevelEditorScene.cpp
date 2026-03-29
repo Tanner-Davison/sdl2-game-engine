@@ -14,8 +14,6 @@
 
 namespace fs = std::filesystem;
 
-// Shims kept for callers inside Load() / ImportPath() that use MakeThumb/LoadPNG
-// directly (folder icon, bg import). These simply forward to the cache statics.
 static SDL_Surface* MakeThumb(SDL_Surface* src, int w, int h) {
     return EditorSurfaceCache::MakeThumb(src, w, h);
 }
@@ -23,7 +21,7 @@ static SDL_Surface* LoadPNG(const fs::path& p) {
     return EditorSurfaceCache::LoadPNG(p);
 }
 
-// --- MakePopupCtx ----------------------------------------------------------
+// --- MakePopupCtx ---
 EditorPopups::Ctx LevelEditorScene::MakePopupCtx() {
     return EditorPopups::Ctx{
         .level            = mLevel,
@@ -40,7 +38,7 @@ EditorPopups::Ctx LevelEditorScene::MakePopupCtx() {
     };
 }
 
-// --- ImportPath (delegate to EditorFileOps) --------------------------------
+// --- ImportPath ---
 bool LevelEditorScene::ImportPath(const std::string& srcPath) {
     EditorFileOps::Ctx ctx{
         .palette          = mPalette,
@@ -65,7 +63,7 @@ bool LevelEditorScene::ImportPath(const std::string& srcPath) {
     return EditorFileOps::ImportPath(srcPath, ctx);
 }
 
-// --- OpenAnimPicker / CloseAnimPicker (shims into mPopups) ----------------
+// --- OpenAnimPicker / CloseAnimPicker ---
 void LevelEditorScene::OpenAnimPicker(int tileIdx) {
     auto ctx = MakePopupCtx();
     mPopups.OpenAnimPicker(tileIdx, ctx);
@@ -74,7 +72,7 @@ void LevelEditorScene::CloseAnimPicker() {
     mPopups.CloseAnimPicker();
 }
 
-// --- GetPowerUpRegistry ----------------------------------------------------
+// --- GetPowerUpRegistry ---
 // The single authoritative list of power-up types for both the editor UI and
 // the game runtime. To add a new power-up:
 //   1. Add an entry here (id, label, duration)
@@ -89,9 +87,7 @@ const std::vector<EditorPopups::PowerUpEntry>& LevelEditorScene::GetPowerUpRegis
     return kRegistry;
 }
 
-// --- LoadTileView / LoadBgPalette / ApplyBackground -----------------------
-// Implementations moved to EditorPalette.cpp. LevelEditorScene delegates
-// via inline wrappers in the header. The old ApplyBackground is replaced below.
+// --- ApplyBackground ---
 void LevelEditorScene::ApplyBackground(int idx) {
     mPalette.ApplyBackground(idx, mLevel, [this](const std::string& bgPath) {
         background = std::make_unique<Image>(bgPath, FitModeFromString(mLevel.bgFitMode));
@@ -113,7 +109,7 @@ void LevelEditorScene::RebuildParallaxImages() {
     }
 }
 
-// ─── Load ─────────────────────────────────────────────────────────────────────
+// --- Load ---
 void LevelEditorScene::Load(Window& window) {
     mWindow     = &window;
     mLaunchGame = false;
@@ -128,11 +124,6 @@ void LevelEditorScene::Load(Window& window) {
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
 
-    // Determine which level file to load on startup.
-    // Three cases:
-    //   mForceNew == true          → skip all loading, start blank
-    //   mOpenPath non-empty        → load that specific file
-    //   mOpenPath empty, no force  → auto-resume levels/level1.json if it exists
     if (!mForceNew && mLevel.enemies.empty() &&
         mLevel.tiles.empty()) {
         std::string autoPath;
@@ -169,8 +160,6 @@ void LevelEditorScene::Load(Window& window) {
             static_cast<float>(window.GetHeight() - PLAYER_STAND_HEIGHT - GRID * 2);
     }
 
-    // Load the generic folder icon once — shared by all folder palette cells.
-    // We keep it alive for the lifetime of the editor scene.
     if (!mFolderIcon) {
         SDL_Surface* raw = IMG_Load("game_assets/generic_folder.png");
         if (raw) {
@@ -183,17 +172,13 @@ void LevelEditorScene::Load(Window& window) {
         }
     }
 
-    // Initialize the palette subsystem with the shared surface cache and
-    // folder icon, then load tile and background palettes.
     mPalette.Init(mSurfaceCache, mFolderIcon);
     LoadTileView(TILE_ROOT);
     LoadBgPalette();
 
-    // ── Toolbar layout ────────────────────────────────────────────────────────
     mToolbar.RebuildLayout();
     mToolbar.CreateLabels();
 
-    // Set gravity label to match current level mode
     {
         std::string gLbl = (mLevel.gravityMode == GravityMode::WallRun)     ? "Wall Run"
                            : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Open World"
@@ -210,9 +195,7 @@ void LevelEditorScene::Load(Window& window) {
     mPopups.powerUpRegistry = &GetPowerUpRegistry();
     mPopups.movPlatGroupId  = mMovPlatCurGroupId;
 
-    // ── Centre camera on player spawn ─────────────────────────────────────
-    // Position the camera so the player spawn point sits 100px from the
-    // left edge of the canvas. Clamp to (0,0) so we never go negative.
+    // Position camera so player spawn sits 100px from left edge, clamped to (0,0).
     {
         float spawnCamX = mLevel.player.x - 100.0f;
         float spawnCamY = mLevel.player.y - window.GetHeight() * 0.5f;
@@ -221,20 +204,17 @@ void LevelEditorScene::Load(Window& window) {
         mCamera.SetPosition(spawnCamX, spawnCamY);
     }
 
-    // Initialize the default tool
     SwitchTool(ToolId::MoveCam);
 }
 
-// --- Unload ----------------------------------------------------------------
+// --- Unload ---
 void LevelEditorScene::Unload() {
-    // Deactivate the current tool before teardown
     if (mTool) {
         auto ctx = MakeToolCtx();
         mTool->OnDeactivate(ctx);
         mTool.reset();
     }
 
-    // Palette owns all tile/bg item surfaces -- free them in one call.
     mPalette.Clear();
 
     if (mFolderIcon) {
@@ -242,18 +222,16 @@ void LevelEditorScene::Unload() {
         mFolderIcon = nullptr;
     }
 
-    // Free all cached surfaces (rotation, badge, destroy-anim, tile, extra)
     mSurfaceCache.Clear();
 
     mWindow = nullptr;
 }
 
-// --- HandleEvent -----------------------------------------------------------
+// --- HandleEvent ---
 bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
-    // ── Music change confirmation popup ──────────────────────────────────────
     if (mMusicConfirmActive) {
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
@@ -285,7 +263,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         return true; // block all other events while confirm is open
     }
 
-    // ── File / folder drop ────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_BEGIN) {
         mDropActive = true;
         SetStatus("Drop a .png or folder...");
@@ -363,7 +340,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 int ti = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
                 if (ti >= 0 && mLevel.tiles[ti].HasAction()) {
                     mLevel.tiles[ti].action->destroyAnimPath = path;
-                    // Preload the thumbnail now so it's ready to render immediately
                     GetDestroyAnimThumb(path);
                     fs::path p(path);
                     SetStatus("Tile " + std::to_string(ti) + ": death anim \"" +
@@ -379,26 +355,15 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
-    // Track which action tile the cursor is hovering during an active file drag
-    // (SDL sends DROP_BEGIN but not continuous position events, so we do this
-    // in motion events below; this just resets when the drop window closes)
     if (e.type == SDL_EVENT_DROP_COMPLETE) {
         mActionAnimDropHover = -1;
     }
 
-    // ── Moving-platform popup: text input for speed field ─────────────────────
-    // -- Popup subsystem: movplat speed field, import input, delete confirm,
-    //    anim picker, power-up picker, movplat config clicks
     {
         auto pctx = MakePopupCtx();
         if (mPopups.HandleEvent(e, pctx, mMovPlatIndices))
             return true;
     }
-
-    // (Import input handled by mPopups.HandleEvent above)
-
-    // ── Delete confirmation popup ──────────────────────────────────────────
-    // (Delete confirm handled by mPopups.HandleEvent above)
 
     // EnemyTool speed popup text input
     if (mActiveToolId == ToolId::Enemy && mTool) {
@@ -418,7 +383,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             }
         }
     }
-    // ── Music volume slider ──────────────────────────────────────────────────
     if (!mLevel.musicPath.empty() && mMusicVolSlider.w > 0) {
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
@@ -445,7 +409,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Pan: middle-mouse drag OR Ctrl + left-mouse drag ────────────────────
     auto startPan = [&](int mx, int my) { mCamera.StartPan(mx, my); };
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_MIDDLE) {
@@ -480,17 +443,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
     }
-    // Pan motion is handled in Update() by polling SDL_GetMouseState every frame
-    // for smoothness — no event handler needed here.
-
-    // ── Mouse wheel ───────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_MOUSE_WHEEL) {
         float fmx, fmy;
         SDL_GetMouseState(&fmx, &fmy);
         int mx = (int)fmx, my = (int)fmy;
 
-        // When MovingPlat tool is active, Ctrl+scroll adjusts range instead of zooming.
-        // Adjusts the hovered tile's group, OR the current session group if no hover.
+        // Ctrl+scroll adjusts range for hovered group (or current session group).
         // Start position stays fixed; only the end (range) moves.
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && mActiveToolId == ToolId::MovingPlat &&
             mx < CanvasW()) {
@@ -513,7 +471,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Ctrl+scroll = zoom in/out, anchored to mouse position
         if ((SDL_GetModState() & SDL_KMOD_CTRL) && mx < CanvasW()) {
             if (mCamera.ApplyZoom(e.wheel.y, mx, my)) {
                 SetStatus("Zoom: " + std::to_string(mCamera.ZoomPercent()) +
@@ -633,7 +590,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Key down ──────────────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_KEY_DOWN) {
         switch (e.key.key) {
             case SDLK_Q:
@@ -796,8 +752,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
     }
 
-    // ── Mouse button down ─────────────────────────────────────────────────────
-    // ── Right-click: group cycling for action tiles ──────────────────────────
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
         if (mActiveToolId == ToolId::Action && my >= TOOLBAR_H && mx < CanvasW()) {
@@ -940,8 +894,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
 
-        // ── Destroy-anim picker — handle clicks inside the popup ──────────────────
-        // Anim-picker clicks handled by mPopups.HandleEvent fired above.
         if (false && !mPopups.animPickerEntries.empty()) {
             if (HitTest(mPopups.animPickerRect, mx, my)) {
                 const int THUMB    = 48;
@@ -1003,7 +955,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // Toolbar group collapse pills (strip lives below the buttons)
         for (int gi = 0; gi < static_cast<int>(TBGrp::COUNT); ++gi) {
             auto grp = static_cast<TBGrp>(gi);
             if (HitTest(mToolbar.PillRect(grp), mx, my)) {
@@ -1016,12 +967,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             }
         }
 
-        // Toolbar
-        // Any toolbar click closes the anim picker
         if (mPopups.animPickerTile >= 0 && my < TOOLBAR_H)
             CloseAnimPicker();
 
-        // Toolbar button dispatch via EditorToolbar::HandleClick
         if (my < TOOLBAR_H) {
             auto click = mToolbar.HandleClick(mx, my);
             if (click.kind == EditorToolbar::ClickResult::Kind::Button) {
@@ -1205,10 +1153,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             } // if Button
         } // if toolbar
 
-        // ── Palette panel ──────────────────────────────────────────────────────
         if (mx >= CanvasW() && my >= TOOLBAR_H + TAB_H) {
             if (mPalette.ActiveTab() == EditorPalette::Tab::Tiles) {
-                // Resolve which palette entry was clicked (same grid as render)
                 constexpr int PAD = 4, LBL_H = 14;
                 const int     cellW = (PALETTE_W - PAD * (PAL_COLS + 1)) / PAL_COLS;
                 const int     cellH = cellW + LBL_H;
@@ -1247,7 +1193,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     LoadTileView(folderPath);
                     SetStatus("Opened: " + folderName);
                 } else {
-                    // ── Double-click detection ────────────────────────────────
                     bool isDouble = mPalette.CheckDoubleClick(idx);
 
                     mPalette.SetSelectedTile(idx);
@@ -1315,7 +1260,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     }
                 }
 
-                // ── Parallax layer controls ──────────────────────────────────
                 constexpr int PLX_ROW_H = 34;
                 constexpr int PLX_HDR_H = 28;
                 constexpr int BTN_SZ    = 20;
@@ -1354,7 +1298,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     }
                 }
 
-                // ── Bg item click ───────────────────────────────────────────
                 int relY = my - TOOLBAR_H - TAB_H - 24 - PAD; // 24 = bg header strip
                 int row  = relY / itemH;
                 int idx  = mPalette.BgScroll() + row;
@@ -1385,9 +1328,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             return true;
         }
 
-        // ── Canvas ─────────────────────────────────────────────────────────────
-        // MovingPlat config popup clicks handled by mPopups.HandleEvent above.
-
         if (my < TOOLBAR_H || mx >= CanvasW())
             return true;
         auto [sx, sy] = SnapToGrid(mx, my);
@@ -1412,12 +1352,9 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         }
 
         switch (mActiveToolId) {
-            // Coin, Enemy, Tile, Erase, PlayerStart, MoveCam handled by mTool above
             default:
                 break;
             case ToolId::Action: {
-                // Picker clicks handled by mPopups.HandleEvent above.
-                // If picker open but click was outside, it's already closed.
                 if (mPopups.animPickerTile >= 0) {
                     if (HitTest(mPopups.animPickerRect, mx, my))
                         return true; // consumed by HandleEvent
@@ -1446,10 +1383,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             case ToolId::PowerUp: {
                 // PowerUp popup clicks are handled by mPopups.HandleEvent.
                 // Here we handle opening the popup on tile click.
-                // If popup is open, HandleEvent consumed the click already.
                 if (mPopups.powerUpOpen && mPopups.powerUpTileIdx >= 0)
                     return true; // absorbed by HandleEvent
-                // Open/reopen on tile click
                 mPopups.powerUpOpen    = false;
                 mPopups.powerUpTileIdx = -1;
                 int ti                 = HitTile(mx, my);
@@ -1466,17 +1401,13 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                 return true;
             }
             case ToolId::MovingPlat: {
-                // Left-click: toggle tile into/out of the current moving group
                 int ti = HitTile(mx, my);
                 if (ti >= 0) {
                     auto& t = mLevel.tiles[ti];
-                    // If the tile is already moving but from a *different* session group,
-                    // adopt its group so the speed popup edits the right group.
+                    // Adopt the group of a previously-placed platform so popup edits the right group.
                     if (t.HasMoving() &&
                         std::find(mMovPlatIndices.begin(), mMovPlatIndices.end(), ti) ==
                             mMovPlatIndices.end()) {
-                        // Clicking an existing platform from a previous session: adopt its
-                        // group
                         const auto& mp = *t.moving;
                         mMovPlatCurGroupId =
                             (mp.groupId != 0) ? mp.groupId : mMovPlatNextGroupId++;
@@ -1572,7 +1503,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     }
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
-        // Dispatch to active tool first (handles entity drag stop for modifier tools)
         if (mTool) {
             auto ctx = MakeToolCtx();
             mTool->OnMouseUp(
@@ -1584,11 +1514,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_MOTION) {
         int mx = (int)e.motion.x, my = (int)e.motion.y;
 
-        // ── Pan: derive delta from absolute position vs. recorded start ─────────
-        // SDL coalesces MOUSE_MOTION on macOS so xrel/yrel can skip frames.
-        // Using absolute position minus the recorded start position means we
-        // always land exactly where the mouse is right now, regardless of how
-        // many motion events were coalesced into this one.
+        // Absolute position delta avoids jitter from coalesced motion events on macOS.
         if (mCamera.IsPanning()) {
             mCamera.UpdatePan(mx, my);
             return true;
@@ -1603,14 +1529,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mActionAnimDropHover = -1;
         }
 
-        // Delegate motion to active tool (select, resize, hitbox, entity drag)
         if (mTool) {
             auto ctx = MakeToolCtx();
             if (mTool->OnMouseMove(ctx, mx, my) == ToolResult::Consumed)
                 return true;
         }
 
-        // ── Entity drag ───────────────────────────────────────────────────────
         if (mIsDragging && mDragIndex >= 0 && my >= TOOLBAR_H && mx < CanvasW()) {
             auto [sx, sy] = SnapToGrid(mx, my);
             if (mDragIsTile && mDragIndex < (int)mLevel.tiles.size()) {
@@ -1627,7 +1551,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     return true;
 }
 
-// --- Update ----------------------------------------------------------------
+// --- Update ---
 void LevelEditorScene::Update(float /*dt*/) {
     // Pan is driven entirely by SDL_EVENT_MOUSE_MOTION in HandleEvent using
     // absolute position delta from the recorded start point. SDL_CaptureMouse
@@ -1636,7 +1560,7 @@ void LevelEditorScene::Update(float /*dt*/) {
     // under thermal throttling where frame timing is inconsistent.
 }
 
-// --- Render ----------------------------------------------------------------
+// --- Render ---
 void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     window.Render();
     SDL_Renderer* ren = window.GetRenderer();
@@ -1654,7 +1578,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
         SDL_MapRGBA(SDL_GetPixelFormatDetails(screen->format), nullptr, 0, 0, 0, 0));
     int cw = CanvasW();
 
-    // ── Canvas pass ─────────────────────────────────────────────────────────
     EditorCanvasRenderer::MovPlatState mp;
     mp.indices    = &mMovPlatIndices;
     mp.curGroupId = mMovPlatCurGroupId;
@@ -1668,7 +1591,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     mp.speedStr   = mPopups.movPlatSpeedStr;
     mp.popupRect  = mPopups.movPlatRect;
 
-    // Build parallax scroll factors from level data for the canvas renderer
     std::vector<float> plxFactors;
     plxFactors.reserve(mLevel.parallaxLayers.size());
     for (const auto& pl : mLevel.parallaxLayers)
@@ -1693,19 +1615,14 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
                            &mParallaxImages,
                            &plxFactors);
 
-    // Sync back the popup rect (canvas renderer computes it when popup is open)
     mPopups.movPlatRect = mCanvasRenderer.MovPlatPopupRect();
 
-    // ── UI pass ─────────────────────────────────────────────────────────────
-    // Bridge AnimPickerEntry types (LevelEditorScene::AnimPickerEntry ->
-    // EditorUIRenderer::AnimPickerEntry — same fields, different type).
-    // Bridge: EditorPopups::AnimPickerEntry -> EditorUIRenderer::AnimPickerEntry
+    // Bridge EditorPopups::AnimPickerEntry -> EditorUIRenderer::AnimPickerEntry
     std::vector<EditorUIRenderer::AnimPickerEntry> uiPickerEntries;
     uiPickerEntries.reserve(mPopups.animPickerEntries.size());
     for (const auto& e : mPopups.animPickerEntries)
         uiPickerEntries.push_back({e.path, e.name, e.thumb});
 
-    // Bridge PowerUpEntry types
     const auto&                                 reg = GetPowerUpRegistry();
     std::vector<EditorUIRenderer::PowerUpEntry> uiPowerUpReg;
     uiPowerUpReg.reserve(reg.size());
@@ -1788,7 +1705,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
                        mLastPalHeaderPath,
                        GetTileW());
 
-    // Sync back rects that HandleEvent needs
     mPopups.delYes         = mUIRenderer.DelConfirmYesRect();
     mPopups.delNo          = mUIRenderer.DelConfirmNoRect();
     mMusicConfirmYes       = mUIRenderer.MusicConfirmYesRect();
@@ -1796,7 +1712,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     mPopups.animPickerRect       = mUIRenderer.AnimPickerRect();
     mPopups.camShakeToggleRect   = mUIRenderer.CamShakeToggleRect();
 
-    // ── Music volume slider (in toolbar, right side) ─────────────────────
     if (!mLevel.musicPath.empty()) {
         auto* fmt = SDL_GetPixelFormatDetails(screen->format);
         auto mapC = [&](Uint8 r, Uint8 g, Uint8 b, Uint8 a) {
@@ -1808,7 +1723,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
         int sliderY = TOOLBAR_H - sliderH - 6;
         mMusicVolSlider = {sliderX, sliderY, sliderW, sliderH};
 
-        // Label via badge cache
         int pct = (int)(mLevel.musicVolume * 100.0f + 0.5f);
         std::string musicName = fs::path(mLevel.musicPath).filename().string();
         if ((int)musicName.size() > 16) musicName = musicName.substr(0, 14) + "..";
@@ -1821,7 +1735,6 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
             SDL_BlitSurface(badge, nullptr, screen, &dst);
         }
 
-        // Slider track
         SDL_FillSurfaceRect(screen, &mMusicVolSlider, mapC(20, 22, 36, 255));
         for (int side = 0; side < 4; ++side) {
             SDL_Rect edge{};
@@ -1832,23 +1745,18 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
             SDL_FillSurfaceRect(screen, &edge, mapC(50, 55, 80, 255));
         }
 
-        // Filled portion
         int fillW = (int)(mLevel.musicVolume * (float)(sliderW - 2));
         if (fillW > 0) {
             SDL_Rect filled = {sliderX + 1, sliderY + 1, fillW, sliderH - 2};
             SDL_FillSurfaceRect(screen, &filled, mapC(50, 120, 200, 255));
         }
 
-        // Knob
         int knobX = sliderX + 1 + fillW;
         SDL_Rect knob = {knobX - 2, sliderY, 4, sliderH};
         SDL_FillSurfaceRect(screen, &knob, mapC(180, 200, 255, 255));
     }
 
-    // Upload completed surface to GPU and present.
-    // Use LINEAR filtering — the surface contains anti-aliased text from
-    // TTF_RenderText_Blended. NEAREST would make text blocky, especially
-    // on Retina/HiDPI where the logical surface is upscaled 2x.
+    // LINEAR filtering: NEAREST would make blended TTF text blocky on HiDPI.
     SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, screen);
     SDL_DestroySurface(screen);
     if (tex) {
@@ -1859,7 +1767,7 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     window.Update();
 }
 
-// --- NextScene -------------------------------------------------------------
+// --- NextScene ---
 std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     if (mLaunchGame) {
         mLaunchGame = false;
@@ -1872,7 +1780,7 @@ std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     }
     return nullptr;
 }
-// --- Tile tool accessors ---------------------------------------------------
+// --- Tile tool accessors ---
 int LevelEditorScene::GetTileW() const {
     if (mActiveToolId == ToolId::Tile && mTool)
         if (auto* tt = dynamic_cast<const TileTool*>(mTool.get()))

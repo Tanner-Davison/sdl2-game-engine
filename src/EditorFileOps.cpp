@@ -7,16 +7,12 @@
 
 namespace fs = std::filesystem;
 
-// ---------------------------------------------------------------------------
-// ImportPath
-// ---------------------------------------------------------------------------
+// --- ImportPath ---
 bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
     fs::path src(srcPath);
 
-    // ── Directory import ────────────────────────────────────────────────────
     if (fs::is_directory(src)) {
         if (ctx.palette.ActiveTab() == EditorPalette::Tab::Backgrounds) {
-            // Recurse: import every .png inside as an individual background
             int count = 0;
             for (const auto& entry : fs::recursive_directory_iterator(src)) {
                 if (entry.path().extension() == ".png")
@@ -27,7 +23,7 @@ bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
             return count > 0;
         }
 
-        // Tile import: mirror the folder tree under the current palette dir
+        // Mirror the folder tree under the current palette dir
         fs::path        baseDestDir = fs::path(ctx.palette.CurrentDir()) / src.filename();
         std::error_code ec;
         int             count = 0;
@@ -53,7 +49,6 @@ bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
             ctx.setStatus("No PNGs found in " + src.filename().string());
             return false;
         }
-        // Reload the tile view to the newly-created folder
         ctx.palette.LoadTileView(baseDestDir.string(), ctx.level);
         ctx.setStatus("Imported \"" + src.filename().string() + "\" into " +
                       fs::path(ctx.palette.CurrentDir()).filename().string() + " (" +
@@ -61,7 +56,6 @@ bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
         return true;
     }
 
-    // ── Single-file import ───────────────────────────────────────────────────
     std::string ext = src.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     if (ext != ".png") {
@@ -92,7 +86,6 @@ bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
     }
 
     if (isBg) {
-        // Background: load full image, make thumbnail, insert into bg list
         SDL_Surface* full = EditorSurfaceCache::LoadPNG(dest);
         if (!full) {
             ctx.setStatus("Import failed: can't load " + dest.string());
@@ -107,14 +100,13 @@ bool EditorFileOps::ImportPath(const std::string& srcPath, Ctx& ctx) {
         ctx.applyBackground((int)ctx.palette.BgItems().size() - 1);
         ctx.setStatus("Imported & applied: " + dest.filename().string());
     } else {
-        // Tile: reload the view, find and auto-select the newly imported tile
         SDL_Surface* full = EditorSurfaceCache::LoadPNG(dest);
         if (!full) {
             ctx.setStatus("Import failed: can't load " + dest.string());
             return false;
         }
         SDL_SetSurfaceBlendMode(full, SDL_BLENDMODE_BLEND);
-        // Thumbnail is used during LoadTileView — just free it here
+        // Thumbnail only needed for LoadTileView — free it immediately
         SDL_Surface* thumb = EditorSurfaceCache::MakeThumb(full, ctx.palIcon, ctx.palIcon);
         if (thumb)
             SDL_DestroySurface(thumb);

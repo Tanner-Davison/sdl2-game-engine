@@ -39,9 +39,8 @@ std::unique_ptr<Scene> TitleScene::NextScene() {
     return nullptr;
 }
 
-// ── openCharPicker ───────────────────────────────────────────────────────────
+// --- openCharPicker ---
 void TitleScene::openCharPicker() {
-    // Destroy previous textures before rebuilding
     for (auto& c : mCharCards)
         if (c.previewTex) { SDL_DestroyTexture(c.previewTex); c.previewTex = nullptr; }
     mCharCards.clear();
@@ -49,7 +48,6 @@ void TitleScene::openCharPicker() {
     mCharPickerScroll    = 0;
     mCharPickerHighlight = mProfileIdx; // pre-highlight the currently active character
 
-    // Helper: collect all sorted PNGs in a folder
     auto collectPngs = [&](const std::string& dir) -> std::vector<fs::path> {
         std::vector<fs::path> out;
         std::error_code ec;
@@ -61,8 +59,6 @@ void TitleScene::openCharPicker() {
         return out;
     };
 
-    // Helper: load ONLY the first PNG from a folder as a card preview texture.
-    // One disk read + one GPU upload per character — no SpriteSheet, no atlas.
     auto loadFirstFrame = [&](CharCard& c, const std::string& dir,
                               int overrideW = 0, int overrideH = 0) {
         std::error_code ec;
@@ -78,7 +74,6 @@ void TitleScene::openCharPicker() {
         SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
         SDL_DestroySurface(raw);
         if (!conv) return;
-        // Scale to override dims if provided (respects profile's spriteW/H)
         SDL_Surface* final = conv;
         if ((overrideW > 0 && overrideW != conv->w) ||
             (overrideH > 0 && overrideH != conv->h)) {
@@ -98,7 +93,6 @@ void TitleScene::openCharPicker() {
         SDL_DestroySurface(final);
     };
 
-    // Card 0: Frost Knight (built-in default)
     {
         CharCard c;
         c.name = "Frost Knight"; c.profilePath = "";
@@ -108,7 +102,6 @@ void TitleScene::openCharPicker() {
         mCharCards.push_back(std::move(c));
     }
 
-    // Remaining cards: saved player profiles
     for (const auto& profilePath : ScanPlayerProfiles()) {
         PlayerProfile prof;
         if (!LoadPlayerProfile(profilePath.string(), prof)) continue;
@@ -125,7 +118,6 @@ void TitleScene::openCharPicker() {
         mCharCards.push_back(std::move(c));
     }
 
-    // Lay out card rects
     const int PW = std::min(mWindowW - 80, 780);
     const int PH = std::min(mWindowH - 80, 560);
     const int PX = (mWindowW - PW) / 2;
@@ -133,7 +125,7 @@ void TitleScene::openCharPicker() {
     mCharPickerPanel     = {PX, PY, PW, PH};
     mCharPickerCloseRect = {PX + PW - 36, PY + 6, 30, 30};
 
-    const int FOOTER_H = 52; // height reserved for the Select button at the bottom
+    const int FOOTER_H = 52;
     const int CARD_W = 160, CARD_H = 200, COLS = (PW - 32) / (CARD_W + 12), GAP = 12;
     const int startX = PX + (PW - (COLS * (CARD_W + GAP) - GAP)) / 2;
     int cardY = PY + 54;
@@ -144,12 +136,11 @@ void TitleScene::openCharPicker() {
     int totalRows = ((int)mCharCards.size() + COLS - 1) / COLS;
     mCharPickerMaxScroll = std::max(0, totalRows*(CARD_H+GAP) + 54 + 12 - (PH - FOOTER_H));
 
-    // Select button — bottom-right of the panel
     const int SEL_W = 160, SEL_H = 36;
     mCharPickerSelectRect = {PX + PW - SEL_W - 12, PY + PH - SEL_H - 8, SEL_W, SEL_H};
 }
 
-// ── renderCharPicker ─────────────────────────────────────────────────────────
+// --- renderCharPicker ---
 void TitleScene::renderCharPicker(SDL_Renderer* ren) {
     SDL_SetRenderDrawColor(ren, 0, 0, 0, 180);
     SDL_FRect full = {0, 0, (float)mWindowW, (float)mWindowH};
@@ -176,9 +167,8 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
         r.y -= mCharPickerScroll;
         if (r.y + r.h < clipRect.y || r.y > clipRect.y + clipRect.h) continue;
 
-        bool highlighted = (i == mCharPickerHighlight); // currently previewing
-        bool committed   = (i == mProfileIdx);          // already selected/active
-        // Visual states: highlighted = bright blue, committed-only = subtle teal, default = dark
+        bool highlighted = (i == mCharPickerHighlight);
+        bool committed   = (i == mProfileIdx);
         SDL_Color bgCol  = highlighted ? SDL_Color{50,70,150,255}
                          : committed   ? SDL_Color{30,60,80,255}
                                        : SDL_Color{28,32,54,255};
@@ -191,7 +181,6 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
         const int previewH = r.h - 36;
         SDL_Rect previewArea = {r.x+4, r.y+4, r.w-8, previewH};
 
-        // Highlighted card: walk animation. All others: idle still frame.
         SDL_Texture* displayTex = nullptr;
         if (highlighted && !card.walkFrames.empty()) {
             int fi = card.walkAnimFrame % (int)card.walkFrames.size();
@@ -236,12 +225,10 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
 
     SDL_SetRenderClipRect(ren, nullptr);
 
-    // Footer bar
     SDL_Rect footer = {p.x, p.y + p.h - 52, p.w, 52};
     fillRect(ren, footer, {20, 22, 38, 255});
     outlineRect(ren, {p.x, p.y + p.h - 52, p.w, 1}, {60, 70, 110, 255});
 
-    // Hint texts in footer
     Text esc("Esc / B to close    D-pad to browse    A to select", {60,70,100,255}, p.x + 10, p.y + p.h - 36, 11);
     esc.Render(ren);
     if (mCharPickerMaxScroll > 0) {
@@ -249,7 +236,6 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
         sh.Render(ren);
     }
 
-    // Select Player button — bottom-right of footer
     bool selIsHighlighted = (mCharPickerHighlight == mProfileIdx);
     SDL_Color selBg  = selIsHighlighted ? SDL_Color{40, 90, 60, 255} : SDL_Color{50, 130, 80, 255};
     SDL_Color selOut = selIsHighlighted ? SDL_Color{60, 140, 90, 255} : SDL_Color{80, 200, 120, 255};

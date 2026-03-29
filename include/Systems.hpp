@@ -1,5 +1,3 @@
-// Aggregator — include this to get all systems at once.
-// Individual systems live in include/systems/.
 #pragma once
 #include <GameEvents.hpp>
 #include <systems/AnimationSystem.hpp>

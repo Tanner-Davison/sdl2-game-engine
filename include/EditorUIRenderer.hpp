@@ -1,19 +1,7 @@
 #pragma once
-// EditorUIRenderer.hpp
-//
-// Renders all UI chrome that sits on top of the canvas:
-//   - Toolbar (buttons, group collapse pills, dividers)
-//   - Status bar + active-tool label
-//   - Palette panel (tile grid, bg list, scroll indicators, headers)
-//   - Bottom hint bar
-//   - Destroy-anim picker popup
-//   - PowerUp picker popup
-//   - Import input bar
-//   - Drop overlay
-//   - Delete confirmation popup
-//
-// Like EditorCanvasRenderer, this class holds no state of its own beyond
-// cached surface pointers that are rebuilt when inputs change.
+// EditorUIRenderer.hpp — renders all UI chrome on top of the canvas: toolbar,
+// status bar, palette panel, bottom hint bar, and modal popups.
+// Holds no state beyond cached rects written each frame.
 
 #include "EditorCamera.hpp"
 #include "EditorPalette.hpp"
@@ -30,21 +18,18 @@
 
 class EditorUIRenderer {
   public:
-    // ── Anim-picker entry (mirrors LevelEditorScene::AnimPickerEntry) ────────
     struct AnimPickerEntry {
         std::string  path;
         std::string  name;
         SDL_Surface* thumb = nullptr;
     };
 
-    // ── PowerUp registry entry ───────────────────────────────────────────────
     struct PowerUpEntry {
         std::string id;
         std::string label;
         float       defaultDuration = 15.0f;
     };
 
-    // ── PowerUp popup state ──────────────────────────────────────────────────
     struct PowerUpPopupState {
         bool     open    = false;
         int      tileIdx = -1;
@@ -52,7 +37,6 @@ class EditorUIRenderer {
         const std::vector<PowerUpEntry>* registry = nullptr;
     };
 
-    // ── Delete confirm popup state ───────────────────────────────────────────
     struct DelConfirmState {
         bool        active   = false;
         bool        isDir    = false;
@@ -61,20 +45,17 @@ class EditorUIRenderer {
         SDL_Rect    noRect{};
     };
 
-    // ── Music change confirm popup state ──────────────────────────────────────
     struct MusicConfirmState {
         bool        active  = false;
-        std::string oldName;   // current music filename (or "(none)")
-        std::string newName;   // proposed music filename
+        std::string oldName;
+        std::string newName;
     };
 
-    // ── Import input state ───────────────────────────────────────────────────
     struct ImportInputState {
         bool        active = false;
         std::string text;
     };
 
-    // ── Moving-plat popup state (mirrors what CanvasRenderer computes) ───────
     struct MovPlatPopupState {
         bool        open       = false;
         bool        speedInput = false;
@@ -87,8 +68,6 @@ class EditorUIRenderer {
         SDL_Rect    rect{};
     };
 
-    // ── Main entry point ─────────────────────────────────────────────────────
-    // LevelEditorScene calls this after EditorCanvasRenderer::Render.
     void Render(Window&                       window,
                 SDL_Surface*                  screen,
                 int                           canvasW,
@@ -103,18 +82,15 @@ class EditorUIRenderer {
                 Text*                         lblStatus,
                 Text*                         lblTool,
                 Text*                         lblToolPrefix,
-                // anim picker
                 int                           animPickerTile,
                 const std::vector<AnimPickerEntry>& animPickerEntries,
                 SDL_Rect                      animPickerRect,
-                // popups
                 const PowerUpPopupState&      powerUp,
                 const DelConfirmState&        delConfirm,
                 const MusicConfirmState&     musicConfirm,
                 const ImportInputState&       importInput,
                 const MovPlatPopupState&      movPlat,
                 bool                          dropActive,
-                // cached label pointers (rebuilt by orchestrator when stale)
                 std::unique_ptr<Text>&        lblPalHeader,
                 std::unique_ptr<Text>&        lblPalHint1,
                 std::unique_ptr<Text>&        lblPalHint2,
@@ -122,27 +98,22 @@ class EditorUIRenderer {
                 std::unique_ptr<Text>&        lblStatusBar,
                 std::unique_ptr<Text>&        lblCamPos,
                 std::unique_ptr<Text>&        lblBottomHint,
-                // dirty flags (updated by Render when stale)
                 int&  lastTileCount,
                 int&  lastEnemyCount,
                 int&  lastCamX,
                 int&  lastCamY,
                 int&  lastTileSizeW,
                 std::string& lastPalHeaderPath,
-                // tile-size query (supplied by orchestrator)
                 int                           curTileW);
 
-    // Computed Yes/No button rects (written each frame so HandleEvent can use them)
     [[nodiscard]] SDL_Rect DelConfirmYesRect() const { return mDelYes; }
     [[nodiscard]] SDL_Rect DelConfirmNoRect()  const { return mDelNo;  }
     [[nodiscard]] SDL_Rect MusicConfirmYesRect() const { return mMusicYes; }
     [[nodiscard]] SDL_Rect MusicConfirmNoRect()  const { return mMusicNo;  }
-    // Updated anim picker rect (computed each frame)
     [[nodiscard]] SDL_Rect AnimPickerRect() const { return mAnimPickerRect; }
     [[nodiscard]] SDL_Rect CamShakeToggleRect() const { return mCamShakeToggleRect; }
 
   private:
-    // ── Internal helpers ─────────────────────────────────────────────────────
     static void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void DrawRectAlpha(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void DrawOutline(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);
@@ -205,7 +176,6 @@ class EditorUIRenderer {
                             const MusicConfirmState& mc,
                             EditorSurfaceCache& cache);
 
-    // Mutable state written each frame so the orchestrator can read it back
     SDL_Rect mDelYes{};
     SDL_Rect mDelNo{};
     SDL_Rect mMusicYes{};

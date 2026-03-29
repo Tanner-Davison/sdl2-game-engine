@@ -48,7 +48,7 @@ SDL_Surface* EditorUIRenderer::Badge(EditorSurfaceCache& cache,
     return cache.GetBadge(text, col);
 }
 
-// ── Main entry ───────────────────────────────────────────────────────────────
+// --- Render ---
 void EditorUIRenderer::Render(
     Window&                       window,
     SDL_Surface*                  screen,
@@ -123,7 +123,7 @@ void EditorUIRenderer::Render(
         RenderMusicConfirm(screen, W, H, musicConfirm, cache);
 }
 
-// ── Toolbar ───────────────────────────────────────────────────────────────────
+// --- Toolbar ---
 void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH,
                                       ToolId activeToolId, EditorToolbar& toolbar,
                                       const Level& level, EditorSurfaceCache& cache,
@@ -140,7 +140,6 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
     constexpr SDL_Color ACCENT_MODIFIER = {80, 220, 140, 255};
     constexpr SDL_Color ACCENT_ACTION   = {200, 160, 60, 255};
 
-    // Map ToolId to active button for highlight
     auto toolToBtn = [](ToolId t) -> TBBtn {
         switch (t) {
             case ToolId::Goal:        return TBBtn::Goal;
@@ -259,7 +258,6 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
             DrawRect(screen, {gx1+BTN_GAP+GRP_GAP/2, BTN_Y+4, 1, BTN_H-8}, {70,70,90,255});
     }
 
-    // Status bar below toolbar
     DrawRect(screen, {0, toolbarH, canvasW, 20}, {16,16,24,230});
     if (lblTool) {
         int tx = winW - EditorPalette::PALETTE_W - 8;
@@ -274,7 +272,7 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
     if (lblStatus) lblStatus->RenderToSurface(screen);
 }
 
-// ── Palette panel ─────────────────────────────────────────────────────────────
+// --- Palette panel ---
 void EditorUIRenderer::RenderPalettePanel(
     SDL_Surface* screen, Window& window, int canvasW, int toolbarH, int grid,
     const EditorPalette& palette, const Level& level,
@@ -528,7 +526,6 @@ void EditorUIRenderer::RenderPalettePanel(
             DrawRect(screen, {canvasW+PALETTE_W-4,sy,3,sh},{100,150,255,180});
         }
 
-        // ── Parallax Layers section ──────────────────────────────────────────
         {
             int plxY = H - plxAreaH;
 
@@ -626,7 +623,7 @@ void EditorUIRenderer::RenderPalettePanel(
     }
 }
 
-// ── Bottom bar ───────────────────────────────────────────────────────────────
+// --- Bottom bar ---
 void EditorUIRenderer::RenderBottomBar(
     SDL_Surface* screen, Window& window, int canvasW,
     const Level& level, const EditorCamera& camera, ToolId activeToolId,
@@ -674,7 +671,7 @@ void EditorUIRenderer::RenderBottomBar(
     if (lblBottomHint) lblBottomHint->RenderToSurface(screen);
 }
 
-// ── Anim picker popup ─────────────────────────────────────────────────────────
+// --- Anim picker popup ---
 void EditorUIRenderer::RenderAnimPicker(
     SDL_Surface* screen, int canvasW, int toolbarH, int winH,
     const Level& level, const EditorCamera& cam, int animPickerTile,
@@ -781,7 +778,7 @@ void EditorUIRenderer::RenderAnimPicker(
         px+PAD, py+PH-HINT_H+2);
 }
 
-// ── PowerUp popup ────────────────────────────────────────────────────────────
+// --- PowerUp popup ---
 void EditorUIRenderer::RenderPowerUpPopup(SDL_Surface* screen, const Level& level,
                                            const PowerUpPopupState& pu,
                                            EditorSurfaceCache& cache)
@@ -827,7 +824,7 @@ void EditorUIRenderer::RenderPowerUpPopup(SDL_Surface* screen, const Level& leve
     }
 }
 
-// ── Import input bar ──────────────────────────────────────────────────────────
+// --- Import input bar ---
 void EditorUIRenderer::RenderImportInput(SDL_Surface* screen, int canvasW, int winH,
                                           const EditorPalette& palette,
                                           const ImportInputState& imp)
@@ -847,7 +844,7 @@ void EditorUIRenderer::RenderImportInput(SDL_Surface* screen, int canvasW, int w
     it.RenderToSurface(screen);
 }
 
-// ── Drop overlay ──────────────────────────────────────────────────────────────
+// --- Drop overlay ---
 void EditorUIRenderer::RenderDropOverlay(SDL_Surface* screen, int canvasW, int toolbarH,
                                           int winH, ToolId activeToolId,
                                           const EditorPalette& palette,
@@ -888,7 +885,7 @@ void EditorUIRenderer::RenderDropOverlay(SDL_Surface* screen, int canvasW, int t
     }
 }
 
-// ── Delete confirmation popup ─────────────────────────────────────────────────
+// --- Delete confirmation ---
 void EditorUIRenderer::RenderDelConfirm(SDL_Surface* screen, int W, int H,
                                          const DelConfirmState& dc,
                                          EditorSurfaceCache& cache,
@@ -934,7 +931,7 @@ void EditorUIRenderer::RenderDelConfirm(SDL_Surface* screen, int W, int H,
     BlitBadge(screen, cache.GetBadge("Esc to cancel",{80,80,100,255}), W/2-38, py+ph-12);
 }
 
-// ── Music change confirmation popup ──────────────────────────────────────────
+// --- Music confirmation ---
 void EditorUIRenderer::RenderMusicConfirm(SDL_Surface* screen, int W, int H,
                                            const MusicConfirmState& mc,
                                            EditorSurfaceCache& cache)

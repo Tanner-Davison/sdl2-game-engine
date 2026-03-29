@@ -4,8 +4,6 @@
 #include <string>
 #include <vector>
 
-// ── Plain data — one entry per entity type in the level ──────────────────────
-
 struct EnemySpawn {
     float x, y;
     float speed;
@@ -17,10 +15,6 @@ struct EnemySpawn {
 struct PlayerSpawn {
     float x, y;
 };
-
-// ── TileSpawn sub-structs ────────────────────────────────────────────────────
-// Each optional group holds the data for a specific tile feature.
-// When the optional is std::nullopt, that feature is inactive.
 
 struct ActionData {
     int         group          = 0;   // 0 = standalone; non-zero groups trigger together
@@ -74,23 +68,19 @@ struct ShieldData {
     float duration = 20.0f; // seconds the shield orbits the player
 };
 
-// ── TileSpawn ────────────────────────────────────────────────────────────────
-
 struct TileSpawn {
-    // Core fields — every tile has these
     float       x = 0.0f, y = 0.0f;
     int         w = 0, h = 0;
     std::string imagePath;
     int         rotation    = 0;     // clockwise degrees: 0, 90, 180, 270
 
-    // Simple boolean flags (mutually exclusive rules enforced by editor tools)
+    // Mutually exclusive rules enforced by editor tools
     bool prop        = false; // rendered, no collision — background decoration
     bool ladder      = false; // rendered, no solid collision — player can climb
     bool hazard      = false; // solid tile that drains HP while player overlaps
     bool antiGravity = false; // floats — bobs in place, no gravity, pushable
     bool goal        = false; // collectible goal — player must collect all to complete level
 
-    // Optional feature groups — present only when the feature is active
     std::optional<ActionData>          action;
     std::optional<SlopeData>           slope;
     std::optional<HitboxData>          hitbox;
@@ -99,7 +89,6 @@ struct TileSpawn {
     std::optional<ShooterData>         shooter;
     std::optional<ShieldData>          shield;
 
-    // ── Convenience queries ──────────────────────────────────────────────────
     bool HasAction()   const { return action.has_value(); }
     bool HasSlope()    const { return slope.has_value(); }
     bool HasHitbox()   const { return hitbox.has_value(); }
@@ -114,15 +103,11 @@ struct TileSpawn {
     }
 };
 
-// ── Parallax background layer ────────────────────────────────────────────────
-
 struct ParallaxLayer {
     std::string imagePath;
     float       scrollFactor = 0.5f;  // 0 = static, 1 = moves 1:1 with camera
     float       yOffset      = 0.0f;  // vertical pixel offset (positive = down)
 };
-
-// ── Level-wide settings ──────────────────────────────────────────────────────
 
 enum class GravityMode { Platformer, WallRun, OpenWorld };
 
@@ -137,7 +122,6 @@ struct Level {
     std::vector<TileSpawn>  tiles;
     std::vector<ParallaxLayer> parallaxLayers;
 
-    // ── Audio ─────────────────────────────────────────────────────────────
     std::string musicPath;              // relative path to OGG/MP3 (empty = no music)
     float       musicVolume = 1.0f;     // 0..1 level-specific music volume
 };

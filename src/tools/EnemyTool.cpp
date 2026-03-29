@@ -9,22 +9,16 @@
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EnemyTool — implementation
-// ─────────────────────────────────────────────────────────────────────────────
-
 static bool hitRect(const SDL_Rect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-// ── Refresh the picker entry list from saved enemy profiles ──────────────────
+// --- RefreshPicker ---
+
 void EnemyTool::RefreshPicker() {
     pickerEntries.clear();
-
-    // Entry 0: generic slime (legacy, always available)
     pickerEntries.push_back({"(default slime)", "", {}});
 
-    // Scan enemies/ directory for profiles
     for (const auto& path : ScanEnemyProfiles()) {
         EnemyProfile prof;
         if (!LoadEnemyProfile(path.string(), prof)) continue;
@@ -33,7 +27,8 @@ void EnemyTool::RefreshPicker() {
     }
 }
 
-// ── Commit the speed edit popup value ────────────────────────────────────────
+// --- CommitSpeedEdit ---
+
 void EnemyTool::CommitSpeedEdit(EditorToolContext& ctx) {
     if (!speedInputActive || speedPopupIdx < 0) return;
     if (speedPopupIdx < (int)ctx.level.enemies.size()) {
@@ -48,12 +43,11 @@ void EnemyTool::CommitSpeedEdit(EditorToolContext& ctx) {
     SDL_StopTextInput(ctx.sdlWindow);
 }
 
-// ── Mouse down ──────────────────────────────────────────────────────────────
+// --- OnMouseDown ---
+
 ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
                                   Uint8 button, SDL_Keymod /*mods*/) {
-    // Speed edit popup interactions
     if (speedPopupOpen) {
-        // Close button
         SDL_Rect closeBtn = {speedPopupRect.x + speedPopupRect.w - 40,
                              speedPopupRect.y + 4, 36, 20};
         if (button == SDL_BUTTON_LEFT && hitRect(closeBtn, mx, my)) {
@@ -62,7 +56,6 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
             speedPopupIdx  = -1;
             return ToolResult::Consumed;
         }
-        // Speed field click
         SDL_Rect fieldRect = {speedPopupRect.x + 80, speedPopupRect.y + 30,
                               speedPopupRect.w - 90, 24};
         if (button == SDL_BUTTON_LEFT && hitRect(fieldRect, mx, my)) {
@@ -71,17 +64,16 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
             SDL_StartTextInput(ctx.sdlWindow);
             return ToolResult::Consumed;
         }
-        // Click inside popup but not on a control — consume to prevent placing
+        // Consume clicks inside popup to prevent placing
         if (hitRect(speedPopupRect, mx, my))
             return ToolResult::Consumed;
-        // Click outside popup — close it
+        // Click outside popup -- close it
         if (speedInputActive) CommitSpeedEdit(ctx);
         speedPopupOpen = false;
         speedPopupIdx  = -1;
         // Fall through to normal click handling
     }
 
-    // Picker panel click
     if (pickerVisible && button == SDL_BUTTON_LEFT) {
         for (int i = 0; i < (int)pickerEntries.size(); ++i) {
             if (pickerEntries[i].rect.w > 0 && hitRect(pickerEntries[i].rect, mx, my)) {
@@ -92,7 +84,6 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
                                   std::to_string((int)placementSpeed));
                 } else {
                     selectedType = pickerEntries[i].name;
-                    // Load the profile to get its default speed
                     EnemyProfile prof;
                     std::string profPath = EnemyProfilePath(selectedType);
                     if (LoadEnemyProfile(profPath, prof))
@@ -105,15 +96,13 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
         }
     }
 
-    // Right-click on placed enemy: open speed edit popup
-    // Shift+RClick toggles start direction
+    // Shift+RClick toggles start direction; plain RClick opens speed popup
     if (button == SDL_BUTTON_RIGHT) {
         if (my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
             int ei = ctx.HitEnemy(mx, my);
             if (ei >= 0) {
                 SDL_Keymod mods = SDL_GetModState();
                 if (mods & SDL_KMOD_SHIFT) {
-                    // Toggle start direction
                     auto& en = ctx.level.enemies[ei];
                     en.startLeft = !en.startLeft;
                     ctx.SetStatus("Enemy #" + std::to_string(ei) + " starts " +
@@ -133,12 +122,10 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
         }
     }
 
-    // Left-click: place enemy
     if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
     if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
 
-    // Don't place if clicking inside the picker area
-    // (picker is rendered at top of canvas, height ~56px below toolbar)
+    // Don't place if clicking inside the picker area (~56px below toolbar)
     if (pickerVisible && my < ctx.ToolbarH() + 56) return ToolResult::Consumed;
 
     auto [sx, sy] = ctx.SnapToGrid(mx, my);
@@ -156,7 +143,8 @@ ToolResult EnemyTool::OnMouseDown(EditorToolContext& ctx, int mx, int my,
     return ToolResult::Consumed;
 }
 
-// ── Key down (speed popup text input) ────────────────────────────────────────
+// --- OnKeyDown ---
+
 ToolResult EnemyTool::OnKeyDown(EditorToolContext& ctx, SDL_Keycode key,
                                 SDL_Keymod /*mods*/) {
     if (!speedInputActive) return ToolResult::Ignored;
@@ -172,14 +160,11 @@ ToolResult EnemyTool::OnKeyDown(EditorToolContext& ctx, SDL_Keycode key,
     return ToolResult::Ignored;
 }
 
-// Note: F key for direction toggle is handled below via a separate
-// non-text-input path. The orchestrator calls OnKeyDown for all keys
-// when speedInputActive is false, so we catch F there too.
-// However, since this OnKeyDown only fires when speedInputActive is true,
-// the F-key toggle is handled in OnMouseDown (right-click) for existing
-// enemies and via the overlay button for new placements.
+// F-key direction toggle is handled via RClick (Shift+RClick on placed enemy)
+// and the overlay button for new placements, not through OnKeyDown.
 
-// ── Mouse move: track cursor for ghost outline ───────────────────────────────
+// --- OnMouseMove ---
+
 ToolResult EnemyTool::OnMouseMove(EditorToolContext& ctx, int mx, int my) {
     cursorScreenX  = mx;
     cursorScreenY  = my;
@@ -187,26 +172,26 @@ ToolResult EnemyTool::OnMouseMove(EditorToolContext& ctx, int mx, int my) {
     return ToolResult::Ignored;
 }
 
-// ── Scroll: adjust placement speed ───────────────────────────────────────────
+// --- OnScroll ---
+
 ToolResult EnemyTool::OnScroll(EditorToolContext& ctx, float wheelY,
                                int mx, int my, SDL_Keymod /*mods*/) {
-    // Scroll on picker: scroll the list
     if (pickerVisible && my < ctx.ToolbarH() + 56) {
         pickerScroll = std::max(0, pickerScroll - (int)wheelY);
         return ToolResult::Consumed;
     }
 
-    // Scroll on canvas: adjust placement speed
     int delta = (int)(wheelY * 10.0f);
     placementSpeed = std::max(0.0f, placementSpeed + delta);
     ctx.SetStatus("Placement speed: " + std::to_string((int)placementSpeed));
     return ToolResult::Consumed;
 }
 
-// ── Render overlay: picker panel + speed popup ───────────────────────────────
+// --- RenderOverlay ---
+
 void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
                               int canvasW) {
-    // ── Enemy type picker bar ────────────────────────────────────────────────
+    // --- Picker bar ---
     if (pickerVisible) {
         const int barY = ctx.ToolbarH() + 2;
         const int barH = 52;
@@ -215,18 +200,15 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
         const int itemH = barH - 8;
         const int thumbSz = 32;
 
-        // Background bar
         ctx.DrawRectAlpha(screen, {0, barY, canvasW, barH}, {10, 20, 40, 220});
         ctx.DrawOutline(screen, {0, barY, canvasW, barH}, {80, 60, 50, 255});
 
-        // Label
         SDL_Surface* lbl = ctx.GetBadge("Enemy Type:", {220, 160, 120, 255});
         if (lbl) {
             SDL_Rect ld = {pad + 2, barY + 4, lbl->w, lbl->h};
             SDL_BlitSurface(lbl, nullptr, screen, &ld);
         }
 
-        // Direction + Speed indicator
         {
             std::string dirLabel = placementStartLeft ? "<< LEFT" : "RIGHT >>";
             std::string infoLabel = dirLabel + "  spd=" + std::to_string((int)placementSpeed) + "  (F=flip  scroll=spd)";
@@ -237,7 +219,6 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
             }
         }
 
-        // Picker entries
         int startX = 90;
         int visibleCount = (canvasW - startX - 80) / (itemW + pad);
         int firstIdx = pickerScroll;
@@ -260,11 +241,9 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
             ctx.DrawRect(screen, entry.rect, bg);
             ctx.DrawOutline(screen, entry.rect, border);
 
-            // Thumbnail
             if (!entry.previewPath.empty()) {
                 SDL_Surface* thumb = ctx.surfaceCache.FindTileSurface(entry.previewPath);
                 if (!thumb) {
-                    // Try loading it
                     thumb = ctx.surfaceCache.LoadAndCache(entry.previewPath);
                 }
                 if (thumb) {
@@ -275,7 +254,6 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
                 }
             }
 
-            // Name label (truncated)
             std::string displayName = entry.name;
             if ((int)displayName.size() > 9)
                 displayName = displayName.substr(0, 7) + "..";
@@ -288,7 +266,6 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
             }
         }
 
-        // Scroll arrows if needed
         if (pickerScroll > 0) {
             SDL_Surface* leftArr = ctx.GetBadge("<", {255, 200, 100, 255});
             if (leftArr) {
@@ -306,21 +283,19 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
         }
     }
 
-    // ── Speed edit popup ─────────────────────────────────────────────────────
+    // --- Speed edit popup ---
     if (speedPopupOpen && speedPopupIdx >= 0 &&
         speedPopupIdx < (int)ctx.level.enemies.size()) {
 
         ctx.DrawRect(screen, speedPopupRect, {14, 22, 40, 245});
         ctx.DrawOutline(screen, speedPopupRect, {255, 140, 60, 255}, 2);
 
-        // Title
         SDL_Surface* title = ctx.GetBadge("Enemy Speed", {255, 200, 140, 255});
         if (title) {
             SDL_Rect td = {speedPopupRect.x + 6, speedPopupRect.y + 6, title->w, title->h};
             SDL_BlitSurface(title, nullptr, screen, &td);
         }
 
-        // Close button
         SDL_Rect closeBtn = {speedPopupRect.x + speedPopupRect.w - 40,
                              speedPopupRect.y + 4, 36, 20};
         ctx.DrawRect(screen, closeBtn, {60, 30, 30, 220});
@@ -331,7 +306,6 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
             SDL_BlitSurface(closeLbl, nullptr, screen, &cd);
         }
 
-        // Speed label + field
         SDL_Surface* spdLbl = ctx.GetBadge("Speed:", {160, 200, 220, 255});
         if (spdLbl) {
             SDL_Rect sl = {speedPopupRect.x + 6, speedPopupRect.y + 34, spdLbl->w, spdLbl->h};
@@ -354,7 +328,7 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
         }
     }
 
-    // ── Ghost outline at cursor ──────────────────────────────────────────────
+    // --- Ghost outline at cursor ---
     if (cursorOnCanvas && !speedPopupOpen) {
         int sprW = ctx.Grid(), sprH = ctx.Grid();
         EnemyProfile ghostProf;
@@ -371,10 +345,8 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
 
         SDL_Rect ghostRect = {sp.x, sp.y, (int)(sprW * ctx.Zoom()), (int)(sprH * ctx.Zoom())};
 
-        // Semi-transparent fill
         ctx.DrawRectAlpha(screen, ghostRect, {255, 100, 60, 45});
 
-        // Sprite thumbnail inside the ghost
         if (hasProf) {
             std::string preview = EnemyPreviewImagePath(ghostProf);
             if (!preview.empty()) {
@@ -388,10 +360,8 @@ void EnemyTool::RenderOverlay(EditorToolContext& ctx, SDL_Surface* screen,
             }
         }
 
-        // Outline
         ctx.DrawOutline(screen, ghostRect, {255, 140, 80, 200}, 2);
 
-        // Size label above the ghost
         std::string sizeStr = std::to_string(sprW) + "x" + std::to_string(sprH);
         SDL_Surface* sizeBadge = ctx.GetBadge(sizeStr, {255, 200, 140, 220});
         if (sizeBadge) {

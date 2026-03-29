@@ -7,23 +7,21 @@
 
 namespace fs = std::filesystem;
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 static bool HitTest(const SDL_Rect& r, int x, int y) {
     return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 }
 
-// ─── OpenDeleteConfirm ────────────────────────────────────────────────────────
+// --- OpenDeleteConfirm ---
 void EditorPopups::OpenDeleteConfirm(const std::string& path, bool isDir,
                                      const std::string& name) {
     delActive = true;
     delPath   = path;
     delIsDir  = isDir;
     delName   = name;
-    // Button rects are computed by EditorUIRenderer each frame — just leave them
-    // as zero here; HandleDeleteConfirmEvent reads them after Render has set them.
+    // Button rects are computed by EditorUIRenderer each frame.
 }
 
-// ─── OpenImportInput ─────────────────────────────────────────────────────────
+// --- OpenImportInput ---
 void EditorPopups::OpenImportInput(bool isBgTab, Ctx& ctx) {
     importActive = true;
     importText.clear();
@@ -33,12 +31,11 @@ void EditorPopups::OpenImportInput(bool isBgTab, Ctx& ctx) {
                       : "Import tile path or folder (Enter=go, Esc=cancel):");
 }
 
-// ─── OpenAnimPicker ───────────────────────────────────────────────────────────
+// --- OpenAnimPicker ---
 void EditorPopups::OpenAnimPicker(int tileIdx, Ctx& ctx) {
     animPickerTile = tileIdx;
     animPickerEntries.clear();
 
-    // "None" entry first — always available to clear any existing assignment
     animPickerEntries.push_back({"", "None (no death anim)", nullptr});
 
     auto manifests = ScanAnimatedTiles();
@@ -49,16 +46,16 @@ void EditorPopups::OpenAnimPicker(int tileIdx, Ctx& ctx) {
         SDL_Surface* thumb = ctx.getAnimThumb(p.string());
         animPickerEntries.push_back({p.string(), def.name, thumb});
     }
-    // animPickerRect is computed by EditorUIRenderer each frame — left as zero here.
+    // animPickerRect is computed by EditorUIRenderer each frame.
 }
 
-// ─── CloseAnimPicker ─────────────────────────────────────────────────────────
+// --- CloseAnimPicker ---
 void EditorPopups::CloseAnimPicker() {
     animPickerTile = -1;
     animPickerEntries.clear();
 }
 
-// ─── OpenPowerUpPicker ───────────────────────────────────────────────────────
+// --- OpenPowerUpPicker ---
 void EditorPopups::OpenPowerUpPicker(int tileIdx, int screenX, int screenY,
                                      int windowW, int windowH, int toolbarH) {
     powerUpTileIdx = tileIdx;
@@ -73,19 +70,18 @@ void EditorPopups::OpenPowerUpPicker(int tileIdx, int screenX, int screenY,
     }
 }
 
-// ─── ClosePowerUpPicker ──────────────────────────────────────────────────────
+// --- ClosePowerUpPicker ---
 void EditorPopups::ClosePowerUpPicker() {
     powerUpOpen    = false;
     powerUpTileIdx = -1;
 }
 
-// ─── HandleEvent (main dispatcher) ───────────────────────────────────────────
+// --- HandleEvent ---
 bool EditorPopups::HandleEvent(const SDL_Event& e, Ctx& ctx,
                                 std::vector<int>& movPlatIndices) {
-    // Priority order: most-modal first so a speed-input field swallows keys before
-    // the delete confirm can see them, etc.
+    // Priority order: most-modal first
 
-    // 1. MovingPlat speed text field (highest priority — keyboard modal)
+    // 1. MovingPlat speed text field (keyboard modal)
     if (movPlatOpen && movPlatSpeedInput)
         return HandleMovPlatPopupEvent(e, ctx, movPlatIndices);
 
@@ -97,7 +93,7 @@ bool EditorPopups::HandleEvent(const SDL_Event& e, Ctx& ctx,
     if (delActive)
         return HandleDeleteConfirmEvent(e, ctx);
 
-    // 4. Anim picker (mouse only, non-keyboard-modal)
+    // 4. Anim picker (mouse only)
     if (animPickerTile >= 0)
         if (HandleAnimPickerEvent(e, ctx))
             return true;
@@ -115,7 +111,7 @@ bool EditorPopups::HandleEvent(const SDL_Event& e, Ctx& ctx,
     return false;
 }
 
-// ─── HandleDeleteConfirmEvent ────────────────────────────────────────────────
+// --- HandleDeleteConfirmEvent ---
 bool EditorPopups::HandleDeleteConfirmEvent(const SDL_Event& e, Ctx& ctx) {
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
         delActive = false;
@@ -147,10 +143,10 @@ bool EditorPopups::HandleDeleteConfirmEvent(const SDL_Event& e, Ctx& ctx) {
             return true;
         }
     }
-    return true; // swallow all input while popup is open
+    return true;
 }
 
-// ─── HandleImportInputEvent ───────────────────────────────────────────────────
+// --- HandleImportInputEvent ---
 bool EditorPopups::HandleImportInputEvent(const SDL_Event& e, Ctx& ctx) {
     if (e.type == SDL_EVENT_TEXT_INPUT) {
         importText += e.text.text;
@@ -182,10 +178,10 @@ bool EditorPopups::HandleImportInputEvent(const SDL_Event& e, Ctx& ctx) {
                 break;
         }
     }
-    return true; // swallow all other input while text field is open
+    return true;
 }
 
-// ─── HandleAnimPickerEvent ───────────────────────────────────────────────────
+// --- HandleAnimPickerEvent ---
 bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
     if (e.type != SDL_EVENT_MOUSE_BUTTON_DOWN || e.button.button != SDL_BUTTON_LEFT)
         return false;
@@ -193,9 +189,8 @@ bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
     int mx = (int)e.button.x, my = (int)e.button.y;
 
     if (!HitTest(animPickerRect, mx, my)) {
-        // Click outside — close picker without changing assignment
         CloseAnimPicker();
-        return false; // let click propagate to canvas
+        return false;
     }
 
     if (HitTest(camShakeToggleRect, mx, my)) {
@@ -209,7 +204,7 @@ bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
         return true;
     }
 
-    // Re-derive cell geometry (must match EditorUIRenderer exactly)
+    // Cell geometry must match EditorUIRenderer exactly
     const int THUMB   = 48;
     const int ROW_H   = THUMB + 10;
     const int PAD     = 8;
@@ -228,11 +223,10 @@ bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
         SDL_Rect cell = {ex, ey2, COL_W - PAD, ROW_H};
         if (HitTest(cell, mx, my)) {
             const auto& entry = animPickerEntries[i];
-            // Write back through the level reference
             if (animPickerTile < (int)ctx.level.tiles.size()) {
                 ctx.level.tiles[animPickerTile].action->destroyAnimPath = entry.path;
                 if (!entry.path.empty())
-                    ctx.getAnimThumb(entry.path); // warm the cache
+                    ctx.getAnimThumb(entry.path);
                 ctx.setStatus("Tile " + std::to_string(animPickerTile) +
                               ": death anim -> " +
                               (entry.path.empty() ? "None" : entry.name));
@@ -241,10 +235,10 @@ bool EditorPopups::HandleAnimPickerEvent(const SDL_Event& e, Ctx& ctx) {
             return true;
         }
     }
-    return true; // click inside popup but no cell hit — absorb
+    return true;
 }
 
-// ─── HandlePowerUpPickerEvent ────────────────────────────────────────────────
+// --- HandlePowerUpPickerEvent ---
 bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
     if (e.type != SDL_EVENT_MOUSE_BUTTON_DOWN || e.button.button != SDL_BUTTON_LEFT)
         return false;
@@ -253,7 +247,7 @@ bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
 
     if (!HitTest(powerUpRect, mx, my)) {
         ClosePowerUpPicker();
-        return false; // let click propagate
+        return false;
     }
 
     if (!powerUpRegistry || powerUpTileIdx < 0 ||
@@ -279,7 +273,6 @@ bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
         }
     }
 
-    // "None" row below all entries
     SDL_Rect noneRow = {powerUpRect.x + PAD,
                         py + (int)reg.size() * (ROW_H + 2),
                         powerUpRect.w - PAD * 2, ROW_H};
@@ -290,13 +283,12 @@ bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
         return true;
     }
 
-    return true; // click inside popup but missed every row — absorb
+    return true;
 }
 
-// ─── HandleMovPlatPopupEvent ─────────────────────────────────────────────────
+// --- HandleMovPlatPopupEvent ---
 bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
                                            std::vector<int>& movPlatIndices) {
-    // ── Speed text field is focused — swallow all keyboard input ─────────────
     if (movPlatSpeedInput) {
         if (e.type == SDL_EVENT_TEXT_INPUT) {
             for (char ch : std::string(e.text.text))
@@ -317,17 +309,16 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
                 return true;
             }
         }
-        return true; // swallow everything else
+        return true;
     }
 
-    // ── Mouse clicks on the popup ─────────────────────────────────────────────
     if (e.type != SDL_EVENT_MOUSE_BUTTON_DOWN || e.button.button != SDL_BUTTON_LEFT)
         return false;
 
     int mx = (int)e.button.x, my = (int)e.button.y;
 
     if (!HitTest(movPlatRect, mx, my))
-        return false; // don't consume — let canvas see it
+        return false;
 
     const int PW      = 280;
     const int PAD     = 8;
@@ -337,7 +328,6 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
     const int py      = movPlatRect.y;
     int       ry      = py + TITLE_H;
 
-    // Row 0: speed field + close button
     SDL_Rect speedField = {px + PAD + 90, ry + (ROW_H - 20) / 2,
                            PW - PAD * 2 - 90 - 44, 20};
     SDL_Rect closeBtn   = {px + PW - PAD - 36, ry + (ROW_H - 20) / 2, 36, 20};
@@ -356,7 +346,6 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
     }
     ry += ROW_H + PAD;
 
-    // Row 1: H/V toggle
     SDL_Rect btnH = {px + PAD + 90, ry, 48, ROW_H - 4};
     SDL_Rect btnV = {px + PAD + 90 + 54, ry, 48, ROW_H - 4};
     if (HitTest(btnH, mx, my)) {
@@ -373,7 +362,6 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
     }
     ry += ROW_H + PAD;
 
-    // Row 2: Loop (ping-pong) checkbox
     SDL_Rect loopRow = {px + PAD, ry, PW - PAD * 2, ROW_H};
     if (HitTest(loopRow, mx, my)) {
         movPlatLoop = !movPlatLoop;
@@ -387,7 +375,6 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
     }
     ry += ROW_H + PAD;
 
-    // Row 3: Move on Touch checkbox
     SDL_Rect trigRow = {px + PAD, ry, PW - PAD * 2, ROW_H};
     if (HitTest(trigRow, mx, my)) {
         movPlatTrigger = !movPlatTrigger;
@@ -396,10 +383,10 @@ bool EditorPopups::HandleMovPlatPopupEvent(const SDL_Event& e, Ctx& ctx,
         return true;
     }
 
-    return true; // absorb all other clicks inside popup
+    return true;
 }
 
-// ─── CommitSpeedField (private helper) ───────────────────────────────────────
+// --- CommitSpeedField ---
 void EditorPopups::CommitSpeedField(Ctx& ctx, std::vector<int>& movPlatIndices) {
     if (movPlatSpeedStr.empty())
         return;
@@ -408,7 +395,6 @@ void EditorPopups::CommitSpeedField(Ctx& ctx, std::vector<int>& movPlatIndices) 
     movPlatSpeed  = (float)v;
     movPlatSpeedStr = std::to_string(v);
 
-    // Apply to current session tiles
     for (int idx : movPlatIndices)
         ctx.level.tiles[idx].moving->speed = movPlatSpeed;
 

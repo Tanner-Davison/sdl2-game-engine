@@ -10,9 +10,7 @@
 
 namespace fs = std::filesystem;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Destruction / cleanup
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Destruction / cleanup ---
 
 EditorPalette::~EditorPalette() {
     Clear();
@@ -43,18 +41,14 @@ void EditorPalette::FreeBgItems() {
     mBgItems.clear();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Initialization
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Initialization ---
 
 void EditorPalette::Init(EditorSurfaceCache& cache, SDL_Surface* folderIcon) {
     mCache      = &cache;
     mFolderIcon = folderIcon;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Tile palette
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Tile palette ---
 
 const EditorPalette::PaletteItem* EditorPalette::SelectedItem() const {
     if (mSelectedTile < 0 || mSelectedTile >= static_cast<int>(mPaletteItems.size()))
@@ -71,21 +65,19 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
     if (!fs::exists(dir))
         return;
 
-    // ── "Back" entry when we're inside a subfolder ────────────────────────────
     fs::path dirPath(dir);
     fs::path rel    = fs::path(dir).lexically_relative(TILE_ROOT);
     bool     atRoot = (rel.empty() || rel == ".");
     if (!atRoot) {
         PaletteItem back;
         back.path     = dirPath.parent_path().string();
-        back.label    = "\xe2\x97\x80 Back"; // UTF-8 for "◀ Back" without literal Unicode
+        back.label    = "\xe2\x97\x80 Back";
         back.isFolder = true;
         back.thumb    = mFolderIcon;
         back.full     = nullptr;
         mPaletteItems.push_back(std::move(back));
     }
 
-    // ── Virtual "Animated Tiles" folder entry (root level only) ──────────────
     if (atRoot && fs::exists(ANIMATED_TILE_DIR)) {
         int count = 0;
         for (const auto& e : fs::directory_iterator(ANIMATED_TILE_DIR))
@@ -102,7 +94,6 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
         }
     }
 
-    // ── Scan directory for folders, PNGs, and JSON manifests ─────────────────
     std::vector<fs::path> folders, files, manifests;
     for (const auto& entry : fs::directory_iterator(dir)) {
         if (entry.is_directory()) {
@@ -119,7 +110,6 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
     std::ranges::sort(files);
     std::ranges::sort(manifests);
 
-    // Folders first
     for (const auto& p : folders) {
         int count = 0;
         for (const auto& e : fs::directory_iterator(p))
@@ -135,7 +125,6 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
         mPaletteItems.push_back(std::move(item));
     }
 
-    // Then individual PNG files
     for (const auto& p : files) {
         SDL_Surface* full = EditorSurfaceCache::LoadPNG(p);
         if (!full)
@@ -152,7 +141,6 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
         mPaletteItems.push_back(std::move(item));
     }
 
-    // ── Animated tile manifests (inside ANIMATED_TILE_DIR) ───────────────────
     for (const auto& p : manifests) {
         AnimatedTileDef def;
         if (!LoadAnimatedTileDef(p.string(), def) || def.framePaths.empty())
@@ -185,19 +173,15 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
         mPaletteItems.push_back(std::move(item));
     }
 
-    // ── Rebuild path->surface cache ─────────────────────────────────────────
     mCache->ClearTileSurfaceCache();
     for (const auto& item : mPaletteItems)
         if (!item.isFolder && item.full)
             mCache->InsertTileSurface(item.path, item.full);
 
-    // ── Seed cache for level tiles from other directories ───────────────────
     SeedCacheForLevel(level);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Background palette
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Background palette ---
 
 void EditorPalette::LoadBgPalette(const Level& level) {
     FreeBgItems();
@@ -237,9 +221,7 @@ void EditorPalette::ApplyBackground(int idx, Level& level, const ApplyBgCallback
         onApply(mBgItems[idx].path);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Double-click detection
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Double-click detection ---
 
 bool EditorPalette::CheckDoubleClick(int index) {
     Uint64 now      = SDL_GetTicks();
@@ -249,12 +231,9 @@ bool EditorPalette::CheckDoubleClick(int index) {
     return isDbl;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Cache seeding — ensures every tile in the level has a renderable surface
-// ═══════════════════════════════════════════════════════════════════════════════
+// --- Cache seeding ---
 
 void EditorPalette::SeedCacheForLevel(const Level& level) {
-    // Deduplicate: collect unique (path -> first seen w,h,animated) tuples
     struct TileLoad {
         std::string path;
         int         w;
