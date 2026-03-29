@@ -84,9 +84,7 @@ void LevelEditorScene::CloseAnimPicker() {
 const std::vector<EditorPopups::PowerUpEntry>& LevelEditorScene::GetPowerUpRegistry() {
     static const std::vector<EditorPopups::PowerUpEntry> kRegistry = {
         {"antigravity", "Anti-Gravity (15s)", 15.0f},
-        // Add future power-ups here:
-        // {"speedboost",  "Speed Boost (10s)",  10.0f},
-        // {"invincible",  "Invincibility (8s)",  8.0f},
+        {"turret",      "Orbiting Turret (15s)", 15.0f},
     };
     return kRegistry;
 }
@@ -255,6 +253,38 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
+    // ── Music change confirmation popup ──────────────────────────────────────
+    if (mMusicConfirmActive) {
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+            int mx = (int)e.button.x, my = (int)e.button.y;
+            if (HitTest(mMusicConfirmYes, mx, my)) {
+                namespace fs = std::filesystem;
+                mLevel.musicPath   = mMusicConfirmNewPath;
+                mLevel.musicVolume = 1.0f;
+                SetStatus("Level music: "
+                    + fs::path(mMusicConfirmNewPath).filename().string()
+                    + "  (drop another to replace, M to remove)");
+                mMusicConfirmActive  = false;
+                mMusicConfirmNewPath.clear();
+                return true;
+            }
+            if (HitTest(mMusicConfirmNo, mx, my)) {
+                mMusicConfirmActive  = false;
+                mMusicConfirmNewPath.clear();
+                SetStatus("Music change cancelled.");
+                return true;
+            }
+            return true; // consume click while popup is open
+        }
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+            mMusicConfirmActive  = false;
+            mMusicConfirmNewPath.clear();
+            SetStatus("Music change cancelled.");
+            return true;
+        }
+        return true; // block all other events while confirm is open
+    }
+
     // ── File / folder drop ────────────────────────────────────────────────────
     if (e.type == SDL_EVENT_DROP_BEGIN) {
         mDropActive = true;
@@ -269,16 +299,56 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
         mDropActive      = false;
         std::string path = e.drop.data ? std::string(e.drop.data) : "";
         if (!path.empty()) {
-            // Audio file drop: assign as level music
+            // Audio file drop
             {
                 fs::path p(path);
                 auto ext = p.extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
                 if (ext == ".wav" || ext == ".ogg" || ext == ".mp3" || ext == ".flac") {
-                    mLevel.musicPath = path;
-                    mLevel.musicVolume = 1.0f;
-                    SetStatus("Level music: " + p.filename().string()
-                              + "  (drop another to replace, M to remove)");
+                    float fmxA, fmyA;
+                    SDL_GetMouseState(&fmxA, &fmyA);
+                    int mxA = (int)fmxA, myA = (int)fmyA;
+                    int ti = (myA >= TOOLBAR_H && mxA < CanvasW()) ? HitTile(mxA, myA) : -1;
+
+                    // Tool-aware: Shooter tool targets turret tiles
+                    if (mActiveToolId == ToolId::Shooter) {
+                        if (ti >= 0 && mLevel.tiles[ti].HasShooter()) {
+                            mLevel.tiles[ti].shooter->sfxPath = path;
+                            SetStatus("Turret " + std::to_string(ti) + " fire SFX: "
+                                      + p.filename().string());
+                        } else {
+                            SetStatus("No turret tile under cursor — select Turret tool & drop on a turret");
+                        }
+                        return true;
+                    }
+                    // Tool-aware: PowerUp tool targets power-up tiles
+                    if (mActiveToolId == ToolId::PowerUp) {
+                        if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
+                            mLevel.tiles[ti].powerUp->sfxPath = path;
+                            SetStatus("Power-up " + std::to_string(ti) + " fire SFX: "
+                                      + p.filename().string());
+                        } else {
+                            SetStatus("No power-up tile under cursor — select Power-Up tool & drop on a power-up");
+                        }
+                        return true;
+                    }
+
+                    // Fallback: try turret, then power-up, then level music
+                    if (ti >= 0 && mLevel.tiles[ti].HasShooter()) {
+                        mLevel.tiles[ti].shooter->sfxPath = path;
+                        SetStatus("Turret " + std::to_string(ti) + " fire SFX: "
+                                  + p.filename().string());
+                        return true;
+                    }
+                    if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
+                        mLevel.tiles[ti].powerUp->sfxPath = path;
+                        SetStatus("Power-up " + std::to_string(ti) + " fire SFX: "
+                                  + p.filename().string());
+                        return true;
+                    }
+                    mMusicConfirmActive  = true;
+                    mMusicConfirmNewPath = path;
+                    SetStatus("Confirm music change...");
                     return true;
                 }
             }
@@ -540,6 +610,25 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                           "  spd=" + std::to_string((int)mPopups.movPlatSpeed) +
                           (mPopups.movPlatLoop ? "  LOOP" : "") +
                           (mPopups.movPlatTrigger ? "  TRIGGER" : ""));
+            }
+        } else if (mActiveToolId == ToolId::Shooter) {
+            int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
+            if (hovTi >= 0 && mLevel.tiles[hovTi].HasShooter()) {
+                auto& sd = *mLevel.tiles[hovTi].shooter;
+                sd.fireRate = std::clamp(sd.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "Turret fire rate: %.1f shots/sec", sd.fireRate);
+                SetStatus(buf);
+            }
+        } else if (mActiveToolId == ToolId::PowerUp) {
+            int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
+            if (hovTi >= 0 && mLevel.tiles[hovTi].HasPowerUp() &&
+                mLevel.tiles[hovTi].powerUp->type == "turret") {
+                auto& pu = *mLevel.tiles[hovTi].powerUp;
+                pu.fireRate = std::clamp(pu.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
+                char buf[64];
+                std::snprintf(buf, sizeof(buf), "Turret PU fire rate: %.1f shots/sec", pu.fireRate);
+                SetStatus(buf);
             }
         }
     }
@@ -827,6 +916,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     grp      = (grp + 1) % 10;
                     SetStatus("Tile " + std::to_string(ti) + " group -> " +
                               (grp == 0 ? "standalone" : std::to_string(grp)));
+                } else if (mActiveToolId == ToolId::Shooter && mLevel.tiles[ti].HasShooter()) {
+                    int s = (static_cast<int>(mLevel.tiles[ti].shooter->side) + 1) % 4;
+                    mLevel.tiles[ti].shooter->side = static_cast<ShooterSide>(s);
+                    static const char* kNames[] = {"Top","Right","Bottom","Left"};
+                    SetStatus("Tile " + std::to_string(ti) + " shooter side -> " + kNames[s]);
                 } else {
                     int& rot = mLevel.tiles[ti].rotation;
                     rot      = (rot + 90) % 360;
@@ -1000,6 +1094,16 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                         mPopups.powerUpRegistry = &GetPowerUpRegistry();
                         lblTool->CreateSurface("PowerUp");
                         SetStatus("PowerUp: click a tile to assign a power-up pickup");
+                        return true;
+                    case TBBtn::Shooter:
+                        SwitchTool(ToolId::Shooter);
+                        lblTool->CreateSurface("Turret");
+                        SetStatus("Turret: LClick toggle, RClick cycle side, Scroll adjust fire rate");
+                        return true;
+                    case TBBtn::Shield:
+                        SwitchTool(ToolId::Shield);
+                        lblTool->CreateSurface("Shield");
+                        SetStatus("Shield: LClick tile to toggle shield pickup (slash to collect)");
                         return true;
                     case TBBtn::MovingPlat: {
                         SwitchTool(ToolId::MovingPlat);
@@ -1447,7 +1551,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             mActiveToolId != ToolId::MoveCam && mActiveToolId != ToolId::PlayerStart &&
             mActiveToolId != ToolId::Prop && mActiveToolId != ToolId::Ladder &&
             mActiveToolId != ToolId::Slope && mActiveToolId != ToolId::Hazard &&
-            mActiveToolId != ToolId::AntiGrav && mActiveToolId != ToolId::Select &&
+            mActiveToolId != ToolId::AntiGrav && mActiveToolId != ToolId::Shooter &&
+            mActiveToolId != ToolId::Shield && mActiveToolId != ToolId::Select &&
             mActiveToolId != ToolId::Resize && mActiveToolId != ToolId::Hitbox) {
             int ti = HitTile(mx, my);
             if (ti >= 0) {
@@ -1620,6 +1725,16 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     dcState.yesRect = mPopups.delYes;
     dcState.noRect  = mPopups.delNo;
 
+    EditorUIRenderer::MusicConfirmState mcState;
+    mcState.active  = mMusicConfirmActive;
+    {
+        namespace fs = std::filesystem;
+        mcState.oldName = mLevel.musicPath.empty()
+            ? "(none)" : fs::path(mLevel.musicPath).filename().string();
+        mcState.newName = mMusicConfirmNewPath.empty()
+            ? "" : fs::path(mMusicConfirmNewPath).filename().string();
+    }
+
     EditorUIRenderer::ImportInputState impState;
     impState.active = mPopups.importActive;
     impState.text   = mPopups.importText;
@@ -1654,6 +1769,7 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
                        mPopups.animPickerRect,
                        puState,
                        dcState,
+                       mcState,
                        impState,
                        mpuState,
                        mDropActive,
@@ -1675,6 +1791,8 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     // Sync back rects that HandleEvent needs
     mPopups.delYes         = mUIRenderer.DelConfirmYesRect();
     mPopups.delNo          = mUIRenderer.DelConfirmNoRect();
+    mMusicConfirmYes       = mUIRenderer.MusicConfirmYesRect();
+    mMusicConfirmNo        = mUIRenderer.MusicConfirmNoRect();
     mPopups.animPickerRect       = mUIRenderer.AnimPickerRect();
     mPopups.camShakeToggleRect   = mUIRenderer.CamShakeToggleRect();
 

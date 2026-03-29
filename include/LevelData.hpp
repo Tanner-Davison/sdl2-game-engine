@@ -53,8 +53,25 @@ struct MovingPlatformData {
 };
 
 struct PowerUpData {
-    std::string type;             // "antigravity", etc.
+    std::string type;             // "antigravity", "turret", etc.
     float       duration = 15.0f; // seconds the effect lasts
+    float       fireRate = 3.0f;  // shots/sec (turret power-up only)
+    std::string sfxPath;          // optional fire SFX (turret power-up)
+};
+
+enum class ShooterSide { Top, Right, Bottom, Left };
+
+struct ShooterData {
+    ShooterSide side        = ShooterSide::Right;
+    float       range       = 1000.0f;  // detection range in pixels
+    float       fireRate    = 2.5f;     // shots per second
+    float       bulletSpeed = 700.0f;   // pixels per second
+    float       damage      = 25.0f;    // HP per bullet hit
+    std::string sfxPath;                // optional fire sound effect
+};
+
+struct ShieldData {
+    float duration = 20.0f; // seconds the shield orbits the player
 };
 
 // ── TileSpawn ────────────────────────────────────────────────────────────────
@@ -79,6 +96,8 @@ struct TileSpawn {
     std::optional<HitboxData>          hitbox;
     std::optional<MovingPlatformData>  moving;
     std::optional<PowerUpData>         powerUp;
+    std::optional<ShooterData>         shooter;
+    std::optional<ShieldData>          shield;
 
     // ── Convenience queries ──────────────────────────────────────────────────
     bool HasAction()   const { return action.has_value(); }
@@ -86,6 +105,8 @@ struct TileSpawn {
     bool HasHitbox()   const { return hitbox.has_value(); }
     bool HasMoving()   const { return moving.has_value(); }
     bool HasPowerUp()  const { return powerUp.has_value(); }
+    bool HasShooter()  const { return shooter.has_value(); }
+    bool HasShield()   const { return shield.has_value(); }
     bool HasGoal()    const { return goal; }
 
     SlopeType GetSlopeType() const {

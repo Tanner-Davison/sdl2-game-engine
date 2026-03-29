@@ -345,7 +345,7 @@ struct OpenWorldTag {}; // marks the player as running in open-world (top-down) 
 enum class PowerUpType {
     None,
     AntiGravity,   // player has zero gravity for `duration` seconds
-    // Future: SpeedBoost, Invincibility, DoubleJump, ...
+    Turret,        // orbiting turret that fires bullets for `duration` seconds
 };
 
 // Attached to a tile entity that functions as a power-up pickup.
@@ -353,7 +353,9 @@ enum class PowerUpType {
 // and ActivePowerUp is emplaced on the player.
 struct PowerUpTag {
     PowerUpType type     = PowerUpType::None;
-    float       duration = 15.0f; // seconds the effect lasts (configurable per tile)
+    float       duration = 15.0f;
+    float       fireRate = 3.0f;
+    std::string sfxPath;
 };
 
 // One active power-up slot — tracks remaining time for a single effect.
@@ -533,4 +535,60 @@ struct PlayerBaseCollider {
             outW = standW; outH = standH; outRoffX = standRoffX; outRoffY = standRoffY;
         }
     }
+};
+
+// ── Shooter / Turret components ──────────────────────────────────────────────
+
+struct ShooterTag {
+    int   side        = 0;     // 0=Top 1=Right 2=Bottom 3=Left (matches ShooterSide)
+    float range       = 300.f;
+    float fireRate    = 1.5f;
+    float bulletSpeed = 200.f;
+    float damage      = 10.f;
+    std::string sfxPath;
+};
+
+struct ShooterState {
+    float cooldownLeft = 0.f;
+};
+
+struct BulletTag {
+    float dx = 0.f, dy = 0.f;  // normalized direction
+    float speed  = 200.f;
+    float damage = 10.f;
+    float originX = 0.f, originY = 0.f; // spawn position for max-range despawn
+    float maxRange = 300.f;
+    entt::entity sourceTurret = entt::null; // turret that fired this bullet
+    bool playerOwned = false; // true = fired by player's turret power-up
+};
+
+// ── Shield components ────────────────────────────────────────────────────────
+
+struct ShieldPickupTag {
+    float duration = 20.f;
+};
+
+struct ShieldEntry {
+    SDL_Texture* tex       = nullptr;
+    int          renderW   = 0;
+    int          renderH   = 0;
+    float        remaining = 20.f;
+};
+
+struct ActiveShield {
+    std::vector<ShieldEntry> shields;
+    float angle       = 0.f;      // base orbit angle (radians, 0 = right)
+    float orbitRadius = 30.f;     // pixels from player center
+};
+
+struct ActiveTurretPowerUp {
+    float angle       = 0.f;
+    float orbitRadius = 28.f;
+    float remaining   = 15.f;
+    float fireRate    = 3.0f;
+    float cooldown    = 0.f;
+    float bulletSpeed = 500.f;
+    float damage      = 15.f;
+    float range       = 1200.f;
+    std::string sfxId;           // pre-loaded SFX id for fire sound
 };

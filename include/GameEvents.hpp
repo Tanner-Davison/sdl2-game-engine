@@ -36,4 +36,5 @@ struct CollisionResult {
     int                       enemiesSlashed   = 0;    // enemies killed by slash this frame
     int                       slashHits        = 0;    // total sword-to-enemy connections (lethal + non-lethal)
     float                     lowestHitHpFrac  = 1.0f; // lowest enemy HP fraction after any hit (0 = killed)
+    bool                      shieldBounce     = false; // true if shield knocked back an enemy this frame
 };

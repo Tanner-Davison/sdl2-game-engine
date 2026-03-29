@@ -133,6 +133,8 @@ class LevelEditorScene : public Scene {
             case ToolId::AntiGrav:    return TBBtn::AntiGrav;
             case ToolId::MovingPlat:  return TBBtn::MovingPlat;
             case ToolId::PowerUp:     return TBBtn::PowerUp;
+            case ToolId::Shooter:     return TBBtn::Shooter;
+            case ToolId::Shield:      return TBBtn::Shield;
         }
         return TBBtn::COUNT;
     }
@@ -313,4 +315,10 @@ class LevelEditorScene : public Scene {
     // Music volume slider
     SDL_Rect mMusicVolSlider{};
     bool     mMusicVolDragging = false;
+
+    // Music change confirmation popup
+    bool        mMusicConfirmActive = false;
+    std::string mMusicConfirmNewPath;
+    SDL_Rect    mMusicConfirmYes{};
+    SDL_Rect    mMusicConfirmNo{};
 };

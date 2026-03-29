@@ -30,6 +30,8 @@ EditorToolbar::Defs() {
         {ButtonId::AntiGrav,    Group::Modifier, "Float",    13, "",  true},
         {ButtonId::MovingPlat,  Group::Modifier, "MovePlat", 12, "",  true},
         {ButtonId::PowerUp,     Group::Modifier, "PowerUp",  12, "",  true},
+        {ButtonId::Shooter,     Group::Modifier, "Turret",   13, "",  true},
+        {ButtonId::Shield,      Group::Modifier, "Shield",   13, "",  true},
         // Group 3 - Action buttons
         {ButtonId::Gravity,     Group::Actions,  "Platform", 13, "",  false},
         {ButtonId::Save,        Group::Actions,  "Save",     14, "",  false},

@@ -89,6 +89,41 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         if (auto* ds = reg.try_get<DashState>(playerEnt))
             dashing = ds->active;
 
+        // -- Shield vs enemy knockback (independent of player overlap) ----------
+        if (auto* as = reg.try_get<ActiveShield>(playerEnt)) {
+            constexpr float PI2 = 2.f * 3.14159265f;
+            constexpr float SHIELD_KB = 64.f;
+            float pcx = pt.x + pw * 0.5f;
+            float pcy = pt.y + ph * 0.5f;
+            int n = (int)as->shields.size();
+
+            liveEnemyView.each([&](entt::entity enemy, const Transform& et, const Collider& ec) {
+                SDL_FRect enemyR = {et.x, et.y, (float)ec.w, (float)ec.h};
+                for (int i = 0; i < n; ++i) {
+                    float a = as->angle + (float)i / n * PI2;
+                    const auto& se = as->shields[i];
+                    float sx = pcx + std::cos(a) * as->orbitRadius - se.renderW * 0.5f;
+                    float sy = pcy + std::sin(a) * as->orbitRadius - se.renderH * 0.5f;
+                    SDL_FRect shieldR = {sx, sy, (float)se.renderW, (float)se.renderH};
+                    if (SDL_HasRectIntersectionFloat(&shieldR, &enemyR)) {
+                        float sCX = sx + se.renderW * 0.5f;
+                        float sCY = sy + se.renderH * 0.5f;
+                        float eCX = et.x + ec.w * 0.5f;
+                        float eCY = et.y + ec.h * 0.5f;
+                        float dx = eCX - sCX;
+                        float dy = eCY - sCY;
+                        float len = std::sqrt(dx * dx + dy * dy);
+                        if (len < 0.01f) { dx = 1.f; dy = 0.f; len = 1.f; }
+                        auto& eMut = reg.get<Transform>(enemy);
+                        eMut.x += dx / len * SHIELD_KB;
+                        eMut.y += dy / len * SHIELD_KB;
+                        result.shieldBounce = true;
+                        break;
+                    }
+                }
+            });
+        }
+
         liveEnemyView.each([&](entt::entity enemy, const Transform& et, const Collider& ec) {
             // While dashing the player phases through enemies — no damage,
             // no stomp, no push-out.

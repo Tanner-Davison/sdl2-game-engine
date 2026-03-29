@@ -209,23 +209,71 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             if (t.ladder) SDL_SetSurfaceColorMod(draw, 120, 220, 255);
             if (t.HasAction()) SDL_SetSurfaceColorMod(draw, 255, 160,  80);
             if (t.hazard) SDL_SetSurfaceColorMod(draw, 255,  80,  80);
-            // Use LINEAR when downscaling (zoom < 100%) for smooth minification;
-            // PIXELART when at or above source size for crisp pixel edges.
+            if (t.HasShooter()) SDL_SetSurfaceColorMod(draw, 255, 160, 60);
+            if (t.HasShield()) SDL_SetSurfaceColorMod(draw, 100, 180, 255);
             SDL_ScaleMode tileScale = (dst.w < draw->w || dst.h < draw->h)
                                     ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_PIXELART;
             SDL_BlitSurfaceScaled(draw, nullptr, screen, &dst, tileScale);
-            if (t.prop || t.ladder || t.HasAction() || t.hazard)
+            if (t.prop || t.ladder || t.HasAction() || t.hazard || t.HasShooter() || t.HasShield())
                 SDL_SetSurfaceColorMod(draw, 255, 255, 255);
         } else {
             DrawRect(screen, dst, {80, 80, 120, 200});
         }
 
-        SDL_Color outlineCol = t.ladder   ? SDL_Color{0, 220, 220, 255}
-                             : t.prop     ? SDL_Color{80, 255, 80, 255}
-                             : t.HasAction() ? SDL_Color{255, 160, 60, 255}
-                             : t.hazard   ? SDL_Color{255, 60, 60, 255}
-                                          : SDL_Color{100, 180, 255, 255};
+        SDL_Color outlineCol = t.ladder       ? SDL_Color{0, 220, 220, 255}
+                             : t.prop         ? SDL_Color{80, 255, 80, 255}
+                             : t.HasAction()  ? SDL_Color{255, 160, 60, 255}
+                             : t.hazard       ? SDL_Color{255, 60, 60, 255}
+                             : t.HasShooter() ? SDL_Color{255, 140, 40, 255}
+                             : t.HasShield()  ? SDL_Color{60, 160, 255, 255}
+                                              : SDL_Color{100, 180, 255, 255};
         DrawOutline(screen, dst, outlineCol);
+
+        // ── Shooter barrel graphic ────────────────────────────────────────────
+        if (t.HasShooter()) {
+            int cx = tsx + tsw / 2;
+            int cy = tsy + tsh / 2;
+            int side = static_cast<int>(t.shooter->side);
+
+            // Base: dark circle-ish square in the center
+            int baseW = std::max(6, tsw / 4);
+            int baseH = std::max(6, tsh / 4);
+            SDL_Rect base = {cx - baseW / 2, cy - baseH / 2, baseW, baseH};
+            DrawRect(screen, base, {20, 20, 20, 220});
+            DrawOutline(screen, base, {60, 60, 60, 255});
+
+            // Barrel: rectangle extending from the base toward the firing side
+            int barrelLen = std::max(4, std::min(tsw, tsh) / 3);
+            int barrelThk = std::max(3, std::min(baseW, baseH) / 2);
+            SDL_Rect barrel{};
+            switch (side) {
+                case 0: // Top
+                    barrel = {cx - barrelThk / 2, cy - baseH / 2 - barrelLen, barrelThk, barrelLen};
+                    break;
+                case 1: // Right
+                    barrel = {cx + baseW / 2, cy - barrelThk / 2, barrelLen, barrelThk};
+                    break;
+                case 2: // Bottom
+                    barrel = {cx - barrelThk / 2, cy + baseH / 2, barrelThk, barrelLen};
+                    break;
+                case 3: // Left
+                    barrel = {cx - baseW / 2 - barrelLen, cy - barrelThk / 2, barrelLen, barrelThk};
+                    break;
+            }
+            DrawRect(screen, barrel, {15, 15, 15, 230});
+            DrawOutline(screen, barrel, {80, 80, 80, 255});
+
+            // Muzzle tip: bright orange dot at the end of the barrel
+            int muzzleSz = std::max(2, barrelThk - 2);
+            SDL_Rect muzzle{};
+            switch (side) {
+                case 0: muzzle = {cx - muzzleSz / 2, barrel.y,                     muzzleSz, muzzleSz}; break;
+                case 1: muzzle = {barrel.x + barrel.w - muzzleSz, cy - muzzleSz/2, muzzleSz, muzzleSz}; break;
+                case 2: muzzle = {cx - muzzleSz / 2, barrel.y + barrel.h - muzzleSz, muzzleSz, muzzleSz}; break;
+                case 3: muzzle = {barrel.x,           cy - muzzleSz / 2,            muzzleSz, muzzleSz}; break;
+            }
+            DrawRect(screen, muzzle, {255, 140, 30, 255});
+        }
 
         // ── Stacked top-left badges ──────────────────────────────────────────
         {
@@ -251,6 +299,7 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             if (t.antiGravity) drawBadge("F", {0, 180, 200, 220},{255, 255, 255, 255});
             if (t.HasPowerUp()) {
                 std::string pb  = t.powerUp->type.empty() ? "PU" : t.powerUp->type.substr(0, 2);
+                if (!t.powerUp->sfxPath.empty()) pb += " \xe2\x99\xaa";
                 int         pw  = (int)pb.size() * 6 + 4;
                 DrawRect(screen, {bx, tsy + 2, pw, BH}, {180, 0, 220, 220});
                 DrawOutline(screen, {bx, tsy + 2, pw, BH}, {255, 80, 255, 255});
@@ -267,6 +316,20 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
                 bx += bw + GAP;
             }
             if (t.goal)  drawBadge("G", {0, 200, 80, 220},     {255, 255, 255, 255});
+            if (t.HasShooter()) {
+                static const char* kArrows[] = {"\xe2\x96\xb2","\xe2\x96\xb6","\xe2\x96\xbc","\xe2\x97\x80"}; // ▲▶▼◀
+                char rateBuf[16];
+                std::snprintf(rateBuf, sizeof(rateBuf), "%.1f", t.shooter->fireRate);
+                std::string sb = std::string("T") + kArrows[static_cast<int>(t.shooter->side)]
+                               + " " + rateBuf;
+                if (!t.shooter->sfxPath.empty()) sb += " \xe2\x99\xaa";
+                int sw = (int)sb.size() * 4 + 6;
+                DrawRect(screen, {bx, tsy + 2, sw, BH}, {180, 80, 0, 220});
+                DrawOutline(screen, {bx, tsy + 2, sw, BH}, {255, 140, 40, 255});
+                blitBadge(badge(sb, {255, 255, 255, 255}), bx + 2, tsy + 2);
+                bx += sw + GAP;
+            }
+            if (t.HasShield()) drawBadge("S", {30, 100, 200, 220}, {255, 255, 255, 255});
             (void)bx;
         }
 

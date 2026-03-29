@@ -39,6 +39,8 @@ enum class ToolId {
     Select,
     MoveCam,
     PowerUp,
+    Shooter,
+    Shield,
 };
 
 // Return value from event handlers: tells the orchestrator whether the

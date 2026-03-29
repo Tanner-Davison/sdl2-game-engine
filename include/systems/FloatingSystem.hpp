@@ -101,6 +101,30 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                     }
                 });
             }
+
+            // ── Lateral collision: push enemies out of tile sides ─────────
+            // Prevents enemies from walking through or climbing onto tiles.
+            // Only resolves horizontal penetration when the enemy's feet
+            // are below the tile's top face (they're hitting the side, not
+            // landing on top).
+            tileView.each([&](const Transform& tt, const Collider& tc) {
+                if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
+                if (et.y + ec.h <= tt.y || et.y >= tt.y + tc.h) return;
+
+                float feetY = et.y + ec.h;
+                bool hittingSide = feetY > tt.y + 4.f;
+                if (!hittingSide) return;
+
+                float overlapL = (et.x + ec.w) - tt.x;
+                float overlapR = (tt.x + tc.w) - et.x;
+                if (overlapL < overlapR) {
+                    et.x = tt.x - ec.w;
+                    if (ev.dx > 0.f) ev.dx = -std::abs(ev.dx);
+                } else {
+                    et.x = tt.x + tc.w;
+                    if (ev.dx < 0.f) ev.dx = std::abs(ev.dx);
+                }
+            });
         });
     }
 

@@ -284,3 +284,113 @@ class AntiGravTool final : public EditorTool {
         return ToolResult::Consumed;
     }
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ShooterTool (Turret)
+// Left-click a tile to toggle shooter, right-click to cycle side (Top/Right/Bottom/Left).
+// ═══════════════════════════════════════════════════════════════════════════════
+class ShooterTool final : public EditorTool {
+  public:
+    [[nodiscard]] const char* Name() const override { return "Turret"; }
+
+    ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
+                           Uint8 button, SDL_Keymod /*mods*/) override {
+        if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
+
+        int ti = ctx.HitTile(mx, my);
+        if (ti < 0) {
+            if (button == SDL_BUTTON_LEFT)
+                return StartEntityDrag(ctx, mx, my);
+            return ToolResult::Ignored;
+        }
+
+        auto& t = ctx.level.tiles[ti];
+
+        if (button == SDL_BUTTON_RIGHT) {
+            if (!t.HasShooter()) return ToolResult::Consumed;
+            int s = (static_cast<int>(t.shooter->side) + 1) % 4;
+            t.shooter->side = static_cast<ShooterSide>(s);
+            static const char* kNames[] = {"Top","Right","Bottom","Left"};
+            ctx.SetStatus("Tile " + std::to_string(ti) + " shooter side -> " + kNames[s]);
+            return ToolResult::Consumed;
+        }
+
+        if (button == SDL_BUTTON_LEFT) {
+            if (t.HasShooter()) {
+                t.shooter.reset();
+                ctx.SetStatus("Tile " + std::to_string(ti) + " -> shooter removed");
+            } else {
+                t.shooter = ShooterData{};
+                ctx.SetStatus("Tile " + std::to_string(ti) + " -> shooter (RClick to cycle side)");
+            }
+            return ToolResult::Consumed;
+        }
+
+        return ToolResult::Ignored;
+    }
+
+    ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override {
+        if (mIsDragging && my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
+            UpdateEntityDrag(ctx, mx, my);
+            return ToolResult::Consumed;
+        }
+        return ToolResult::Ignored;
+    }
+
+    ToolResult OnMouseUp(EditorToolContext& /*ctx*/, int /*mx*/, int /*my*/,
+                         Uint8 button, SDL_Keymod /*mods*/) override {
+        (void)button;
+        StopEntityDrag();
+        return ToolResult::Consumed;
+    }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ShieldTool
+// Left-click a tile to toggle shield pickup. Automatically adds ActionTag
+// (hitsRequired=1) so the tile is slashable to pick up.
+// ═══════════════════════════════════════════════════════════════════════════════
+class ShieldTool final : public EditorTool {
+  public:
+    [[nodiscard]] const char* Name() const override { return "Shield"; }
+
+    ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
+                           Uint8 button, SDL_Keymod /*mods*/) override {
+        if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
+        if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
+        int ti = ctx.HitTile(mx, my);
+        if (ti >= 0) {
+            auto& t = ctx.level.tiles[ti];
+            if (t.HasShield()) {
+                t.shield.reset();
+                if (t.HasAction() && t.action->hitsRequired == 1 &&
+                    t.action->destroyAnimPath.empty() && t.action->group == 0)
+                    t.action.reset();
+                ctx.SetStatus("Tile " + std::to_string(ti) + " -> shield removed");
+            } else {
+                t.shield = ShieldData{};
+                if (!t.HasAction())
+                    t.action = ActionData{0, 1, "", false};
+                ctx.SetStatus("Tile " + std::to_string(ti) +
+                              " -> shield pickup (slash to collect)");
+            }
+            return ToolResult::Consumed;
+        }
+        return StartEntityDrag(ctx, mx, my);
+    }
+
+    ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override {
+        if (mIsDragging && my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
+            UpdateEntityDrag(ctx, mx, my);
+            return ToolResult::Consumed;
+        }
+        return ToolResult::Ignored;
+    }
+
+    ToolResult OnMouseUp(EditorToolContext& /*ctx*/, int /*mx*/, int /*my*/,
+                         Uint8 button, SDL_Keymod /*mods*/) override {
+        (void)button;
+        StopEntityDrag();
+        return ToolResult::Consumed;
+    }
+};

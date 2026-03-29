@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
     // presentation. On WSL this can force OpenGL instead of software rendering.
     // Must be set before any SDL_Create* calls.
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
-    SDL_SetHint(SDL_HINT_RENDER_VSYNC,  "1");
+    SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
 
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD | SDL_INIT_AUDIO);
     if (!TTF_Init()) {
@@ -36,8 +36,8 @@ int main(int argc, char** argv) {
     // SDL3 also fires SDL_EVENT_GAMEPAD_ADDED for hot-plug so HandleEvent
     // in GameScene picks up controllers connected after launch.
     {
-        int count = 0;
-        SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        int             count = 0;
+        SDL_JoystickID* ids   = SDL_GetGamepads(&count);
         if (ids) {
             for (int i = 0; i < count; ++i)
                 SDL_OpenGamepad(ids[i]);
@@ -48,8 +48,8 @@ int main(int argc, char** argv) {
     manager.SetScene(std::make_unique<TitleScene>(), GameWindow);
 
     SDL_Event E;
-    Uint64 frequency = SDL_GetPerformanceFrequency();
-    Uint64 lastTime  = SDL_GetPerformanceCounter();
+    Uint64    frequency = SDL_GetPerformanceFrequency();
+    Uint64    lastTime  = SDL_GetPerformanceCounter();
 
     // ── Fixed timestep accumulator ─────────────────────────────────────────
     // Physics always advances in fixed FIXED_DT steps regardless of how long
@@ -67,12 +67,13 @@ int main(int argc, char** argv) {
     while (true) {
         // ── Measure real elapsed time ────────────────────────────────────
         Uint64 currentTime = SDL_GetPerformanceCounter();
-        float  frameTime   = static_cast<float>(currentTime - lastTime)
-                           / static_cast<float>(frequency);
+        float  frameTime =
+            static_cast<float>(currentTime - lastTime) / static_cast<float>(frequency);
         lastTime = currentTime;
 
         // Clamp so a breakpoint / system pause doesn't send the sim flying
-        if (frameTime > MAX_FRAME) frameTime = MAX_FRAME;
+        if (frameTime > MAX_FRAME)
+            frameTime = MAX_FRAME;
 
         // ── Events ──────────────────────────────────────────────────────
         while (SDL_PollEvent(&E)) {
@@ -106,15 +107,16 @@ int main(int argc, char** argv) {
         // ── Hybrid frame limiter ─────────────────────────────────────────
         // Coarse sleep eats most of the idle time cheaply; busy-spin covers
         // the last ~1ms where SDL_Delay's ~10ms granularity would overshoot.
-        Uint64 frameEnd     = SDL_GetPerformanceCounter();
-        float  frameCost    = static_cast<float>(frameEnd - lastTime)
-                            / static_cast<float>(frequency);
-        float  sleepSeconds = TARGET_DT - frameCost - 0.001f;
+        Uint64 frameEnd = SDL_GetPerformanceCounter();
+        float  frameCost =
+            static_cast<float>(frameEnd - lastTime) / static_cast<float>(frequency);
+        float sleepSeconds = TARGET_DT - frameCost - 0.001f;
         if (sleepSeconds > 0.0f)
             SDL_Delay(static_cast<Uint32>(sleepSeconds * 1000.0f));
 
-        while (static_cast<float>(SDL_GetPerformanceCounter() - lastTime)
-               / static_cast<float>(frequency) < TARGET_DT) {
+        while (static_cast<float>(SDL_GetPerformanceCounter() - lastTime) /
+                   static_cast<float>(frequency) <
+               TARGET_DT) {
             // busy-spin the last sub-millisecond for precise frame delivery
         }
     }

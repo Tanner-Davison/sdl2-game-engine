@@ -7,6 +7,8 @@
 
 #include "tools/EditorTool.hpp"
 #include "EditorSurfaceCache.hpp"
+#include <cmath>
+#include <climits>
 #include <string>
 
 // ─── Forward declarations for palette query ──────────────────────────────────
@@ -154,26 +156,27 @@ class PlayerStartTool final : public EditorTool {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TileTool
+// TileTool — click to place, click-and-drag to paint a row/column/area.
+//
+// During drag, tiles snap to tileW/tileH intervals relative to the first
+// placed tile so they always align edge-to-edge. Overlap detection prevents
+// placing on top of any existing tile during a drag stroke. Single clicks
+// preserve the old behavior (can intentionally stack).
 // ═══════════════════════════════════════════════════════════════════════════════
 class TileTool final : public EditorTool {
   public:
     [[nodiscard]] const char* Name() const override { return "Tile"; }
 
-    // Tile size (defaults to GRID, adjustable via scroll)
     int  tileW         = 38;
     int  tileH         = 38;
     int  ghostRotation = 0;
     float scrollAccum  = 0.0f;
 
-    // The orchestrator sets this every frame before dispatch so the tool
-    // knows what palette item is selected without holding a palette reference.
     TilePlacementInfo placementInfo;
 
     ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
                            Uint8 button, SDL_Keymod /*mods*/) override {
         if (button == SDL_BUTTON_RIGHT) {
-            // Right-click on a tile: rotate it. On empty space: cycle ghost.
             if (my >= ctx.ToolbarH() && mx < ctx.CanvasW()) {
                 int ti = ctx.HitTile(mx, my);
                 if (ti >= 0) {
@@ -193,7 +196,6 @@ class TileTool final : public EditorTool {
 
         if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;
         if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
-
         if (!placementInfo.hasSelection || placementInfo.isFolder)
             return ToolResult::Consumed;
 
@@ -204,7 +206,53 @@ class TileTool final : public EditorTool {
         ctx.level.tiles.push_back(std::move(newTile));
         ctx.SetStatus("Tile: " + placementInfo.label +
                       (ghostRotation ? "  rot=" + std::to_string(ghostRotation) : ""));
+
+        mDragging    = true;
+        mDragOriginX = sx;
+        mDragOriginY = sy;
+        mLastCellX   = 0;
+        mLastCellY   = 0;
         return ToolResult::Consumed;
+    }
+
+    ToolResult OnMouseMove(EditorToolContext& ctx, int mx, int my) override {
+        if (!mDragging) return ToolResult::Ignored;
+        if (my < ctx.ToolbarH() || mx >= ctx.CanvasW()) return ToolResult::Ignored;
+        if (!placementInfo.hasSelection || placementInfo.isFolder)
+            return ToolResult::Ignored;
+
+        auto [wx, wy] = ctx.ScreenToWorld(mx, my);
+        int cellX = (int)std::floor((float)(wx - mDragOriginX) / (float)tileW);
+        int cellY = (int)std::floor((float)(wy - mDragOriginY) / (float)tileH);
+
+        if (cellX == mLastCellX && cellY == mLastCellY)
+            return ToolResult::Consumed;
+
+        mLastCellX = cellX;
+        mLastCellY = cellY;
+
+        int snapX = mDragOriginX + cellX * tileW;
+        int snapY = mDragOriginY + cellY * tileH;
+
+        SDL_Rect candidate = {snapX, snapY, tileW, tileH};
+        for (const auto& t : ctx.level.tiles) {
+            SDL_Rect existing = {(int)t.x, (int)t.y, t.w, t.h};
+            if (SDL_HasRectIntersection(&candidate, &existing))
+                return ToolResult::Consumed;
+        }
+
+        auto newTile = TileSpawn{static_cast<float>(snapX), static_cast<float>(snapY),
+                                 tileW, tileH, placementInfo.imagePath};
+        newTile.rotation = ghostRotation;
+        ctx.level.tiles.push_back(std::move(newTile));
+        return ToolResult::Consumed;
+    }
+
+    ToolResult OnMouseUp(EditorToolContext& /*ctx*/, int /*mx*/, int /*my*/,
+                         Uint8 button, SDL_Keymod /*mods*/) override {
+        if (button == SDL_BUTTON_LEFT)
+            mDragging = false;
+        return ToolResult::Ignored;
     }
 
     ToolResult OnScroll(EditorToolContext& ctx, float wheelY,
@@ -223,7 +271,15 @@ class TileTool final : public EditorTool {
     void OnActivate(EditorToolContext& /*ctx*/) override {
         ghostRotation = 0;
         scrollAccum   = 0.0f;
+        mDragging     = false;
     }
+
+  private:
+    bool mDragging    = false;
+    int  mDragOriginX = 0;
+    int  mDragOriginY = 0;
+    int  mLastCellX   = INT_MIN;
+    int  mLastCellY   = INT_MIN;
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════

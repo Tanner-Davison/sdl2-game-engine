@@ -34,6 +34,8 @@ inline std::unique_ptr<EditorTool> MakeEditorTool(ToolId id) {
         case ToolId::Slope:       return std::make_unique<SlopeTool>();
         case ToolId::Hazard:      return std::make_unique<HazardTool>();
         case ToolId::AntiGrav:    return std::make_unique<AntiGravTool>();
+        case ToolId::Shooter:     return std::make_unique<ShooterTool>();
+        case ToolId::Shield:      return std::make_unique<ShieldTool>();
 
         // Complex tools -- handled inline by the orchestrator for now.
         case ToolId::Action:

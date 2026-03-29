@@ -69,6 +69,7 @@ void EditorUIRenderer::Render(
     SDL_Rect                      animPickerRectIn,
     const PowerUpPopupState&      powerUp,
     const DelConfirmState&        delConfirm,
+    const MusicConfirmState&     musicConfirm,
     const ImportInputState&       importInput,
     const MovPlatPopupState&      movPlat,
     bool                          dropActive,
@@ -117,6 +118,9 @@ void EditorUIRenderer::Render(
         const auto* fmt = SDL_GetPixelFormatDetails(screen->format);
         RenderDelConfirm(screen, W, H, delConfirm, cache, fmt);
     }
+
+    if (musicConfirm.active)
+        RenderMusicConfirm(screen, W, H, musicConfirm, cache);
 }
 
 // ── Toolbar ───────────────────────────────────────────────────────────────────
@@ -156,6 +160,8 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
             case ToolId::AntiGrav:    return TBBtn::AntiGrav;
             case ToolId::MovingPlat:  return TBBtn::MovingPlat;
             case ToolId::PowerUp:     return TBBtn::PowerUp;
+            case ToolId::Shooter:     return TBBtn::Shooter;
+            case ToolId::Shield:      return TBBtn::Shield;
         }
         return TBBtn::COUNT;
     };
@@ -847,21 +853,31 @@ void EditorUIRenderer::RenderDropOverlay(SDL_Surface* screen, int canvasW, int t
                                           const EditorPalette& palette,
                                           EditorSurfaceCache& cache)
 {
-    DrawRect(screen, {0,toolbarH,canvasW,winH-toolbarH}, {20,80,160,80});
-    constexpr int B=6;
-    SDL_Color bc={80,180,255,220};
-    DrawRect(screen,{0,toolbarH,canvasW,B},bc);
-    DrawRect(screen,{0,winH-B,canvasW,B},bc);
-    DrawRect(screen,{0,toolbarH,B,winH-toolbarH},bc);
-    DrawRect(screen,{canvasW-B,toolbarH,B,winH-toolbarH},bc);
+    DrawRectAlpha(screen, {0,toolbarH,canvasW,winH-toolbarH}, {20,80,160,60});
+    constexpr int B=4;
+    SDL_Color bc={80,180,255,180};
+    DrawRectAlpha(screen,{0,toolbarH,canvasW,B},bc);
+    DrawRectAlpha(screen,{0,winH-B,canvasW,B},bc);
+    DrawRectAlpha(screen,{0,toolbarH,B,winH-toolbarH},bc);
+    DrawRectAlpha(screen,{canvasW-B,toolbarH,B,winH-toolbarH},bc);
     int cx=canvasW/2, cy=winH/2;
-    DrawRect(screen,{cx-220,cy-44,440,88},{10,30,70,220});
+    DrawRect(screen,{cx-220,cy-44,440,88},{10,30,70,230});
     DrawOutline(screen,{cx-220,cy-44,440,88},{80,180,255,255},2);
     if (activeToolId==ToolId::Action) {
         Text d1("Drop animated tile .json onto an Action tile",{255,200,255,255},cx-200,cy-32,20);
         d1.RenderToSurface(screen);
         BlitBadge(screen, cache.GetBadge("The tile will play that animation when destroyed",
                                          {200,160,255,255}), cx-164, cy+4);
+    } else if (activeToolId==ToolId::Shooter) {
+        Text d1("Drop audio onto a Turret tile for fire SFX",{255,200,140,255},cx-180,cy-32,20);
+        d1.RenderToSurface(screen);
+        BlitBadge(screen, cache.GetBadge(".wav .ogg .mp3 .flac — overwrites existing SFX",
+                                         {255,180,100,255}), cx-164, cy+4);
+    } else if (activeToolId==ToolId::PowerUp) {
+        Text d1("Drop audio onto a Power-Up tile for fire SFX",{200,140,255,255},cx-186,cy-32,20);
+        d1.RenderToSurface(screen);
+        BlitBadge(screen, cache.GetBadge(".wav .ogg .mp3 .flac — overwrites existing SFX",
+                                         {180,120,255,255}), cx-164, cy+4);
     } else {
         std::string hint = (palette.ActiveTab()==EditorPalette::Tab::Backgrounds)
             ? "Drop .png or folder -> backgrounds" : "Drop .png or folder -> tiles";
@@ -916,4 +932,55 @@ void EditorUIRenderer::RenderDelConfirm(SDL_Surface* screen, int W, int H,
     auto [cx3,cy3] = Text::CenterInRect("Cancel",14,mDelNo);
     Text tb2("Cancel",{180,180,220,255},cx3,cy3,14); tb2.RenderToSurface(screen);
     BlitBadge(screen, cache.GetBadge("Esc to cancel",{80,80,100,255}), W/2-38, py+ph-12);
+}
+
+// ── Music change confirmation popup ──────────────────────────────────────────
+void EditorUIRenderer::RenderMusicConfirm(SDL_Surface* screen, int W, int H,
+                                           const MusicConfirmState& mc,
+                                           EditorSurfaceCache& cache)
+{
+    DrawRectAlpha(screen, {0, 0, W, H}, {0, 0, 0, 160});
+
+    int pw = 420, ph = 160;
+    int px = W / 2 - pw / 2, py = H / 2 - ph / 2;
+    DrawRect(screen, {px, py, pw, ph}, {18, 22, 36, 250});
+    DrawOutline(screen, {px, py, pw, ph}, {80, 160, 255, 255}, 2);
+
+    auto [tx, ty] = Text::CenterInRect("Change Level Music?", 18, {px, py + 8, pw, 28});
+    Text t1("Change Level Music?", {100, 180, 255, 255}, tx, ty, 18);
+    t1.RenderToSurface(screen);
+
+    std::string fromStr = mc.oldName.empty() ? "(none)" : mc.oldName;
+    if ((int)fromStr.size() > 36) fromStr = fromStr.substr(0, 34) + "...";
+    auto [fx, fy] = Text::CenterInRect(fromStr, 12, {px, py + 40, pw, 18});
+    Text t2(fromStr, {160, 140, 140, 255}, fx, fy, 12);
+    t2.RenderToSurface(screen);
+
+    auto [ax, ay] = Text::CenterInRect("->", 12, {px, py + 58, pw, 14});
+    Text arrow("->", {100, 160, 255, 255}, ax, ay, 12);
+    arrow.RenderToSurface(screen);
+
+    std::string toStr = mc.newName;
+    if ((int)toStr.size() > 36) toStr = toStr.substr(0, 34) + "...";
+    auto [nx, ny] = Text::CenterInRect(toStr, 12, {px, py + 72, pw, 18});
+    Text t3(toStr, {200, 220, 255, 255}, nx, ny, 12);
+    t3.RenderToSurface(screen);
+
+    mMusicYes = {px + 30,       py + ph - 44, 140, 34};
+    mMusicNo  = {px + pw - 170, py + ph - 44, 140, 34};
+
+    DrawRect(screen, mMusicYes, {30, 100, 180, 255});
+    DrawOutline(screen, mMusicYes, {80, 180, 255, 255}, 2);
+    auto [yx, yy] = Text::CenterInRect("Yes, Change", 14, mMusicYes);
+    Text yBtn("Yes, Change", {220, 240, 255, 255}, yx, yy, 14);
+    yBtn.RenderToSurface(screen);
+
+    DrawRect(screen, mMusicNo, {40, 40, 60, 255});
+    DrawOutline(screen, mMusicNo, {80, 80, 120, 255}, 2);
+    auto [cx2, cy2] = Text::CenterInRect("Cancel", 14, mMusicNo);
+    Text nBtn("Cancel", {180, 180, 220, 255}, cx2, cy2, 14);
+    nBtn.RenderToSurface(screen);
+
+    BlitBadge(screen, cache.GetBadge("Esc to cancel", {80, 80, 100, 255}),
+              W / 2 - 38, py + ph - 12);
 }

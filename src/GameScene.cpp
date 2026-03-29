@@ -357,9 +357,10 @@ void GameScene::Unload() {
     for (auto* t : tileScaledTextures)
         SDL_DestroyTexture(t);
     tileScaledTextures.clear();
-    tileTextureCache.clear(); // non-owning refs — textures already freed above
+    tileTextureCache.clear();
     tileAnimFrameMap.clear();
     mSortedTileRenderList.clear();
+    if (mBulletTex) { SDL_DestroyTexture(mBulletTex); mBulletTex = nullptr; }
     mWindow = nullptr;
 }
 
@@ -716,6 +717,15 @@ void GameScene::Update(float dt) {
                 if (!reg.all_of<ActivePowerUps>(playerEnt))
                     reg.emplace<ActivePowerUps>(playerEnt);
                 reg.get<ActivePowerUps>(playerEnt).add(pu.type, pu.duration);
+
+                if (pu.type == PowerUpType::Turret) {
+                    ActiveTurretPowerUp tp;
+                    tp.remaining = pu.duration;
+                    tp.fireRate  = pu.fireRate;
+                    if (!pu.sfxPath.empty())
+                        tp.sfxId = "powerup_" + std::to_string((uint32_t)e);
+                    reg.emplace_or_replace<ActiveTurretPowerUp>(playerEnt, tp);
+                }
                 // Consume the tile
                 auto it2 =
                     std::find(mSortedTileRenderList.begin(), mSortedTileRenderList.end(), e);
@@ -739,10 +749,12 @@ void GameScene::Update(float dt) {
                     expired.push_back(key);
                     // Restore effects when this type expires
                     if ((PowerUpType)key == PowerUpType::AntiGravity) {
-                        // Only restore gravity if no other slot is also suspending it
-                        // (currently only AntiGravity does this, so safe to restore)
                         g.active   = true;
                         g.velocity = 0.0f;
+                    }
+                    if ((PowerUpType)key == PowerUpType::Turret) {
+                        if (reg.all_of<ActiveTurretPowerUp>(e))
+                            reg.remove<ActiveTurretPowerUp>(e);
                     }
                 }
             }
@@ -759,6 +771,8 @@ void GameScene::Update(float dt) {
                     case PowerUpType::AntiGravity:
                         g.active   = false;
                         g.velocity = 0.0f;
+                        break;
+                    case PowerUpType::Turret:
                         break;
                     default:
                         break;
@@ -884,11 +898,46 @@ void GameScene::Update(float dt) {
         mCamera.StartPunch(punchDir, -0.25f, intensity, duration);
     }
 
+    if (collision.shieldBounce)
+        mCamera.StartShake(5.0f, 0.15f);
+
     // Process triggered action tiles
     SDL_Renderer* ren = mWindow->GetRenderer();
     for (entt::entity e : collision.actionTilesTriggered) {
         if (!reg.valid(e))
             continue;
+
+        // Shield pickup: capture tile texture, give player the shield, destroy tile
+        if (auto* sp = reg.try_get<ShieldPickupTag>(e)) {
+            auto* rend = reg.try_get<Renderable>(e);
+            if (rend) {
+                auto pv = reg.view<PlayerTag>();
+                for (auto pe : pv) {
+                    ShieldEntry se;
+                    se.tex      = rend->sheet;
+                    se.renderW  = rend->renderW > 0 ? rend->renderW : 20;
+                    se.renderH  = rend->renderH > 0 ? rend->renderH : 20;
+                    se.remaining = sp->duration;
+                    auto* as = reg.try_get<ActiveShield>(pe);
+                    if (as) {
+                        as->shields.push_back(se);
+                        as->orbitRadius = std::max(as->orbitRadius,
+                            (float)std::max(se.renderW, se.renderH) * 1.2f);
+                    } else {
+                        ActiveShield newAs;
+                        newAs.shields.push_back(se);
+                        newAs.orbitRadius = std::max(se.renderW, se.renderH) * 1.2f;
+                        reg.emplace<ActiveShield>(pe, std::move(newAs));
+                    }
+                }
+            }
+            auto it = std::find(mSortedTileRenderList.begin(),
+                                mSortedTileRenderList.end(), e);
+            if (it != mSortedTileRenderList.end())
+                mSortedTileRenderList.erase(it);
+            reg.destroy(e);
+            continue;
+        }
 
         // If this action tile is also a goal, decide when to collect it:
         //   - Has a destroy animation? Keep the GoalTag alive so it gets
@@ -1191,6 +1240,517 @@ void GameScene::Update(float dt) {
     if (totalGoals > 0 && goalsCollected >= totalGoals)
         levelComplete = true;
 
+    // ── Shooter turrets: fire at player when in range ─────────────────────
+    if (!mPlayerDying && !gameOver) {
+        float playerCX = 0, playerCY = 0;
+        bool  havePlayer = false;
+        {
+            auto pv = reg.view<PlayerTag, Transform, Collider>();
+            pv.each([&](const Transform& pt, const Collider& pc) {
+                playerCX   = pt.x + pc.w * 0.5f;
+                playerCY   = pt.y + pc.h * 0.5f;
+                havePlayer = true;
+            });
+        }
+        if (havePlayer) {
+            auto sv = reg.view<ShooterTag, ShooterState, Transform, Collider>();
+            sv.each([&](entt::entity turretEnt, const ShooterTag& sh,
+                        ShooterState& ss, const Transform& tt, const Collider& tc) {
+                ss.cooldownLeft -= dt;
+                float tcx = tt.x + tc.w * 0.5f;
+                float tcy = tt.y + tc.h * 0.5f;
+                float ddx = playerCX - tcx, ddy = playerCY - tcy;
+                float dist = std::sqrt(ddx * ddx + ddy * ddy);
+                if (dist > sh.range || ss.cooldownLeft > 0.f) return;
+
+                ss.cooldownLeft = 1.f / sh.fireRate;
+
+                // Direction: aim at the player from tile center
+                float aimX = playerCX - tcx, aimY = playerCY - tcy;
+                float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
+                if (aimLen < 1.f) return;
+                float bdx = aimX / aimLen, bdy = aimY / aimLen;
+
+                // Spawn at barrel tip (matching the visual render)
+                float baseW = std::max(8.f, (float)tc.w * 0.3f);
+                float baseH = std::max(8.f, (float)tc.h * 0.3f);
+                float barrelLen = std::max(6.f, std::min((float)tc.w, (float)tc.h) * 0.45f);
+                float bx = tcx + bdx * (baseW * 0.5f + barrelLen);
+                float by = tcy + bdy * (baseH * 0.5f + barrelLen);
+
+                auto bullet = reg.create();
+                reg.emplace<Transform>(bullet, bx, by);
+                reg.emplace<Collider>(bullet, 8, 8);
+                BulletTag bt;
+                bt.dx      = bdx; bt.dy = bdy;
+                bt.speed   = sh.bulletSpeed;
+                bt.damage  = sh.damage;
+                bt.originX = bx;  bt.originY = by;
+                bt.maxRange = sh.range;
+                bt.sourceTurret = turretEnt;
+                reg.emplace<BulletTag>(bullet, bt);
+                if (mBulletTex) {
+                    std::vector<SDL_Rect> bf = {{0, 0, 8, 8}};
+                    reg.emplace<Renderable>(bullet, mBulletTex, bf, false, 8, 8);
+                    reg.emplace<AnimationState>(bullet, 0, 1, 0.0f, 1.0f, false);
+                }
+
+                if (!sh.sfxPath.empty() && Audio() && Audio()->IsReady()) {
+                    std::string sfxId = "turret_" + std::to_string((uint32_t)turretEnt);
+                    Audio()->Sfx().Play(sfxId);
+                }
+            });
+        }
+    }
+
+    // ── Bullet movement + collision ──────────────────────────────────────────
+    bool bulletKilledPlayer = false;
+    {
+        std::vector<entt::entity> bulletsToDestroy;
+        auto bv = reg.view<BulletTag, Transform>();
+        bv.each([&](entt::entity be, BulletTag& bt, Transform& btr) {
+            btr.x += bt.dx * bt.speed * dt;
+            btr.y += bt.dy * bt.speed * dt;
+            float travelX = btr.x - bt.originX, travelY = btr.y - bt.originY;
+            if (travelX * travelX + travelY * travelY > bt.maxRange * bt.maxRange) {
+                bulletsToDestroy.push_back(be);
+                return;
+            }
+            SDL_FRect bulletR = {btr.x, btr.y, 8.f, 8.f};
+
+            // Hit solid tiles (skip source turret; player bullets pass through hazards & floats)
+            auto tv = reg.view<TileTag, Transform, Collider>();
+            for (auto te : tv) {
+                if (te == bt.sourceTurret) continue;
+                if (bt.playerOwned && reg.all_of<HazardTag>(te)) continue;
+                if (bt.playerOwned && reg.all_of<FloatTag>(te)) continue;
+                auto& tt2 = reg.get<Transform>(te);
+                auto& tc2 = reg.get<Collider>(te);
+                SDL_FRect tileR = {tt2.x, tt2.y, (float)tc2.w, (float)tc2.h};
+                if (const auto* off = reg.try_get<ColliderOffset>(te)) {
+                    tileR.x += off->x; tileR.y += off->y;
+                }
+                if (SDL_HasRectIntersectionFloat(&bulletR, &tileR)) {
+                    bulletsToDestroy.push_back(be);
+                    return;
+                }
+            }
+
+            // Hit shield (absorbs bullet)
+            {
+                bool blocked = false;
+                auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
+                shv.each([&](const Transform& pt, const Collider& pc, const ActiveShield& as) {
+                    if (blocked) return;
+                    float pcx = pt.x + pc.w * 0.5f;
+                    float pcy = pt.y + pc.h * 0.5f;
+                    int n = (int)as.shields.size();
+                    for (int i = 0; i < n && !blocked; ++i) {
+                        float a = as.angle + (float)i / n * 2.f * 3.14159265f;
+                        const auto& se = as.shields[i];
+                        float sx = pcx + std::cos(a) * as.orbitRadius - se.renderW * 0.5f;
+                        float sy = pcy + std::sin(a) * as.orbitRadius - se.renderH * 0.5f;
+                        SDL_FRect shieldR = {sx, sy, (float)se.renderW, (float)se.renderH};
+                        if (SDL_HasRectIntersectionFloat(&bulletR, &shieldR)) {
+                            bulletsToDestroy.push_back(be);
+                            blocked = true;
+                        }
+                    }
+                });
+                if (blocked) return;
+            }
+
+            // Hit player (skip player-owned bullets)
+            if (!bt.playerOwned) {
+                auto pv2 = reg.view<PlayerTag, Transform, Collider, InvincibilityTimer>();
+                pv2.each([&](entt::entity pe, Transform& pt, const Collider& pc,
+                             InvincibilityTimer& inv) {
+                    if (inv.isInvincible) return;
+                    SDL_FRect playerR = {pt.x, pt.y, (float)pc.w, (float)pc.h};
+                    if (const auto* off = reg.try_get<ColliderOffset>(pe)) {
+                        playerR.x += off->x; playerR.y += off->y;
+                    }
+                    if (SDL_HasRectIntersectionFloat(&bulletR, &playerR)) {
+                        if (auto* hp = reg.try_get<Health>(pe)) {
+                            hp->current -= bt.damage;
+                            if (hp->current <= 0.f) {
+                                hp->current = 0.f;
+                                bulletKilledPlayer = true;
+                            }
+                        }
+                        inv.isInvincible = true;
+                        inv.remaining    = 0.3f;
+
+                        pt.x += bt.dx * -16.f;
+                        pt.y += bt.dy * -16.f;
+
+                        if (!bulletKilledPlayer) {
+                            auto* anim = reg.try_get<AnimationState>(pe);
+                            auto* r    = reg.try_get<Renderable>(pe);
+                            auto* set  = reg.try_get<AnimationSet>(pe);
+                            if (anim && r && set && !set->hurt.empty() && set->hurtSheet) {
+                                r->sheet           = set->hurtSheet;
+                                r->frames          = set->hurt;
+                                anim->currentFrame = 0;
+                                anim->timer        = 0.0f;
+                                anim->fps          = (set->hurtFps > 0.f) ? set->hurtFps : 12.f;
+                                anim->looping      = false;
+                                anim->totalFrames  = (int)set->hurt.size();
+                                anim->currentAnim  = AnimationID::HURT;
+                            }
+                        }
+
+                        mCamera.StartShake(3.5f, 0.1f);
+                        bulletsToDestroy.push_back(be);
+                    }
+                });
+            }
+
+            // Hit enemies
+            auto ev = reg.view<EnemyTag, Transform, Collider, Health>(entt::exclude<DeadTag>);
+            for (auto ee : ev) {
+                auto& et = reg.get<Transform>(ee);
+                auto& ec = reg.get<Collider>(ee);
+                SDL_FRect enemyR = {et.x, et.y, (float)ec.w, (float)ec.h};
+                if (SDL_HasRectIntersectionFloat(&bulletR, &enemyR)) {
+                    auto& eh = reg.get<Health>(ee);
+                    eh.current -= bt.damage;
+
+                    // Knockback
+                    et.x += bt.dx * 24.f;
+
+                    if (eh.current <= 0.f) {
+                        eh.current = 0.f;
+                        if (reg.all_of<Velocity>(ee)) {
+                            auto& v = reg.get<Velocity>(ee);
+                            v.dx = v.dy = 0.f;
+                        }
+                        if (reg.all_of<Renderable, AnimationState>(ee)) {
+                            auto& r    = reg.get<Renderable>(ee);
+                            auto& anim = reg.get<AnimationState>(ee);
+                            if (auto* ead = reg.try_get<EnemyAnimData>(ee);
+                                ead && ead->deadSheet && !ead->deadFrames.empty()) {
+                                r.sheet         = ead->deadSheet;
+                                r.frames        = ead->deadFrames;
+                                r.renderW       = ead->spriteW;
+                                r.renderH       = ead->spriteH;
+                                anim.currentFrame = 0;
+                                anim.totalFrames  = (int)ead->deadFrames.size();
+                                anim.fps          = ead->deadFps;
+                                anim.looping      = false;
+                                ead->ApplyHitbox(ead->deadHitbox, reg, ee);
+                            } else {
+                                anim.looping = false;
+                            }
+                        }
+                        if (!reg.all_of<DeadTag>(ee))
+                            reg.emplace<DeadTag>(ee);
+                    } else {
+                        // Hurt flash + animation
+                        if (auto* ead = reg.try_get<EnemyAnimData>(ee);
+                            ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
+                            if (reg.all_of<Renderable, AnimationState>(ee)) {
+                                auto& r    = reg.get<Renderable>(ee);
+                                auto& anim = reg.get<AnimationState>(ee);
+                                r.sheet         = ead->hurtSheet;
+                                r.frames        = ead->hurtFrames;
+                                r.renderW       = ead->spriteW;
+                                r.renderH       = ead->spriteH;
+                                anim.currentFrame = 0;
+                                anim.totalFrames  = (int)ead->hurtFrames.size();
+                                anim.fps          = ead->hurtFps;
+                                anim.looping      = false;
+                                ead->ApplyHitbox(ead->hurtHitbox, reg, ee);
+                            }
+                        }
+                        if (!reg.all_of<HitFlash>(ee))
+                            reg.emplace<HitFlash>(ee);
+                        else
+                            reg.get<HitFlash>(ee).timer = HitFlash{}.duration;
+                    }
+
+                    bulletsToDestroy.push_back(be);
+                    break;
+                }
+            }
+
+            // Player-owned bullets destroy hazard tiles on contact
+            if (bt.playerOwned) {
+                auto hv = reg.view<HazardTag, Transform, Collider>();
+                for (auto he : hv) {
+                    auto& ht = reg.get<Transform>(he);
+                    auto& hc = reg.get<Collider>(he);
+                    SDL_FRect hazR = {ht.x, ht.y, (float)hc.w, (float)hc.h};
+                    if (SDL_HasRectIntersectionFloat(&bulletR, &hazR)) {
+                        // Strip gameplay components so it's no longer solid/hazard
+                        if (reg.all_of<HazardTag>(he)) reg.remove<HazardTag>(he);
+                        if (reg.all_of<TileTag>(he))   reg.remove<TileTag>(he);
+                        if (reg.all_of<Collider>(he))   reg.remove<Collider>(he);
+
+                        // If the tile has a destroy animation, play it
+                        const ActionTag* atag = reg.try_get<ActionTag>(he);
+                        bool playedAnim = false;
+                        if (atag && !atag->destroyAnimPath.empty()) {
+                            SDL_Renderer* ren2 = mWindow->GetRenderer();
+                            AnimatedTileDef def;
+                            if (LoadAnimatedTileDef(atag->destroyAnimPath, def) &&
+                                !def.framePaths.empty()) {
+                                int tileW = 38, tileH = 38;
+                                if (reg.all_of<Renderable>(he)) {
+                                    const auto& rnd = reg.get<Renderable>(he);
+                                    if (rnd.renderW > 0) tileW = rnd.renderW;
+                                    if (rnd.renderH > 0) tileH = rnd.renderH;
+                                }
+                                std::vector<SDL_Texture*> frameTex;
+                                for (const auto& fp : def.framePaths) {
+                                    SDL_Texture* t = LoadScaledTexture(ren2, fp, 0, 0);
+                                    frameTex.push_back(t);
+                                    if (t) tileScaledTextures.push_back(t);
+                                }
+                                if (!frameTex.empty() && frameTex[0]) {
+                                    tileAnimFrameMap[he] = std::move(frameTex);
+                                    auto& fvec = tileAnimFrameMap[he];
+                                    std::vector<SDL_Rect> animRects;
+                                    animRects.reserve(fvec.size());
+                                    for (auto* ft : fvec) {
+                                        float fw = 0, fh = 0;
+                                        if (ft) SDL_GetTextureSize(ft, &fw, &fh);
+                                        animRects.push_back({0, 0, (int)fw, (int)fh});
+                                    }
+                                    float nativeW = 0, nativeH = 0;
+                                    SDL_GetTextureSize(fvec[0], &nativeW, &nativeH);
+                                    int animRenderW = tileW, animRenderH = tileH;
+                                    if (nativeW > 0 && nativeH > 0) {
+                                        float aspect = nativeW / nativeH;
+                                        animRenderW = std::max(tileW, (int)(tileH * aspect));
+                                        animRenderH = std::max(tileH, (int)(tileW / aspect));
+                                    }
+                                    auto& tr = reg.get<Transform>(he);
+                                    float tileCX = tr.x + tileW * 0.5f;
+                                    float tileCY = tr.y + tileH * 0.5f;
+                                    tr.x = tileCX - animRenderW * 0.5f;
+                                    tr.y = tileCY - animRenderH * 0.5f;
+                                    if (reg.all_of<Renderable>(he)) reg.remove<Renderable>(he);
+                                    reg.emplace<Renderable>(he, fvec[0], std::move(animRects),
+                                                            false, animRenderW, animRenderH);
+                                    if (reg.all_of<AnimationState>(he)) reg.remove<AnimationState>(he);
+                                    reg.emplace<AnimationState>(
+                                        he, 0, (int)fvec.size(), 0.0f, def.fps, false);
+                                    if (!reg.all_of<TileAnimTag>(he))
+                                        reg.emplace<TileAnimTag>(he);
+                                    if (!reg.all_of<DestroyAnimTag>(he))
+                                        reg.emplace<DestroyAnimTag>(
+                                            he, (int)fvec.size(), def.fps, false);
+                                    playedAnim = true;
+                                }
+                            }
+                        }
+                        if (!playedAnim) {
+                            auto it = std::find(mSortedTileRenderList.begin(),
+                                                mSortedTileRenderList.end(), he);
+                            if (it != mSortedTileRenderList.end())
+                                mSortedTileRenderList.erase(it);
+                            reg.destroy(he);
+                        }
+                        bulletsToDestroy.push_back(be);
+                        break;
+                    }
+                }
+
+                // Player-owned bullets trigger action tiles (floating objects, breakables)
+                auto actv = reg.view<ActionTag, Transform, Collider>();
+                for (auto ae : actv) {
+                    if (reg.all_of<HazardTag>(ae)) continue;
+                    auto& at2 = reg.get<Transform>(ae);
+                    auto& ac2 = reg.get<Collider>(ae);
+                    SDL_FRect actR = {at2.x, at2.y, (float)ac2.w, (float)ac2.h};
+                    if (const auto* off = reg.try_get<ColliderOffset>(ae)) {
+                        actR.x += off->x; actR.y += off->y;
+                    }
+                    if (SDL_HasRectIntersectionFloat(&bulletR, &actR)) {
+                        auto& atag = reg.get<ActionTag>(ae);
+                        atag.hitsRemaining--;
+                        if (atag.hitsRemaining <= 0) {
+                            collision.actionTilesTriggered.push_back(ae);
+                        } else {
+                            if (reg.all_of<HitFlash>(ae))
+                                reg.get<HitFlash>(ae).timer = HitFlash{}.duration;
+                            else
+                                reg.emplace<HitFlash>(ae);
+                        }
+                        if (reg.all_of<FloatTag>(ae)) {
+                            auto* fs = reg.try_get<FloatState>(ae);
+                            if (fs) {
+                                fs->driftVx += bt.dx * bt.speed * 0.3f;
+                                fs->driftVy += bt.dy * bt.speed * 0.3f;
+                                fs->spinSpeed += bt.dx * 180.f;
+                            }
+                        }
+                        bulletsToDestroy.push_back(be);
+                        break;
+                    }
+                }
+            }
+        });
+        for (auto be : bulletsToDestroy)
+            if (reg.valid(be)) reg.destroy(be);
+    }
+
+    if (bulletKilledPlayer && !mPlayerDying) {
+        mPlayerDying    = true;
+        mDeathAnimTimer = 0.0f;
+        auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
+        dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
+                   const AnimationSet& set) {
+            v.dx = 0.0f; v.dy = 0.0f;
+            const std::vector<SDL_Rect>* frames = nullptr;
+            SDL_Texture* sheet = nullptr;
+            float fps = 8.0f;
+            AnimationID id = AnimationID::DEATH;
+            if (!set.death.empty()) {
+                frames = &set.death;
+                sheet  = set.deathSheet;
+                fps    = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
+            } else if (!set.hurt.empty()) {
+                frames = &set.hurt;
+                sheet  = set.hurtSheet;
+                fps    = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
+                id     = AnimationID::HURT;
+            }
+            if (frames && sheet) {
+                r.sheet           = sheet;
+                r.frames          = *frames;
+                anim.currentFrame = 0;
+                anim.timer        = 0.0f;
+                anim.fps          = fps;
+                anim.looping      = false;
+                anim.totalFrames  = (int)frames->size();
+                anim.currentAnim  = id;
+            }
+        });
+        mCamera.StartShake(6.0f, 0.2f);
+    }
+
+    // ── Shield orbit: input, positioning, timer ──────────────────────────────
+    {
+        auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
+        shv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
+                     ActiveShield& as) {
+            // Per-shield timer: expire individual shields
+            for (auto it = as.shields.begin(); it != as.shields.end(); ) {
+                it->remaining -= dt;
+                if (it->remaining <= 0.f)
+                    it = as.shields.erase(it);
+                else
+                    ++it;
+            }
+            if (as.shields.empty()) {
+                reg.remove<ActiveShield>(pe);
+                return;
+            }
+
+            // Input: right stick (gamepad, direct positioning) or
+            // arrow keys (keyboard, wheel-style continuous rotation)
+            bool gamepadAimed = false;
+            {
+                int count = 0;
+                SDL_JoystickID* ids = SDL_GetGamepads(&count);
+                if (ids && count > 0) {
+                    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
+                    if (pad) {
+                        float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                        float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+                        constexpr float DEAD = 0.25f;
+                        if (rx * rx + ry * ry > DEAD * DEAD) {
+                            as.angle = std::atan2(ry, rx);
+                            gamepadAimed = true;
+                        }
+                    }
+                }
+                SDL_free(ids);
+            }
+            if (!gamepadAimed) {
+                constexpr float ROTATE_SPEED = 4.0f;
+                const bool* keys = SDL_GetKeyboardState(nullptr);
+                if (keys[SDL_SCANCODE_LEFT])  as.angle -= ROTATE_SPEED * dt;
+                if (keys[SDL_SCANCODE_RIGHT]) as.angle += ROTATE_SPEED * dt;
+            }
+        });
+    }
+
+    // ── Turret power-up: input, firing, timer ────────────────────────────────
+    {
+        auto tpv = reg.view<PlayerTag, Transform, Collider, ActiveTurretPowerUp>();
+        tpv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
+                      ActiveTurretPowerUp& tp) {
+            tp.remaining -= dt;
+            if (tp.remaining <= 0.f) {
+                reg.remove<ActiveTurretPowerUp>(pe);
+                return;
+            }
+
+            // Input: same controls as shield
+            bool gpAimed = false;
+            {
+                int count = 0;
+                SDL_JoystickID* ids = SDL_GetGamepads(&count);
+                if (ids && count > 0) {
+                    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
+                    if (pad) {
+                        float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                        float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+                        constexpr float DEAD = 0.25f;
+                        if (rx * rx + ry * ry > DEAD * DEAD) {
+                            tp.angle = std::atan2(ry, rx);
+                            gpAimed = true;
+                        }
+                    }
+                }
+                SDL_free(ids);
+            }
+            if (!gpAimed) {
+                constexpr float ROTATE_SPEED = 4.0f;
+                const bool* keys = SDL_GetKeyboardState(nullptr);
+                if (keys[SDL_SCANCODE_LEFT])  tp.angle -= ROTATE_SPEED * dt;
+                if (keys[SDL_SCANCODE_RIGHT]) tp.angle += ROTATE_SPEED * dt;
+            }
+
+            // Firing — barrel is centered on player, extends outward
+            constexpr float BARREL_LEN = 28.f;
+            tp.cooldown -= dt;
+            if (tp.cooldown <= 0.f) {
+                tp.cooldown = 1.f / tp.fireRate;
+                float pcx = pt.x + pc.w * 0.5f;
+                float pcy = pt.y + pc.h * 0.5f;
+                float bdx = std::cos(tp.angle);
+                float bdy = std::sin(tp.angle);
+                float bx = pcx + bdx * BARREL_LEN;
+                float by = pcy + bdy * BARREL_LEN;
+
+                auto bullet = reg.create();
+                reg.emplace<Transform>(bullet, bx, by);
+                reg.emplace<Collider>(bullet, 8, 8);
+                BulletTag bt;
+                bt.dx       = bdx; bt.dy = bdy;
+                bt.speed    = tp.bulletSpeed;
+                bt.damage   = tp.damage;
+                bt.originX  = bx; bt.originY = by;
+                bt.maxRange = tp.range;
+                bt.sourceTurret = entt::null;
+                bt.playerOwned  = true;
+                reg.emplace<BulletTag>(bullet, bt);
+                if (mBulletTex) {
+                    std::vector<SDL_Rect> bf = {{0, 0, 8, 8}};
+                    reg.emplace<Renderable>(bullet, mBulletTex, bf, false, 8, 8);
+                    reg.emplace<AnimationState>(bullet, 0, 1, 0.0f, 1.0f, false);
+                }
+
+                if (!tp.sfxId.empty() && Audio() && Audio()->IsReady())
+                    Audio()->Sfx().Play(tp.sfxId);
+            }
+        });
+    }
+
     {
         auto pView = reg.view<PlayerTag, Transform, Collider>();
         pView.each([&](const Transform& pt, const Collider& pc) {
@@ -1242,6 +1802,9 @@ void GameScene::Render(Window& window, float alpha) {
     const int H = window.GetHeight();
     if (levelComplete) {
         RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderTurrets(ren, W, H);
+        RenderShield(ren, W, H);
+        RenderTurretPowerUp(ren, W, H);
         HUDSystem(reg,
                   ren,
                   W,
@@ -1256,6 +1819,9 @@ void GameScene::Render(Window& window, float alpha) {
             levelCompleteText->Render(ren);
     } else if (gameOver) {
         RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderTurrets(ren, W, H);
+        RenderShield(ren, W, H);
+        RenderTurretPowerUp(ren, W, H);
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 140);
         SDL_FRect dimOverlay = {0, 0, (float)W, (float)H};
@@ -1268,6 +1834,9 @@ void GameScene::Render(Window& window, float alpha) {
         locationText->Render(ren);
         actionText->Render(ren);
         RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderTurrets(ren, W, H);
+        RenderShield(ren, W, H);
+        RenderTurretPowerUp(ren, W, H);
 
         // ── Debug hitbox overlay (F1) ─────────────────────────────────────
         if (mDebugHitboxes) {
@@ -1470,6 +2039,227 @@ void GameScene::RenderPauseOverlay(Window& window) {
         mPauseHintLbl->Render(ren);
     if (mPauseHintLbl2)
         mPauseHintLbl2->Render(ren);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Turret barrel overlay — renders on top of tiles during gameplay
+// ─────────────────────────────────────────────────────────────────────────────
+void GameScene::RenderTurrets(SDL_Renderer* ren, int W, int H) {
+    // Find the player center for aiming
+    float playerCX = 0, playerCY = 0;
+    bool  havePlayer = false;
+    {
+        auto pv = reg.view<PlayerTag, Transform, Collider>();
+        pv.each([&](const Transform& pt, const Collider& pc) {
+            playerCX   = pt.x + pc.w * 0.5f;
+            playerCY   = pt.y + pc.h * 0.5f;
+            havePlayer = true;
+        });
+    }
+
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+    auto sv = reg.view<ShooterTag, Transform, Collider>();
+    sv.each([&](const ShooterTag& sh, const Transform& tt, const Collider& tc) {
+        float sx = tt.x - mCamera.x;
+        float sy = tt.y - mCamera.y;
+        float sw = (float)tc.w;
+        float sh2 = (float)tc.h;
+
+        // Cull off-screen turrets
+        if (sx + sw < 0 || sx > W || sy + sh2 < 0 || sy > H) return;
+
+        float cx = sx + sw * 0.5f;
+        float cy = sy + sh2 * 0.5f;
+
+        // Base: dark square in center
+        float baseW = std::max(8.f, sw * 0.3f);
+        float baseH = std::max(8.f, sh2 * 0.3f);
+        SDL_FRect base = {cx - baseW / 2, cy - baseH / 2, baseW, baseH};
+        SDL_SetRenderDrawColor(ren, 20, 20, 20, 230);
+        SDL_RenderFillRect(ren, &base);
+        SDL_SetRenderDrawColor(ren, 70, 70, 70, 255);
+        SDL_RenderRect(ren, &base);
+
+        // Barrel: if we have a player, aim at them; otherwise use the configured side
+        float aimDx = 0, aimDy = 0;
+        if (havePlayer) {
+            float ax = (playerCX - mCamera.x) - cx;
+            float ay = (playerCY - mCamera.y) - cy;
+            float aLen = std::sqrt(ax * ax + ay * ay);
+            if (aLen > 0.1f) { aimDx = ax / aLen; aimDy = ay / aLen; }
+            else              { aimDx = 1; }
+        } else {
+            switch (sh.side) {
+                case 0: aimDy = -1; break;
+                case 1: aimDx =  1; break;
+                case 2: aimDy =  1; break;
+                case 3: aimDx = -1; break;
+            }
+        }
+
+        float barrelLen = std::max(6.f, std::min(sw, sh2) * 0.45f);
+        float barrelThk = std::max(4.f, std::min(baseW, baseH) * 0.45f);
+
+        // Perpendicular for barrel thickness
+        float perpX = -aimDy, perpY = aimDx;
+
+        // Barrel corners: a quad from base center extending outward
+        float tipX = cx + aimDx * (baseW * 0.5f + barrelLen);
+        float tipY = cy + aimDy * (baseH * 0.5f + barrelLen);
+        float startX = cx + aimDx * baseW * 0.4f;
+        float startY = cy + aimDy * baseH * 0.4f;
+
+        // Draw barrel as a thick line (two triangles via rect approximation)
+        // Since SDL doesn't have rotated rects, draw with RenderGeometry
+        SDL_Vertex verts[4];
+        SDL_FColor darkGray = {15.f/255.f, 15.f/255.f, 15.f/255.f, 240.f/255.f};
+        float halfThk = barrelThk * 0.5f;
+
+        verts[0].position = {startX - perpX * halfThk, startY - perpY * halfThk};
+        verts[0].color = darkGray;
+        verts[1].position = {startX + perpX * halfThk, startY + perpY * halfThk};
+        verts[1].color = darkGray;
+        verts[2].position = {tipX + perpX * halfThk, tipY + perpY * halfThk};
+        verts[2].color = darkGray;
+        verts[3].position = {tipX - perpX * halfThk, tipY - perpY * halfThk};
+        verts[3].color = darkGray;
+
+        int indices[6] = {0, 1, 2, 0, 2, 3};
+        SDL_RenderGeometry(ren, nullptr, verts, 4, indices, 6);
+
+        // Barrel outline
+        SDL_SetRenderDrawColor(ren, 80, 80, 80, 255);
+        SDL_RenderLine(ren, verts[0].position.x, verts[0].position.y,
+                            verts[1].position.x, verts[1].position.y);
+        SDL_RenderLine(ren, verts[1].position.x, verts[1].position.y,
+                            verts[2].position.x, verts[2].position.y);
+        SDL_RenderLine(ren, verts[2].position.x, verts[2].position.y,
+                            verts[3].position.x, verts[3].position.y);
+        SDL_RenderLine(ren, verts[3].position.x, verts[3].position.y,
+                            verts[0].position.x, verts[0].position.y);
+
+        // Muzzle flash: orange dot at the tip
+        float muzzleSz = std::max(3.f, barrelThk * 0.6f);
+        SDL_FRect muzzle = {tipX - muzzleSz / 2, tipY - muzzleSz / 2, muzzleSz, muzzleSz};
+        SDL_SetRenderDrawColor(ren, 255, 140, 30, 255);
+        SDL_RenderFillRect(ren, &muzzle);
+    });
+}
+
+void GameScene::RenderShield(SDL_Renderer* ren, int W, int H) {
+    constexpr float PI2 = 2.f * 3.14159265f;
+    auto sv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
+    sv.each([&](const Transform& pt, const Collider& pc, const ActiveShield& as) {
+        float pcx = pt.x + pc.w * 0.5f;
+        float pcy = pt.y + pc.h * 0.5f;
+        int n = (int)as.shields.size();
+        if (n == 0) return;
+
+        // Find minimum remaining for orbit circle fade
+        float minRemaining = as.shields[0].remaining;
+        for (auto& se : as.shields) minRemaining = std::min(minRemaining, se.remaining);
+        float circleAlpha = (minRemaining < 3.f) ? (minRemaining / 3.f) : 1.f;
+
+        for (int i = 0; i < n; ++i) {
+            const auto& se = as.shields[i];
+            float a = as.angle + (float)i / n * PI2;
+            float wx = pcx + std::cos(a) * as.orbitRadius;
+            float wy = pcy + std::sin(a) * as.orbitRadius;
+
+            float screenX = wx - mCamera.x;
+            float screenY = wy - mCamera.y;
+            if (screenX + se.renderW < 0 || screenX > W ||
+                screenY + se.renderH < 0 || screenY > H)
+                continue;
+
+            SDL_FRect dst = {screenX - se.renderW * 0.5f,
+                             screenY - se.renderH * 0.5f,
+                             (float)se.renderW, (float)se.renderH};
+
+            float alpha = (se.remaining < 3.f) ? (se.remaining / 3.f) : 1.f;
+            Uint8 alphaU = (Uint8)(alpha * 255);
+            if (se.tex) {
+                SDL_SetTextureAlphaMod(se.tex, alphaU);
+                SDL_RenderTexture(ren, se.tex, nullptr, &dst);
+                SDL_SetTextureAlphaMod(se.tex, 255);
+            } else {
+                SDL_SetRenderDrawColor(ren, 100, 180, 255, alphaU);
+                SDL_RenderFillRect(ren, &dst);
+            }
+        }
+
+        // Faint blue circle outline around orbit
+        SDL_SetRenderDrawColor(ren, 100, 180, 255, (Uint8)(40 * circleAlpha));
+        constexpr int SEGS = 32;
+        float rad = as.orbitRadius;
+        float cx = pcx - mCamera.x, cy = pcy - mCamera.y;
+        for (int i = 0; i < SEGS; ++i) {
+            float a1 = (float)i / SEGS * PI2;
+            float a2 = (float)(i + 1) / SEGS * PI2;
+            SDL_RenderLine(ren, cx + std::cos(a1) * rad, cy + std::sin(a1) * rad,
+                           cx + std::cos(a2) * rad, cy + std::sin(a2) * rad);
+        }
+    });
+}
+
+void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
+    auto tv = reg.view<PlayerTag, Transform, Collider, ActiveTurretPowerUp>();
+    tv.each([&](const Transform& pt, const Collider& pc, const ActiveTurretPowerUp& tp) {
+        float pcx = pt.x + pc.w * 0.5f;
+        float pcy = pt.y + pc.h * 0.5f;
+        float cx = pcx - mCamera.x;
+        float cy = pcy - mCamera.y;
+        if (cx < -30 || cx > W + 30 || cy < -30 || cy > H + 30) return;
+
+        float aimDx = std::cos(tp.angle);
+        float aimDy = std::sin(tp.angle);
+        float perpX = -aimDy, perpY = aimDx;
+
+        constexpr float BASE_SZ   = 14.f;
+        constexpr float BARREL_L  = 28.f;
+        constexpr float BARREL_TH = 6.f;
+
+        // Dark base square at player center
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        float alpha = (tp.remaining < 3.f) ? (tp.remaining / 3.f) : 1.f;
+        Uint8 a = (Uint8)(alpha * 255);
+
+        SDL_FRect baseR = {cx - BASE_SZ * 0.5f, cy - BASE_SZ * 0.5f, BASE_SZ, BASE_SZ};
+        SDL_SetRenderDrawColor(ren, 30, 30, 30, a);
+        SDL_RenderFillRect(ren, &baseR);
+
+        // Barrel: rotated quad from center outward
+        float tipX = cx + aimDx * BARREL_L;
+        float tipY = cy + aimDy * BARREL_L;
+        float hw = BARREL_TH * 0.5f;
+
+        SDL_Vertex verts[4];
+        SDL_FColor barrelCol = {0.15f, 0.15f, 0.15f, alpha};
+        verts[0] = {{cx - perpX * hw, cy - perpY * hw}, barrelCol, {0, 0}};
+        verts[1] = {{cx + perpX * hw, cy + perpY * hw}, barrelCol, {0, 0}};
+        verts[2] = {{tipX + perpX * hw, tipY + perpY * hw}, barrelCol, {0, 0}};
+        verts[3] = {{tipX - perpX * hw, tipY - perpY * hw}, barrelCol, {0, 0}};
+        int idx[6] = {0, 1, 2, 0, 2, 3};
+        SDL_RenderGeometry(ren, nullptr, verts, 4, idx, 6);
+
+        // Muzzle dot (orange)
+        constexpr float MUZ = 5.f;
+        SDL_FRect muz = {tipX - MUZ * 0.5f, tipY - MUZ * 0.5f, MUZ, MUZ};
+        SDL_SetRenderDrawColor(ren, 255, 160, 40, a);
+        SDL_RenderFillRect(ren, &muz);
+
+        // Faint rotation circle
+        SDL_SetRenderDrawColor(ren, 255, 160, 40, (Uint8)(30 * alpha));
+        constexpr int SEGS = 24;
+        float rad = BARREL_L;
+        for (int i = 0; i < SEGS; ++i) {
+            float a1 = (float)i / SEGS * 2.f * 3.14159265f;
+            float a2 = (float)(i + 1) / SEGS * 2.f * 3.14159265f;
+            SDL_RenderLine(ren, cx + std::cos(a1) * rad, cy + std::sin(a1) * rad,
+                           cx + std::cos(a2) * rad, cy + std::sin(a2) * rad);
+        }
+    });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1848,8 +2638,31 @@ void GameScene::Spawn() {
                 PowerUpType puType = PowerUpType::None;
                 if (ts.powerUp->type == "antigravity")
                     puType = PowerUpType::AntiGravity;
-                if (puType != PowerUpType::None)
-                    reg.emplace<PowerUpTag>(tile, puType, ts.powerUp->duration);
+                else if (ts.powerUp->type == "turret")
+                    puType = PowerUpType::Turret;
+                if (puType != PowerUpType::None) {
+                    PowerUpTag pt2;
+                    pt2.type     = puType;
+                    pt2.duration = ts.powerUp->duration;
+                    pt2.fireRate = ts.powerUp->fireRate;
+                    pt2.sfxPath  = ts.powerUp->sfxPath;
+                    reg.emplace<PowerUpTag>(tile, pt2);
+                }
+            }
+            if (ts.HasShooter()) {
+                const auto& sd = *ts.shooter;
+                ShooterTag st;
+                st.side        = static_cast<int>(sd.side);
+                st.range       = sd.range;
+                st.fireRate    = sd.fireRate;
+                st.bulletSpeed = sd.bulletSpeed;
+                st.damage      = sd.damage;
+                st.sfxPath     = sd.sfxPath;
+                reg.emplace<ShooterTag>(tile, st);
+                reg.emplace<ShooterState>(tile);
+            }
+            if (ts.HasShield()) {
+                reg.emplace<ShieldPickupTag>(tile, ts.shield->duration);
             }
             continue;
         }
@@ -1935,15 +2748,38 @@ void GameScene::Spawn() {
             PowerUpType puType = PowerUpType::None;
             if (ts.powerUp->type == "antigravity")
                 puType = PowerUpType::AntiGravity;
-            // Future: else if (ts.powerUp->type == "speedboost") puType =
-            // PowerUpType::SpeedBoost;
-            if (puType != PowerUpType::None)
-                reg.emplace<PowerUpTag>(tile, puType, ts.powerUp->duration);
+            else if (ts.powerUp->type == "turret")
+                puType = PowerUpType::Turret;
+            if (puType != PowerUpType::None) {
+                PowerUpTag pt2;
+                pt2.type     = puType;
+                pt2.duration = ts.powerUp->duration;
+                pt2.fireRate = ts.powerUp->fireRate;
+                pt2.sfxPath  = ts.powerUp->sfxPath;
+                reg.emplace<PowerUpTag>(tile, pt2);
+            }
         }
 
         if (ts.goal) {
             reg.emplace<GoalTag>(tile);
             totalGoals++;
+        }
+
+        if (ts.HasShooter()) {
+            const auto& sd = *ts.shooter;
+            ShooterTag st;
+            st.side        = static_cast<int>(sd.side);
+            st.range       = sd.range;
+            st.fireRate    = sd.fireRate;
+            st.bulletSpeed = sd.bulletSpeed;
+            st.damage      = sd.damage;
+            st.sfxPath     = sd.sfxPath;
+            reg.emplace<ShooterTag>(tile, st);
+            reg.emplace<ShooterState>(tile);
+        }
+
+        if (ts.HasShield()) {
+            reg.emplace<ShieldPickupTag>(tile, ts.shield->duration);
         }
 
         // Source rect covers the full native-resolution texture.
@@ -1954,6 +2790,24 @@ void GameScene::Spawn() {
         std::vector<SDL_Rect> tileFrame = {{0, 0, (int)texW, (int)texH}};
         reg.emplace<Renderable>(tile, tex, tileFrame, false, ts.w, ts.h);
         reg.emplace<AnimationState>(tile, 0, 1, 0.0f, 1.0f, false);
+    }
+
+    // ── Load turret fire SFX ───────────────────────────────────────────────────
+    if (Audio() && Audio()->IsReady()) {
+        auto sv = reg.view<ShooterTag>();
+        sv.each([&](entt::entity e, const ShooterTag& sh) {
+            if (!sh.sfxPath.empty()) {
+                std::string sfxId = "turret_" + std::to_string((uint32_t)e);
+                Audio()->Sfx().Load(sfxId, sh.sfxPath);
+            }
+        });
+        auto puv = reg.view<PowerUpTag>();
+        puv.each([&](entt::entity e, const PowerUpTag& pu) {
+            if (!pu.sfxPath.empty()) {
+                std::string sfxId = "powerup_" + std::to_string((uint32_t)e);
+                Audio()->Sfx().Load(sfxId, pu.sfxPath);
+            }
+        });
     }
 
     // ── Spawn enemies ─────────────────────────────────────────────────────────
@@ -2196,11 +3050,18 @@ void GameScene::Spawn() {
         }
     }
 
+    // Create bullet texture (8x8 dark square) for turret projectiles
+    if (!mBulletTex) {
+        SDL_Surface* bs = SDL_CreateSurface(8, 8, SDL_PIXELFORMAT_ARGB8888);
+        if (bs) {
+            SDL_FillSurfaceRect(bs, nullptr,
+                SDL_MapRGBA(SDL_GetPixelFormatDetails(bs->format), nullptr, 10, 10, 10, 255));
+            mBulletTex = SDL_CreateTextureFromSurface(ren, bs);
+            SDL_DestroySurface(bs);
+        }
+    }
+
     // Build the pre-sorted tile render list used by RenderSystem Pass 1.
-    // Tile entity IDs are stable for the lifetime of Spawn() -- they are never
-    // re-created mid-level, only destroyed (action tiles). RenderSystem uses
-    // this list instead of building+sorting a vector on every frame.
-    // We rebuild it here on each Spawn() because Respawn() clears the registry.
     {
         mSortedTileRenderList.clear();
         auto tv = reg.view<TileTag, AnimationState, Renderable>();

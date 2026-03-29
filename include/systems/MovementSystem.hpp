@@ -68,8 +68,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
 
         if (!g.active) {
             if (climb.climbing || climb.atTop) {
-                bool leftHeld  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT] || padAxisX < 0.0f;
-                bool rightHeld = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT] || padAxisX > 0.0f;
+                bool leftHeld  = keys[SDL_SCANCODE_A] || padAxisX < 0.0f;
+                bool rightHeld = keys[SDL_SCANCODE_D] || padAxisX > 0.0f;
                 if (leftHeld && !rightHeld) {
                     v.dx = -CLIMB_STRAFE_SPEED;
                 } else if (rightHeld && !leftHeld) {
@@ -82,9 +82,7 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 return;
             }
             bool kbMoving = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
-                            keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D] ||
-                            keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_DOWN] ||
-                            keys[SDL_SCANCODE_LEFT] || keys[SDL_SCANCODE_RIGHT];
+                            keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D];
             bool padMoving = std::abs(padAxisX) > 0.0f || std::abs(padAxisY) > 0.0f;
             if (padMoving) {
                 v.dx = padAxisX * v.speed;
@@ -120,8 +118,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
                     bool invertFlip = g.direction == GravityDir::UP;
-                    bool kbLeft  = keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_LEFT];
-                    bool kbRight = keys[SDL_SCANCODE_D] || keys[SDL_SCANCODE_RIGHT];
+                    bool kbLeft  = keys[SDL_SCANCODE_A];
+                    bool kbRight = keys[SDL_SCANCODE_D];
                     if (kbLeft)  v.dx = -effSpeed;
                     if (kbRight) v.dx =  effSpeed;
                     if (std::abs(padAxisX) > 0.0f) {
@@ -138,8 +136,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
                 case GravityDir::LEFT:
                 case GravityDir::RIGHT: {
-                    bool kbUp   = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-                    bool kbDown = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+                    bool kbUp   = keys[SDL_SCANCODE_W];
+                    bool kbDown = keys[SDL_SCANCODE_S];
                     if (kbUp)   v.dy = -effSpeed;
                     if (kbDown) v.dy =  effSpeed;
                     if (std::abs(padAxisY) > 0.0f)

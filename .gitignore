@@ -42,3 +42,6 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
+
+# Study plan (personal notes, not part of the codebase)
+studyplan/

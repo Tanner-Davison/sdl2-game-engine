@@ -61,6 +61,13 @@ class EditorUIRenderer {
         SDL_Rect    noRect{};
     };
 
+    // ── Music change confirm popup state ──────────────────────────────────────
+    struct MusicConfirmState {
+        bool        active  = false;
+        std::string oldName;   // current music filename (or "(none)")
+        std::string newName;   // proposed music filename
+    };
+
     // ── Import input state ───────────────────────────────────────────────────
     struct ImportInputState {
         bool        active = false;
@@ -103,6 +110,7 @@ class EditorUIRenderer {
                 // popups
                 const PowerUpPopupState&      powerUp,
                 const DelConfirmState&        delConfirm,
+                const MusicConfirmState&     musicConfirm,
                 const ImportInputState&       importInput,
                 const MovPlatPopupState&      movPlat,
                 bool                          dropActive,
@@ -127,6 +135,8 @@ class EditorUIRenderer {
     // Computed Yes/No button rects (written each frame so HandleEvent can use them)
     [[nodiscard]] SDL_Rect DelConfirmYesRect() const { return mDelYes; }
     [[nodiscard]] SDL_Rect DelConfirmNoRect()  const { return mDelNo;  }
+    [[nodiscard]] SDL_Rect MusicConfirmYesRect() const { return mMusicYes; }
+    [[nodiscard]] SDL_Rect MusicConfirmNoRect()  const { return mMusicNo;  }
     // Updated anim picker rect (computed each frame)
     [[nodiscard]] SDL_Rect AnimPickerRect() const { return mAnimPickerRect; }
     [[nodiscard]] SDL_Rect CamShakeToggleRect() const { return mCamShakeToggleRect; }
@@ -191,9 +201,15 @@ class EditorUIRenderer {
                           EditorSurfaceCache& cache,
                           const SDL_PixelFormatDetails* fmt);
 
+    void RenderMusicConfirm(SDL_Surface* screen, int W, int H,
+                            const MusicConfirmState& mc,
+                            EditorSurfaceCache& cache);
+
     // Mutable state written each frame so the orchestrator can read it back
     SDL_Rect mDelYes{};
     SDL_Rect mDelNo{};
+    SDL_Rect mMusicYes{};
+    SDL_Rect mMusicNo{};
     SDL_Rect mAnimPickerRect{};
     SDL_Rect mCamShakeToggleRect{};
 };

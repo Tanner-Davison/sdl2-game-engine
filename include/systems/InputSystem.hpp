@@ -32,8 +32,8 @@ inline void GamepadPollSystem(entt::registry& reg) {
     bool btnSprint = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
 
     const bool* keys = SDL_GetKeyboardState(nullptr);
-    bool kbW = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_UP];
-    bool kbS = keys[SDL_SCANCODE_S] || keys[SDL_SCANCODE_DOWN];
+    bool kbW = keys[SDL_SCANCODE_W];
+    bool kbS = keys[SDL_SCANCODE_S];
 
     auto view = reg.view<PlayerTag, GravityState, ClimbState>();
     view.each([&](GravityState& g, ClimbState& climb) {
@@ -128,8 +128,8 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
             if (climb.climbing || climb.atTop) return;
             if (g.isCrouching) return;
 
-            bool isLeft  = (e.key.key == SDLK_A || e.key.key == SDLK_LEFT);
-            bool isRight = (e.key.key == SDLK_D || e.key.key == SDLK_RIGHT);
+            bool isLeft  = (e.key.key == SDLK_A);
+            bool isRight = (e.key.key == SDLK_D);
 
             if (isLeft) {
                 if (dash.tapTimerLeft > 0.0f && dash.releasedLeft) {
@@ -162,9 +162,9 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
     if (e.type == SDL_EVENT_KEY_UP) {
         auto dashView = reg.view<PlayerTag, DashState>();
         dashView.each([&e](DashState& dash) {
-            if (e.key.key == SDLK_A || e.key.key == SDLK_LEFT)
+            if (e.key.key == SDLK_A)
                 dash.releasedLeft = true;
-            if (e.key.key == SDLK_D || e.key.key == SDLK_RIGHT)
+            if (e.key.key == SDLK_D)
                 dash.releasedRight = true;
         });
     }

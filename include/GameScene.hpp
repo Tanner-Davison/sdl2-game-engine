@@ -100,6 +100,7 @@ class GameScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     // Custom enemy type sprite sheets — kept alive so GPU textures remain valid
     std::vector<std::unique_ptr<SpriteSheet>> mEnemySpriteSheets;
+    SDL_Texture*                 mBulletTex = nullptr; // 4x4 black square for turret bullets
     std::vector<SDL_Texture*>    tileScaledTextures; // owned; freed on Unload only
     // Tile texture cache: key = "path|WxH|rROT" → non-owning ptr into tileScaledTextures.
     // Populated in Spawn(), never cleared between Respawn() calls — only in Unload().
@@ -137,4 +138,7 @@ class GameScene : public Scene {
 
     void Spawn();
     void Respawn();
+    void RenderTurrets(SDL_Renderer* ren, int W, int H);
+    void RenderShield(SDL_Renderer* ren, int W, int H);
+    void RenderTurretPowerUp(SDL_Renderer* ren, int W, int H);
 };

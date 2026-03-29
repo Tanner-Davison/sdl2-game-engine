@@ -88,6 +88,19 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
             {"powerUp",         t.HasPowerUp()},
             {"powerUpType",     t.HasPowerUp() ? t.powerUp->type     : std::string{}},
             {"powerUpDuration", t.HasPowerUp() ? t.powerUp->duration : 15.0f},
+            {"powerUpFireRate", t.HasPowerUp() ? t.powerUp->fireRate : 3.0f},
+            {"powerUpSfx",      t.HasPowerUp() ? t.powerUp->sfxPath  : std::string{}},
+            // Shooter
+            {"shooter",         t.HasShooter()},
+            {"shooterSide",     t.HasShooter() ? static_cast<int>(t.shooter->side) : 0},
+            {"shooterRange",    t.HasShooter() ? t.shooter->range       : 300.0f},
+            {"shooterFireRate", t.HasShooter() ? t.shooter->fireRate    : 1.5f},
+            {"shooterBulletSpd",t.HasShooter() ? t.shooter->bulletSpeed : 200.0f},
+            {"shooterDamage",   t.HasShooter() ? t.shooter->damage      : 10.0f},
+            {"shooterSfx",     t.HasShooter() ? t.shooter->sfxPath    : ""},
+            // Shield
+            {"shield",          t.HasShield()},
+            {"shieldDuration",  t.HasShield() ? t.shield->duration : 20.0f},
         };
         j["tiles"].push_back(std::move(tile));
     }
@@ -228,7 +241,28 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             PowerUpData pu;
             pu.type     = t.value("powerUpType", std::string{});
             pu.duration = t.value("powerUpDuration", 15.0f);
+            pu.fireRate = t.value("powerUpFireRate", 3.0f);
+            pu.sfxPath  = t.value("powerUpSfx", std::string{});
             ts.powerUp = pu;
+        }
+
+        // Shooter
+        if (t.value("shooter", false)) {
+            ShooterData sd;
+            sd.side        = static_cast<ShooterSide>(t.value("shooterSide", 0));
+            sd.range       = t.value("shooterRange", 300.0f);
+            sd.fireRate    = t.value("shooterFireRate", 1.5f);
+            sd.bulletSpeed = t.value("shooterBulletSpd", 200.0f);
+            sd.damage      = t.value("shooterDamage", 10.0f);
+            sd.sfxPath     = t.value("shooterSfx", std::string(""));
+            ts.shooter = sd;
+        }
+
+        // Shield
+        if (t.value("shield", false)) {
+            ShieldData sd;
+            sd.duration = t.value("shieldDuration", 20.0f);
+            ts.shield = sd;
         }
 
         out.tiles.push_back(std::move(ts));
