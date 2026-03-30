@@ -35,6 +35,7 @@ find_package(ZLIB REQUIRED)
 
 set(SOURCES
     src/main.cpp
+    src/DrawPrimitives.cpp
     src/TitleScene.cpp
     src/GameScene.cpp
     src/LevelEditorScene.cpp

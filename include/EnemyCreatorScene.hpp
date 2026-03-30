@@ -164,6 +164,10 @@ class EnemyCreatorScene : public Scene {
     SDL_Rect mBackBtnRect{};
     SDL_Rect mClearSlotRect{};
 
+    enum class HoverBtn { None, Save, Back, Clear, SlotRow, FpsMinus, FpsPlus, RosterLoad, RosterDel };
+    HoverBtn mHoverBtn   = HoverBtn::None;
+    int      mHoverIndex = -1;
+
     std::vector<SDL_Rect> mSlotRowRects;
 
     void computeLayout();
@@ -203,9 +207,15 @@ class EnemyCreatorScene : public Scene {
     static constexpr SDL_Color DROP_HOVER  = {200, 80,  50,  255};
     static constexpr SDL_Color HB_COLOR    = {255, 80,  80, 180};
     static constexpr SDL_Color BTN_SAVE    = {40, 160,  80,  255};
+    static constexpr SDL_Color BTN_SAVE_H  = {60, 200, 100,  255};
     static constexpr SDL_Color BTN_BACK    = {80,  80, 160,  255};
+    static constexpr SDL_Color BTN_BACK_H  = {110, 110, 200,  255};
     static constexpr SDL_Color BTN_DEL     = {160, 50,  50,  255};
+    static constexpr SDL_Color BTN_DEL_H   = {200, 70,  70,  255};
     static constexpr SDL_Color BTN_LOAD    = {180, 100, 40,  255};
+    static constexpr SDL_Color BTN_LOAD_H  = {220, 130, 60,  255};
+    static constexpr SDL_Color BTN_CLR     = {80, 50, 50, 255};
+    static constexpr SDL_Color BTN_CLR_H   = {110, 70, 70, 255};
 
     static SDL_Rect normaliseRect(SDL_Rect r);
 };

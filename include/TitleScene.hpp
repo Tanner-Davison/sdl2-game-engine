@@ -1,8 +1,10 @@
 #pragma once
+#include "DrawPrimitives.hpp"
 #include "Image.hpp"
 #include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
+#include "SpriteSheet.hpp"
 #include "Text.hpp"
 #include "Window.hpp"
 #include <SDL3/SDL.h>
@@ -44,13 +46,15 @@ class TitleScene : public Scene {
                                            titleX, row1Y - 80 - 72, 72);
         const int row2Y = row1Y + btnH + rowGap;
 
-        const float btnRadius = 8.0f;
+        const float    btnRadius  = 8.0f;
+        const SDL_Color hoverOutline = {255, 220, 60, 255};
 
         editorBtnRect = {cx - btnW - gap / 2, row1Y, btnW, btnH};
         editorButton  = std::make_unique<Rectangle>(editorBtnRect);
         editorButton->SetColor({80, 120, 200, 255});
         editorButton->SetHoverColor({100, 150, 230, 255});
         editorButton->SetCornerRadius(btnRadius);
+        editorButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [eBtnX, eBtnY] = Text::CenterInRect("Level Editor", 22, editorBtnRect);
         editorBtnText = std::make_unique<Text>("Level Editor", SDL_Color{255, 255, 255, 255},
                                                eBtnX, eBtnY, 22);
@@ -60,6 +64,7 @@ class TitleScene : public Scene {
         createPlayerButton->SetColor({160, 80, 180, 255});
         createPlayerButton->SetHoverColor({200, 110, 220, 255});
         createPlayerButton->SetCornerRadius(btnRadius);
+        createPlayerButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [cpbx, cpby] = Text::CenterInRect("Create Player", 20, createPlayerBtnRect);
         createPlayerBtnText = std::make_unique<Text>("Create Player",
                                                      SDL_Color{255, 255, 255, 255},
@@ -70,6 +75,7 @@ class TitleScene : public Scene {
         tileAnimButton->SetColor({40, 140, 160, 255});
         tileAnimButton->SetHoverColor({60, 180, 200, 255});
         tileAnimButton->SetCornerRadius(btnRadius);
+        tileAnimButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [tabx, taby] = Text::CenterInRect("Tile Animator", 20, tileAnimBtnRect);
         tileAnimBtnText = std::make_unique<Text>("Tile Animator",
                                                   SDL_Color{255, 255, 255, 255},
@@ -81,6 +87,7 @@ class TitleScene : public Scene {
         createEnemyButton->SetColor({180, 60, 40, 255});
         createEnemyButton->SetHoverColor({220, 90, 60, 255});
         createEnemyButton->SetCornerRadius(btnRadius);
+        createEnemyButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [cebx, ceby] = Text::CenterInRect("Create Enemy", 20, createEnemyBtnRect);
         createEnemyBtnText = std::make_unique<Text>("Create Enemy",
                                                      SDL_Color{255, 255, 255, 255},
@@ -91,6 +98,7 @@ class TitleScene : public Scene {
         tileAssetsButton->SetColor({120, 100, 40, 255});
         tileAssetsButton->SetHoverColor({160, 140, 60, 255});
         tileAssetsButton->SetCornerRadius(btnRadius);
+        tileAssetsButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [tabx2, taby2] = Text::CenterInRect("Tile Assets", 20, tileAssetsBtnRect);
         tileAssetsBtnText = std::make_unique<Text>("Tile Assets",
                                                     SDL_Color{255, 255, 255, 255},
@@ -99,15 +107,20 @@ class TitleScene : public Scene {
         mRow2BottomY = row3Y + btnH;
 
         mProfileSelectorBaseY = mRow2BottomY;
+        loadSettings();
         scanProfiles();
+        restoreProfileFromSettings();
         rebuildProfileSelector();
-        mRow2BottomY += 52;
+        loadChosenPreviewTex();
+        preloadCharCards();
+        mRow2BottomY += 108;
 
         viewLevelsBtnRect = {cx + gap / 2, row1Y, btnW, btnH};
         viewLevelsButton  = std::make_unique<Rectangle>(viewLevelsBtnRect);
         viewLevelsButton->SetColor({40, 140, 60, 255});
         viewLevelsButton->SetHoverColor({60, 180, 80, 255});
         viewLevelsButton->SetCornerRadius(btnRadius);
+        viewLevelsButton->SetHoverOutline(hoverOutline, 2.0f);
         auto [vlx, vly] = Text::CenterInRect("Play Level", 22, viewLevelsBtnRect);
         viewLevelsBtnText = std::make_unique<Text>("Play Level",
             SDL_Color{255, 255, 255, 255}, vlx, vly, 22);
@@ -118,12 +131,8 @@ class TitleScene : public Scene {
     void Unload() override {
         if (mNamingActive)
             SDL_StopTextInput(mSDLWindow);
-        for (auto& c : mCharCards) {
-            if (c.previewTex) { SDL_DestroyTexture(c.previewTex); c.previewTex = nullptr; }
-            for (auto* t : c.walkFrames) if (t) SDL_DestroyTexture(t);
-            c.walkFrames.clear();
-        }
-        mCharCards.clear();
+        stashCharCardCache();
+        if (mChosenPreviewTex) { SDL_DestroyTexture(mChosenPreviewTex); mChosenPreviewTex = nullptr; }
     }
 
     bool HandleEvent(SDL_Event& e) override {
@@ -246,6 +255,8 @@ class TitleScene : public Scene {
             if (e.type == SDL_EVENT_MOUSE_MOTION) {
                 int mx = (int)e.motion.x, my = (int)e.motion.y;
                 mHoverRow = -1; mHoverEdit = false; mHoverDel = false; mHoverPlay = false;
+                mHoverNewBtn = hit(mBrowserNewRect, mx, my);
+                mHoverCloseBtn = hit(mBrowserCloseRect, mx, my);
                 for (int i = 0; i < (int)mLevelButtons.size(); i++) {
                     const auto& lb = mLevelButtons[i];
                     if (hit(lb.delRect, mx, my))      { mHoverRow = i; mHoverDel  = true; break; }
@@ -310,9 +321,23 @@ class TitleScene : public Scene {
                     mProfileIdx    = mCharPickerHighlight;
                     mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
                     rebuildProfileSelector();
+                    loadChosenPreviewTex();
+                    saveSettings();
                     mCharPickerOpen = false;
                     return true;
                 }
+            }
+            if (e.type == SDL_EVENT_MOUSE_MOTION) {
+                int mx = (int)e.motion.x, my = (int)e.motion.y;
+                mCharPickerHoverClose  = hit(mCharPickerCloseRect, mx, my);
+                mCharPickerHoverSelect = hit(mCharPickerSelectRect, mx, my);
+                mCharPickerHoverCard   = -1;
+                for (int i = 0; i < (int)mCharCards.size(); ++i) {
+                    SDL_Rect cr = mCharCards[i].rect;
+                    cr.y -= mCharPickerScroll;
+                    if (hit(cr, mx, my)) { mCharPickerHoverCard = i; break; }
+                }
+                return true;
             }
             if (e.type == SDL_EVENT_MOUSE_WHEEL) {
                 float fmx, fmy; SDL_GetMouseState(&fmx, &fmy);
@@ -325,23 +350,31 @@ class TitleScene : public Scene {
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
                 int mx = (int)e.button.x, my = (int)e.button.y;
                 if (hit(mCharPickerCloseRect, mx, my)) { mCharPickerOpen = false; return true; }
-                // Select button — commit the highlighted card and close
                 if (hit(mCharPickerSelectRect, mx, my)) {
                     mProfileIdx    = mCharPickerHighlight;
                     mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
                     rebuildProfileSelector();
+                    loadChosenPreviewTex();
+                    saveSettings();
                     mCharPickerOpen = false;
                     return true;
                 }
-                // Hit-test each card — highlight only, don't close
                 for (int i = 0; i < (int)mCharCards.size(); ++i) {
                     SDL_Rect cardRect = mCharCards[i].rect;
                     cardRect.y -= mCharPickerScroll;
                     if (hit(cardRect, mx, my)) {
-                        mCharPickerHighlight = i;
-                        // Reset walk anim so animation starts fresh
-                        mCharCards[i].walkAnimFrame = 0;
-                        mCharCards[i].walkAnimTimer = 0.f;
+                        if (mCharPickerHighlight == i) {
+                            mProfileIdx    = i;
+                            mChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
+                            rebuildProfileSelector();
+                            loadChosenPreviewTex();
+                            saveSettings();
+                            mCharPickerOpen = false;
+                        } else {
+                            mCharPickerHighlight = i;
+                            mCharCards[i].walkAnimFrame = 0;
+                            mCharCards[i].walkAnimTimer = 0.f;
+                        }
                         return true;
                     }
                 }
@@ -363,11 +396,12 @@ class TitleScene : public Scene {
         if (handleGamepadNav(e)) return true;
 
         editorButton->HandleEvent(e);
-        if (createPlayerButton) createPlayerButton->HandleEvent(e);
-        if (tileAnimButton)     tileAnimButton->HandleEvent(e);
-        if (createEnemyButton)  createEnemyButton->HandleEvent(e);
-        if (tileAssetsButton)   tileAssetsButton->HandleEvent(e);
-        if (viewLevelsButton)   viewLevelsButton->HandleEvent(e);
+        if (createPlayerButton)  createPlayerButton->HandleEvent(e);
+        if (tileAnimButton)      tileAnimButton->HandleEvent(e);
+        if (createEnemyButton)   createEnemyButton->HandleEvent(e);
+        if (tileAssetsButton)    tileAssetsButton->HandleEvent(e);
+        if (viewLevelsButton)    viewLevelsButton->HandleEvent(e);
+        if (mChooseCharButton)   mChooseCharButton->HandleEvent(e);
         return true;
     }
 
@@ -383,34 +417,26 @@ class TitleScene : public Scene {
 
         if (!mCharPickerOpen || mCharCards.empty()) return;
 
-        // Lazy-load one walk frame per card per tick
+        // Ensure highlighted card is ready immediately
+        if (mCharPickerHighlight >= 0 && mCharPickerHighlight < (int)mCharCards.size())
+            buildWalkSheet(mCharCards[mCharPickerHighlight]);
+
+        // Build one other card's sheet per frame in the background
         for (auto& c : mCharCards) {
-            if (c.walkLoadIdx < (int)c.walkPaths.size()) {
-                SDL_Surface* raw = IMG_Load(c.walkPaths[c.walkLoadIdx].string().c_str());
-                if (raw) {
-                    SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
-                    SDL_DestroySurface(raw);
-                    if (conv) {
-                        SDL_Texture* t = SDL_CreateTextureFromSurface(mRenderer, conv);
-                        SDL_DestroySurface(conv);
-                        if (t) {
-                            SDL_SetTextureScaleMode(t, SDL_SCALEMODE_PIXELART);
-                            c.walkFrames.push_back(t);
-                        }
-                    }
-                }
-                ++c.walkLoadIdx;
+            if (!c.walkLoaded && !c.walkPathStrs.empty()) {
+                buildWalkSheet(c);
+                break;
             }
         }
 
         if (mCharPickerHighlight >= 0 && mCharPickerHighlight < (int)mCharCards.size()) {
             auto& active = mCharCards[mCharPickerHighlight];
-            if (!active.walkFrames.empty()) {
+            if (!active.walkRects.empty()) {
                 active.walkAnimTimer += dt;
                 float interval = 1.f / active.walkFps;
                 while (active.walkAnimTimer >= interval) {
                     active.walkAnimTimer -= interval;
-                    active.walkAnimFrame = (active.walkAnimFrame + 1) % (int)active.walkFrames.size();
+                    active.walkAnimFrame = (active.walkAnimFrame + 1) % (int)active.walkRects.size();
                 }
             }
         }
@@ -431,17 +457,30 @@ class TitleScene : public Scene {
         if (tileAssetsButton)   { tileAssetsButton->Render(ren);   tileAssetsBtnText->Render(ren); }
 
         if (mProfileSelectorBg.w > 0) {
-            fillRect(ren, mProfileSelectorBg, {28, 32, 52, 255});
-            outlineRect(ren, mProfileSelectorBg, {80, 100, 180, 255});
+            fillRounded(ren, mProfileSelectorBg, {22, 26, 44, 240}, 8.f);
+            outlineRounded(ren, mProfileSelectorBg, {60, 80, 140, 255}, 1.f, 8.f);
+
+            fillRounded(ren, mProfileSpriteArea, {16, 18, 32, 255}, 6.f);
+
+            if (mChosenPreviewTex) {
+                float tw = 0, th = 0;
+                SDL_GetTextureSize(mChosenPreviewTex, &tw, &th);
+                if (tw > 0 && th > 0) {
+                    const auto& sa = mProfileSpriteArea;
+                    float sc = std::min((float)sa.w / tw, (float)sa.h / th);
+                    int dw = (int)(tw * sc), dh = (int)(th * sc);
+                    SDL_FRect dst = {(float)(sa.x + (sa.w - dw) / 2),
+                                     (float)(sa.y + sa.h - dh),
+                                     (float)dw, (float)dh};
+                    SDL_RenderTexture(ren, mChosenPreviewTex, nullptr, &dst);
+                }
+            }
         }
         if (mProfileLabel)    mProfileLabel->Render(ren);
         if (mProfileNameText) mProfileNameText->Render(ren);
-        if (mProfileSelectorBg.w > 0) {
-            fillRect(ren, mChooseCharBtnRect, {55, 40, 110, 255});
-            outlineRect(ren, mChooseCharBtnRect, {120, 80, 220, 255});
-            auto [cx2, cy2] = Text::CenterInRect("Choose...", 13, mChooseCharBtnRect);
-            Text chTxt("Choose...", {200, 180, 255, 255}, cx2, cy2, 13);
-            chTxt.Render(ren);
+        if (mChooseCharButton) {
+            mChooseCharButton->Render(ren);
+            mChooseCharBtnText->Render(ren);
         }
 
         if (viewLevelsButton) { viewLevelsButton->Render(ren); viewLevelsBtnText->Render(ren); }
@@ -469,8 +508,8 @@ class TitleScene : public Scene {
             int mw = 400, mh = 170;
             int mx = (W - mw) / 2, my = (H - mh) / 2;
             SDL_Rect box = {mx, my, mw, mh};
-            fillRect(ren, box, {28, 18, 18, 255});
-            outlineRect(ren, box, {200, 60, 60, 255}, 2);
+            fillRounded(ren, box, {28, 18, 18, 255}, 8.f);
+            outlineRounded(ren, box, {200, 60, 60, 255}, 2.f, 8.f);
 
             std::string name = fs::path(mDelConfirmPath).stem().string();
             Text t1("Delete level?", {255, 100, 100, 255}, mx + 20, my + 16, 22);
@@ -486,16 +525,16 @@ class TitleScene : public Scene {
             bool yesFocused = mDelPadOnYes && mPadFocus >= 0;
             bool noFocused  = !mDelPadOnYes && mPadFocus >= 0;
 
-            fillRect(ren, mDelConfirmYes, yesFocused ? SDL_Color{200,40,40,255} : SDL_Color{160,30,30,255});
-            outlineRect(ren, mDelConfirmYes, yesFocused ? SDL_Color{255,220,60,255} : SDL_Color{220,70,70,255},
-                        yesFocused ? 3 : 1);
+            fillRounded(ren, mDelConfirmYes, yesFocused ? SDL_Color{200,40,40,255} : SDL_Color{160,30,30,255}, 6.f);
+            if (yesFocused)
+                outlineRounded(ren, mDelConfirmYes, {255,220,60,255}, 2.f, 6.f, 1.f);
             auto [yx, yy] = Text::CenterInRect("Delete", 16, mDelConfirmYes);
             Text yLbl("Delete", {255, 200, 200, 255}, yx, yy, 16);
             yLbl.Render(ren);
 
-            fillRect(ren, mDelConfirmNo, noFocused ? SDL_Color{60,60,90,255} : SDL_Color{40,40,60,255});
-            outlineRect(ren, mDelConfirmNo, noFocused ? SDL_Color{255,220,60,255} : SDL_Color{80,80,120,255},
-                        noFocused ? 3 : 1);
+            fillRounded(ren, mDelConfirmNo, noFocused ? SDL_Color{60,60,90,255} : SDL_Color{40,40,60,255}, 6.f);
+            if (noFocused)
+                outlineRounded(ren, mDelConfirmNo, {255,220,60,255}, 2.f, 6.f, 1.f);
             auto [nx, ny] = Text::CenterInRect("Cancel", 16, mDelConfirmNo);
             Text nLbl("Cancel", {180, 180, 220, 255}, nx, ny, 16);
             nLbl.Render(ren);
@@ -516,14 +555,14 @@ class TitleScene : public Scene {
             int mw = 480, mh = 200;
             int mx = (W - mw) / 2, my = (H - mh) / 2;
             SDL_Rect box = {mx, my, mw, mh};
-            fillRect(ren, box, {28, 28, 42, 255});
-            outlineRect(ren, box, {80, 120, 220, 255}, 2);
+            fillRounded(ren, box, {28, 28, 42, 255}, 8.f);
+            outlineRounded(ren, box, {80, 120, 220, 255}, 2.f, 8.f);
 
             if (promptTitle) promptTitle->Render(ren);
             SDL_Rect field = {mx + 20, my + 70, mw - 40, 40};
-            fillRect(ren, field, {18, 18, 32, 255});
-            outlineRect(ren, field,
-                mNameError.empty() ? SDL_Color{80, 120, 220, 255} : SDL_Color{220, 80, 80, 255}, 2);
+            fillRounded(ren, field, {18, 18, 32, 255}, 4.f);
+            outlineRounded(ren, field,
+                mNameError.empty() ? SDL_Color{80, 120, 220, 255} : SDL_Color{220, 80, 80, 255}, 2.f, 4.f);
             if (promptInput) promptInput->Render(ren);
             if (promptError) promptError->Render(ren);
             if (promptHint)  promptHint->Render(ren);
@@ -552,16 +591,24 @@ class TitleScene : public Scene {
             }
 
             mBrowserCloseRect = {px + pw - 38, py + 6, 32, 32};
-            fillRect(ren, mBrowserCloseRect, {120, 35, 35, 255});
-            outlineRect(ren, mBrowserCloseRect, {200, 70, 70, 255});
+            {
+                SDL_Color closeBg = mHoverCloseBtn ? SDL_Color{160, 50, 50, 255} : SDL_Color{120, 35, 35, 255};
+                fillRounded(ren, mBrowserCloseRect, closeBg, 4.f);
+                if (mHoverCloseBtn)
+                    outlineRounded(ren, mBrowserCloseRect, {255, 100, 100, 255}, 2.f, 4.f, 1.f);
+            }
             auto [cxx, cxy] = Text::CenterInRect("X", 14, mBrowserCloseRect);
             Text closeX("X", {255, 220, 220, 255}, cxx, cxy, 14);
             closeX.Render(ren);
 
             int newBtnY = py + 54;
             mBrowserNewRect = {px + 16, newBtnY, pw - 32, 34};
-            fillRect(ren, mBrowserNewRect, {45, 50, 100, 255});
-            outlineRect(ren, mBrowserNewRect, {80, 100, 180, 255});
+            {
+                SDL_Color newBg = mHoverNewBtn ? SDL_Color{60, 65, 130, 255} : SDL_Color{45, 50, 100, 255};
+                fillRounded(ren, mBrowserNewRect, newBg, 6.f);
+                if (mHoverNewBtn)
+                    outlineRounded(ren, mBrowserNewRect, {255, 220, 60, 255}, 2.f, 6.f, 1.f);
+            }
             auto [nlx, nly] = Text::CenterInRect("+ New Level", 16, mBrowserNewRect);
             Text newLbl("+ New Level", {160, 180, 255, 255}, nlx, nly, 16);
             newLbl.Render(ren);
@@ -585,15 +632,17 @@ class TitleScene : public Scene {
                 bool isHover = (i == mHoverRow) || (i == mBrowserPadRow && mPadFocus >= 0);
                 bool isLoading = (mLoadingEditor && i == mLoadingIdx);
 
+                constexpr float kRowR = 6.f, kBtnR = 4.f;
+                const SDL_Color kGold = {255, 220, 60, 255};
+
                 SDL_Rect pr = {rowX, ry, playW, rowH};
                 SDL_Color playBg  = isLoading ? SDL_Color{60,60,60,255}
                                    : (isHover && mHoverPlay) ? SDL_Color{40,140,70,255}
                                    : isHover ? SDL_Color{35,120,60,255}
                                    : SDL_Color{30,100,50,255};
-                SDL_Color playBdr = (isHover && mHoverPlay) ? SDL_Color{80,220,120,255}
-                                   : SDL_Color{50,150,75,255};
-                fillRect(ren, pr, playBg);
-                outlineRect(ren, pr, playBdr);
+                fillRounded(ren, pr, playBg, kRowR);
+                if (isHover && mHoverPlay)
+                    outlineRounded(ren, pr, kGold, 2.f, kRowR, 1.f);
                 std::string nm = fs::path(mLevelButtons[i].path).stem().string();
                 auto [lx, ly] = Text::CenterInRect(nm, 16, pr);
                 Text lbl(nm, {255,255,255,255}, lx, ly, 16);
@@ -603,12 +652,11 @@ class TitleScene : public Scene {
                 SDL_Color editBg  = isLoading ? SDL_Color{80,80,80,255}
                                     : (isHover && mHoverEdit) ? SDL_Color{70,110,200,255}
                                     : SDL_Color{45,70,150,255};
-                SDL_Color editBdr = (isHover && mHoverEdit) ? SDL_Color{120,170,255,255}
-                                    : SDL_Color{70,100,200,255};
-                fillRect(ren, er, editBg);
-                outlineRect(ren, er, editBdr);
+                fillRounded(ren, er, editBg, kBtnR);
+                if (isHover && mHoverEdit)
+                    outlineRounded(ren, er, kGold, 2.f, kBtnR, 1.f);
                 if (isLoading) {
-                            const char* dots[] = {".  ", ".. ", "...", " ..", "  ."};
+                    const char* dots[] = {".  ", ".. ", "...", " ..", "  ."};
                     int dotIdx = (int)(mLoadingTimer * 8.0f) % 5;
                     auto [ldx, ldy] = Text::CenterInRect(dots[dotIdx], 14, er);
                     Text ldots(dots[dotIdx], {200,220,255,255}, ldx, ldy, 14);
@@ -622,10 +670,9 @@ class TitleScene : public Scene {
                 SDL_Rect dr = {rowX + playW + btnGap + editW + btnGap, ry, delW, rowH};
                 SDL_Color delBg  = (isHover && mHoverDel) ? SDL_Color{180,45,45,255}
                                    : SDL_Color{120,30,30,255};
-                SDL_Color delBdr = (isHover && mHoverDel) ? SDL_Color{255,100,100,255}
-                                   : SDL_Color{180,60,60,255};
-                fillRect(ren, dr, delBg);
-                outlineRect(ren, dr, delBdr);
+                fillRounded(ren, dr, delBg, kBtnR);
+                if (isHover && mHoverDel)
+                    outlineRounded(ren, dr, kGold, 2.f, kBtnR, 1.f);
                 auto [dx, dy] = Text::CenterInRect("Del", 12, dr);
                 Text dlbl("Del", {255,200,200,255}, dx, dy, 12);
                 dlbl.Render(ren);
@@ -682,9 +729,12 @@ class TitleScene : public Scene {
     }
 
     // --- Draw helpers ---
+    static SDL_FRect toF(SDL_Rect r) {
+        return {(float)r.x, (float)r.y, (float)r.w, (float)r.h};
+    }
     static void fillRect(SDL_Renderer* ren, SDL_Rect r, SDL_Color c) {
         SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
-        SDL_FRect fr = {(float)r.x, (float)r.y, (float)r.w, (float)r.h};
+        SDL_FRect fr = toF(r);
         SDL_RenderFillRect(ren, &fr);
     }
     static void outlineRect(SDL_Renderer* ren, SDL_Rect r, SDL_Color c, int t = 1) {
@@ -696,6 +746,12 @@ class TitleScene : public Scene {
             {(float)(r.x+r.w-t),   (float)r.y,           (float)t,   (float)r.h}
         };
         for (auto& s : sides) SDL_RenderFillRect(ren, &s);
+    }
+    static void fillRounded(SDL_Renderer* ren, SDL_Rect r, SDL_Color c, float rad) {
+        DrawFilledRoundedRect(ren, toF(r), c, rad);
+    }
+    static void outlineRounded(SDL_Renderer* ren, SDL_Rect r, SDL_Color c, float thick, float rad, float gap = 0.f) {
+        DrawRoundedRectOutline(ren, toF(r), c, thick, rad, gap);
     }
 
     // --- Name prompt helpers ---
@@ -735,6 +791,8 @@ class TitleScene : public Scene {
     bool mHoverEdit      = false;
     bool mHoverDel       = false;
     bool mHoverPlay      = false;
+    bool mHoverNewBtn    = false;
+    bool mHoverCloseBtn  = false;
     bool mLoadingEditor  = false;
     float mLoadingTimer  = 0.0f;
     int   mLoadingIdx    = -1;
@@ -761,21 +819,89 @@ class TitleScene : public Scene {
         mProfiles.clear();
         mProfiles.push_back("");
         for (const auto& p : ScanPlayerProfiles()) mProfiles.push_back(p.string());
-        mProfileIdx = 0; mChosenProfile = "";
+        mProfileIdx = 0;
     }
     void rebuildProfileSelector() {
         int cx = mWindowW / 2, selY = mProfileSelectorBaseY + 10;
-        int selW = 340, selH = 32;
-        int btnW2 = 80;
+        constexpr int selW = 400, selH = 88;
+        constexpr int spriteW = 72, spriteH = 76;
+        constexpr int btnW2 = 90, btnH2 = 32;
+        constexpr int pad = 6;
+
         mProfileSelectorBg  = {cx - selW/2, selY, selW, selH};
-        mChooseCharBtnRect  = {cx + selW/2 - btnW2 - 2, selY + 2, btnW2, selH - 4};
-        mProfileLabel = std::make_unique<Text>("Character:", SDL_Color{160, 170, 220, 255},
-                                               cx - selW/2 + 8, selY + 7, 13);
+        mProfileSpriteArea  = {cx - selW/2 + pad, selY + pad, spriteW, spriteH};
+
+        int textX = mProfileSpriteArea.x + spriteW + 10;
+        mProfileLabel = std::make_unique<Text>("Character", SDL_Color{120, 130, 170, 255},
+                                               textX, selY + 16, 11);
         std::string name = "Frost Knight (default)";
         if (mProfileIdx > 0 && mProfileIdx < (int)mProfiles.size())
             name = fs::path(mProfiles[mProfileIdx]).stem().string();
         mProfileNameText = std::make_unique<Text>(name, SDL_Color{255, 255, 255, 255},
-                                                  cx - selW/2 + 90, selY + 7, 14);
+                                                  textX, selY + 34, 18);
+
+        mChooseCharBtnRect = {cx + selW/2 - btnW2 - pad, selY + (selH - btnH2) / 2, btnW2, btnH2};
+        mChooseCharButton = std::make_unique<Rectangle>(mChooseCharBtnRect);
+        mChooseCharButton->SetColor({55, 40, 110, 255});
+        mChooseCharButton->SetHoverColor({80, 60, 140, 255});
+        mChooseCharButton->SetCornerRadius(6.0f);
+        mChooseCharButton->SetHoverOutline({255, 220, 60, 255}, 2.0f);
+        auto [cbx, cby] = Text::CenterInRect("Choose...", 13, mChooseCharBtnRect);
+        mChooseCharBtnText = std::make_unique<Text>("Choose...", SDL_Color{200, 180, 255, 255}, cbx, cby, 13);
+    }
+
+    void loadChosenPreviewTex() {
+        if (mChosenPreviewTex) { SDL_DestroyTexture(mChosenPreviewTex); mChosenPreviewTex = nullptr; }
+        std::string idleDir;
+        if (mChosenProfile.empty()) {
+            idleDir = "game_assets/frost_knight_png_sequences/Idle";
+        } else {
+            PlayerProfile prof;
+            if (LoadPlayerProfile(mChosenProfile, prof))
+                idleDir = prof.Slot(PlayerAnimSlot::Idle).folderPath;
+        }
+        if (idleDir.empty()) return;
+        std::error_code ec;
+        if (!fs::is_directory(idleDir, ec) || ec) return;
+        std::vector<fs::path> pngs;
+        for (const auto& e : fs::directory_iterator(idleDir, ec))
+            if (!ec && (e.path().extension() == ".png" || e.path().extension() == ".PNG"))
+                pngs.push_back(e.path());
+        if (pngs.empty()) return;
+        std::sort(pngs.begin(), pngs.end());
+        SDL_Surface* raw = IMG_Load(pngs[0].string().c_str());
+        if (!raw) return;
+        SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+        SDL_DestroySurface(raw);
+        if (!conv) return;
+        mChosenPreviewTex = SDL_CreateTextureFromSurface(mRenderer, conv);
+        SDL_DestroySurface(conv);
+        if (mChosenPreviewTex)
+            SDL_SetTextureScaleMode(mChosenPreviewTex, SDL_SCALEMODE_PIXELART);
+    }
+
+    static constexpr const char* kSettingsPath = "forge2d_settings.json";
+
+    void saveSettings() const {
+        json j;
+        j["chosenProfile"] = mChosenProfile;
+        std::ofstream f(kSettingsPath);
+        if (f.is_open()) f << j.dump(4);
+    }
+    void loadSettings() {
+        std::ifstream f(kSettingsPath);
+        if (!f.is_open()) return;
+        json j;
+        try { f >> j; } catch (...) { return; }
+        mChosenProfile = j.value("chosenProfile", std::string{});
+    }
+
+    void restoreProfileFromSettings() {
+        if (mChosenProfile.empty()) return;
+        for (int i = 0; i < (int)mProfiles.size(); ++i) {
+            if (mProfiles[i] == mChosenProfile) { mProfileIdx = i; return; }
+        }
+        mChosenProfile.clear();
     }
 
     // --- Character picker popup ---
@@ -785,25 +911,34 @@ class TitleScene : public Scene {
         SDL_Texture* previewTex = nullptr;
         SDL_Rect     rect{};
 
-        std::vector<SDL_Texture*> walkFrames;
-        std::vector<fs::path>     walkPaths;
-        int  walkLoadIdx  = 0;    // next walkPaths index to upload
-        int  walkAnimFrame = 0;   // current display frame
+        std::vector<std::string>      walkPathStrs;
+        std::unique_ptr<SpriteSheet>  walkSheet;
+        std::vector<SDL_Rect>         walkRects;
+        bool  walkLoaded    = false;
+        int   walkAnimFrame = 0;
         float walkAnimTimer = 0.f;
         float walkFps       = 8.f;
     };
-    std::vector<CharCard> mCharCards;
+    std::vector<CharCard>        mCharCards;
+    static std::vector<CharCard> sCardCache;
+    static int                   sCachedProfileCount;
     bool                  mCharPickerOpen        = false;
     int                   mCharPickerScroll      = 0;
     int                   mCharPickerMaxScroll   = 0;
     int                   mCharPickerHighlight   = 0;
+    int                   mCharPickerHoverCard   = -1;
+    bool                  mCharPickerHoverClose  = false;
+    bool                  mCharPickerHoverSelect = false;
     SDL_Rect              mCharPickerPanel{};
     SDL_Rect              mCharPickerCloseRect{};
     SDL_Rect              mCharPickerSelectRect{};
     SDL_Rect              mChooseCharBtnRect{};
     SDL_Renderer*         mRenderer = nullptr;
 
+    void preloadCharCards();
+    void stashCharCardCache();
     void openCharPicker();
+    void buildWalkSheet(CharCard& c);
     void renderCharPicker(SDL_Renderer* ren);
 
     // --- Gamepad navigation ---
@@ -943,6 +1078,10 @@ class TitleScene : public Scene {
     std::vector<std::string>   mProfiles;
     int                        mProfileIdx = 0;
     SDL_Rect                   mProfileSelectorBg{};
+    SDL_Rect                   mProfileSpriteArea{};
     std::unique_ptr<Text>      mProfileLabel;
     std::unique_ptr<Text>      mProfileNameText;
+    std::unique_ptr<Rectangle> mChooseCharButton;
+    std::unique_ptr<Text>      mChooseCharBtnText;
+    SDL_Texture*               mChosenPreviewTex = nullptr;
 };

@@ -305,6 +305,25 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
             r.h = std::max(r.h, 4);
             mHBRect = r;
         }
+
+        mHoverBtn = HoverBtn::None;
+        mHoverIndex = -1;
+        if (hit(mSaveBtnRect, mx, my))           mHoverBtn = HoverBtn::Save;
+        else if (hit(mBackBtnRect, mx, my))       mHoverBtn = HoverBtn::Back;
+        else if (hit(mClearSlotRect, mx, my))     mHoverBtn = HoverBtn::Clear;
+        else {
+            for (int i = 0; i < ENEMY_ANIM_SLOT_COUNT; ++i) {
+                if (hit(mFpsBtns[i].plusRect, mx, my))  { mHoverBtn = HoverBtn::FpsPlus;  mHoverIndex = i; break; }
+                if (hit(mFpsBtns[i].minusRect, mx, my)) { mHoverBtn = HoverBtn::FpsMinus; mHoverIndex = i; break; }
+                if (hit(mSlotRowRects[i], mx, my))       { mHoverBtn = HoverBtn::SlotRow;  mHoverIndex = i; break; }
+            }
+            if (mHoverBtn == HoverBtn::None) {
+                for (int i = 0; i < (int)mRoster.size(); ++i) {
+                    if (hit(mRoster[i].loadRect, mx, my)) { mHoverBtn = HoverBtn::RosterLoad; mHoverIndex = i; break; }
+                    if (hit(mRoster[i].delRect, mx, my))  { mHoverBtn = HoverBtn::RosterDel;  mHoverIndex = i; break; }
+                }
+            }
+        }
     }
 
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
@@ -638,9 +657,11 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         bool sel   = (i == mSelectedSlot);
         bool filled = mProfile.HasSlot(slot);
 
-        SDL_Color bg = sel ? SEL_BG : (filled ? SLOT_FILLED : SLOT_EMPTY);
+        bool hRow = (!sel && mHoverBtn == HoverBtn::SlotRow && mHoverIndex == i);
+        SDL_Color bg = sel ? SEL_BG : hRow ? SDL_Color{70, 60, 65, 255} : (filled ? SLOT_FILLED : SLOT_EMPTY);
         fillRect(s, mSlotRowRects[i], bg);
-        outlineRect(s, mSlotRowRects[i], sel ? SDL_Color{255, 120, 100, 255} : PANEL_OUT);
+        outlineRect(s, mSlotRowRects[i], sel ? SDL_Color{255, 120, 100, 255}
+                                        : hRow ? SDL_Color{180, 100, 80, 255} : PANEL_OUT);
 
         drawText(s, EnemyAnimSlotName(slot),
                  mSlotRowRects[i].x + 8,
@@ -663,12 +684,16 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             std::string fpsStr = (curFps > 0.0f)
                 ? std::to_string((int)curFps) + "fps"
                 : "default";
-            fillRect(s, mFpsBtns[i].minusRect, {50, 50, 80, 255});
-            outlineRect(s, mFpsBtns[i].minusRect, {80, 80, 130, 255});
-            drawTextCentered(s, "-", mFpsBtns[i].minusRect, 13, {200, 200, 255, 255});
-            fillRect(s, mFpsBtns[i].plusRect, {50, 50, 80, 255});
-            outlineRect(s, mFpsBtns[i].plusRect, {80, 80, 130, 255});
-            drawTextCentered(s, "+", mFpsBtns[i].plusRect, 13, {200, 200, 255, 255});
+            {
+                bool hMinus = (mHoverBtn == HoverBtn::FpsMinus && mHoverIndex == i);
+                bool hPlus  = (mHoverBtn == HoverBtn::FpsPlus  && mHoverIndex == i);
+                fillRect(s, mFpsBtns[i].minusRect, hMinus ? SDL_Color{70, 70, 120, 255} : SDL_Color{50, 50, 80, 255});
+                outlineRect(s, mFpsBtns[i].minusRect, hMinus ? SDL_Color{120, 120, 200, 255} : SDL_Color{80, 80, 130, 255});
+                drawTextCentered(s, "-", mFpsBtns[i].minusRect, 13, {200, 200, 255, 255});
+                fillRect(s, mFpsBtns[i].plusRect, hPlus ? SDL_Color{70, 70, 120, 255} : SDL_Color{50, 50, 80, 255});
+                outlineRect(s, mFpsBtns[i].plusRect, hPlus ? SDL_Color{120, 120, 200, 255} : SDL_Color{80, 80, 130, 255});
+                drawTextCentered(s, "+", mFpsBtns[i].plusRect, 13, {200, 200, 255, 255});
+            }
             int labelX = mFpsBtns[i].minusRect.x - 2 - (int)fpsStr.size() * 6;
             drawText(s, fpsStr, labelX, mFpsBtns[i].minusRect.y + 2, 10, {160, 170, 200, 255});
         }
@@ -817,9 +842,12 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
                          {mDropZone.x, mDropZone.y, mDropZone.w - 104, mDropZone.h},
                          13, {200, 180, 160, 255});
 
-        fillRect(s, mClearSlotRect, BTN_DEL);
-        outlineRect(s, mClearSlotRect, {200, 80, 80, 255});
-        drawTextCentered(s, "Clear Slot", mClearSlotRect, 12, {255, 200, 200, 255});
+        {
+            bool hClr = (mHoverBtn == HoverBtn::Clear);
+            fillRect(s, mClearSlotRect, hClr ? BTN_CLR_H : BTN_CLR);
+            outlineRect(s, mClearSlotRect, hClr ? SDL_Color{220, 100, 100, 255} : SDL_Color{200, 80, 80, 255});
+            drawTextCentered(s, "Clear Slot", mClearSlotRect, 12, {255, 200, 200, 255});
+        }
     }
 
     if (prev.has_value() && !prev->frames.empty()) {
@@ -855,13 +883,18 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    fillRect(s, mSaveBtnRect, BTN_SAVE);
-    outlineRect(s, mSaveBtnRect, {60, 200, 100, 255});
-    drawTextCentered(s, "Save Enemy", mSaveBtnRect, 16);
-
-    fillRect(s, mBackBtnRect, BTN_BACK);
-    outlineRect(s, mBackBtnRect, {100, 100, 200, 255});
-    drawTextCentered(s, "< Back", mBackBtnRect, 16);
+    {
+        bool hSave = (mHoverBtn == HoverBtn::Save);
+        fillRect(s, mSaveBtnRect, hSave ? BTN_SAVE_H : BTN_SAVE);
+        outlineRect(s, mSaveBtnRect, hSave ? SDL_Color{100, 255, 140, 255} : SDL_Color{60, 200, 100, 255});
+        drawTextCentered(s, "Save Enemy", mSaveBtnRect, 16);
+    }
+    {
+        bool hBack = (mHoverBtn == HoverBtn::Back);
+        fillRect(s, mBackBtnRect, hBack ? BTN_BACK_H : BTN_BACK);
+        outlineRect(s, mBackBtnRect, hBack ? SDL_Color{150, 150, 255, 255} : SDL_Color{100, 100, 200, 255});
+        drawTextCentered(s, "< Back", mBackBtnRect, 16);
+    }
 
     // --- Right: Roster panel ---
     fillRect(s, mRosterPanel, PANEL_BG);
@@ -879,10 +912,18 @@ void EnemyCreatorScene::Render(Window& window, float /*alpha*/) {
             drawText(s, entry.name, mRosterPanel.x + 10, ry + 4, 15, {255, 220, 200, 255});
             entry.loadRect = {mRosterPanel.x + 4,                    ry + 24, 80, 18};
             entry.delRect  = {mRosterPanel.x + mRosterPanel.w - 54,  ry + 24, 50, 18};
-            fillRect(s, entry.loadRect, BTN_LOAD);
-            drawTextCentered(s, "Load", entry.loadRect, 11);
-            fillRect(s, entry.delRect, BTN_DEL);
-            drawTextCentered(s, "Delete", entry.delRect, 11, {255, 200, 200, 255});
+            {
+                bool hLoad = (mHoverBtn == HoverBtn::RosterLoad && mHoverIndex == i);
+                fillRect(s, entry.loadRect, hLoad ? BTN_LOAD_H : BTN_LOAD);
+                outlineRect(s, entry.loadRect, hLoad ? SDL_Color{255, 180, 100, 255} : SDL_Color{200, 120, 60, 255});
+                drawTextCentered(s, "Load", entry.loadRect, 11);
+            }
+            {
+                bool hDel = (mHoverBtn == HoverBtn::RosterDel && mHoverIndex == i);
+                fillRect(s, entry.delRect, hDel ? BTN_DEL_H : BTN_DEL);
+                outlineRect(s, entry.delRect, hDel ? SDL_Color{255, 100, 100, 255} : SDL_Color{180, 60, 60, 255});
+                drawTextCentered(s, "Delete", entry.delRect, 11, {255, 200, 200, 255});
+            }
             ry += 50;
         }
     }
