@@ -53,6 +53,7 @@ set(SOURCES
     src/Image.cpp
     src/Text.cpp
     src/SpriteSheet.cpp
+    src/AnimCache.cpp
     src/PlayerCreatorScene.cpp
     src/EnemyCreatorScene.cpp
     src/TileAnimCreatorScene.cpp

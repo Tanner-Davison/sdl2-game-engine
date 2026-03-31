@@ -65,6 +65,15 @@
                 "x": 59,
                 "y": 18
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/darkswoosh.wav",
+                    "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.2098214328289032,
+                    "volume": 1.0
+                }
+            ],
             "slot": 5
         },
         {

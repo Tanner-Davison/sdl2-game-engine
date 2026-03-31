@@ -1,11 +1,14 @@
 #include "EditorPalette.hpp"
 #include "AnimatedTile.hpp"
 #include "EditorSurfaceCache.hpp"
+#include "GameScene.hpp"
 #include "LevelData.hpp"
 #include "Text.hpp"
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
+#include <future>
 #include <print>
+#include <thread>
 #include <unordered_map>
 
 namespace fs = std::filesystem;
@@ -158,11 +161,9 @@ void EditorPalette::LoadTileView(const std::string& dir, const Level& level) {
 
     for (const auto& p : files) {
         SDL_Surface* full = EditorSurfaceCache::LoadPNG(p);
-        if (!full)
-            continue;
+        if (!full) continue;
         SDL_SetSurfaceBlendMode(full, SDL_BLENDMODE_BLEND);
         SDL_Surface* thumb = EditorSurfaceCache::MakeThumb(full, PAL_ICON, PAL_ICON);
-
         PaletteItem item;
         item.path     = p.string();
         item.label    = p.stem().string();
@@ -232,13 +233,12 @@ void EditorPalette::LoadBgPalette(const Level& level) {
 
     for (const auto& p : paths) {
         SDL_Surface* full = EditorSurfaceCache::LoadPNG(p);
-        if (!full)
-            continue;
+        if (!full) continue;
         SDL_Surface* thumb = EditorSurfaceCache::MakeThumb(full, thumbW, thumbH);
         SDL_DestroySurface(full);
-        mBgItems.push_back({p.string(), p.stem().string(), thumb});
-
-        if (p.string() == level.background)
+        std::string pathStr = p.string();
+        mBgItems.push_back({pathStr, p.stem().string(), thumb});
+        if (pathStr == level.background)
             mSelectedBg = static_cast<int>(mBgItems.size()) - 1;
     }
 }
@@ -279,11 +279,67 @@ void EditorPalette::SeedCacheForLevel(const Level& level) {
             needed[ts.imagePath] = {ts.imagePath, ts.w, ts.h, IsAnimatedTile(ts.imagePath)};
     }
 
+    std::vector<TileLoad> staticTiles;
     for (auto& [path, info] : needed) {
-        if (info.animated) {
+        if (info.animated)
             SeedAnimatedTile(info.path, info.w, info.h);
-        } else {
-            SeedStaticTile(info.path, info.w, info.h);
+        else
+            staticTiles.push_back(info);
+    }
+
+    if (staticTiles.empty()) return;
+
+    auto& rawCache = GameScene::sRawSurfaceCache;
+
+    struct RawLoad { std::string path; int w; int h; SDL_Surface* conv; };
+
+    const int hw    = std::max(1, (int)std::thread::hardware_concurrency());
+    const int batch = std::max(1, (int)staticTiles.size() / hw);
+
+    std::vector<std::future<std::vector<RawLoad>>> futures;
+    for (int i = 0; i < (int)staticTiles.size(); i += batch) {
+        int end = std::min(i + batch, (int)staticTiles.size());
+        std::vector<TileLoad> slice(staticTiles.begin() + i, staticTiles.begin() + end);
+        futures.push_back(std::async(std::launch::async,
+            [slice = std::move(slice), &rawCache]() {
+                std::vector<RawLoad> out;
+                out.reserve(slice.size());
+                for (const auto& t : slice) {
+                    SDL_Surface* src = nullptr;
+                    if (auto it = rawCache.find(t.path); it != rawCache.end() && it->second)
+                        src = SDL_DuplicateSurface(it->second);
+                    else
+                        src = IMG_Load(t.path.c_str());
+                    if (!src) continue;
+                    SDL_Surface* conv = SDL_ConvertSurface(src, SDL_PIXELFORMAT_ARGB8888);
+                    SDL_DestroySurface(src);
+                    if (conv) out.push_back({t.path, t.w, t.h, conv});
+                }
+                return out;
+            }));
+    }
+
+    for (auto& f : futures) {
+        for (auto& [path, w, h, conv] : f.get()) {
+            SDL_Surface* result = conv;
+            if (conv->w != w || conv->h != h) {
+                SDL_Surface* scaled = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_ARGB8888);
+                if (scaled) {
+                    SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_NONE);
+                    SDL_ScaleMode sm = (w < conv->w || h < conv->h)
+                                     ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_PIXELART;
+                    SDL_BlitSurfaceScaled(conv, nullptr, scaled, nullptr, sm);
+                    SDL_SetSurfaceBlendMode(scaled, SDL_BLENDMODE_BLEND);
+                    SDL_DestroySurface(conv);
+                    result = scaled;
+                } else {
+                    SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
+                }
+            } else {
+                SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
+            }
+            mCache->InsertTileSurface(path, result);
+            mCache->AddExtraTileSurface(result);
         }
     }
 }
@@ -325,7 +381,12 @@ void EditorPalette::SeedAnimatedTile(const std::string& path, int w, int h) {
 }
 
 void EditorPalette::SeedStaticTile(const std::string& path, int w, int h) {
-    SDL_Surface* raw = IMG_Load(path.c_str());
+    auto& rawCache = GameScene::sRawSurfaceCache;
+    SDL_Surface* raw = nullptr;
+    if (auto it = rawCache.find(path); it != rawCache.end() && it->second)
+        raw = SDL_DuplicateSurface(it->second);
+    else
+        raw = IMG_Load(path.c_str());
     if (!raw)
         return;
     SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);

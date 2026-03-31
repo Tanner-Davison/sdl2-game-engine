@@ -47,6 +47,26 @@ class PlayerCreatorScene : public Scene {
     SDL_Texture* mRenderTexture = nullptr;
     void markDirty() { mDirty = true; }
 
+    // Text surface cache: avoids TTF_RenderText_Blended per drawText call.
+    struct TextCacheKey {
+        std::string text;
+        int ptSize;
+        Uint32 color;
+        bool operator==(const TextCacheKey& o) const {
+            return text == o.text && ptSize == o.ptSize && color == o.color;
+        }
+    };
+    struct TextCacheHash {
+        size_t operator()(const TextCacheKey& k) const {
+            size_t h = std::hash<std::string>{}(k.text);
+            h ^= std::hash<int>{}(k.ptSize) << 1;
+            h ^= std::hash<Uint32>{}(k.color) << 2;
+            return h;
+        }
+    };
+    std::unordered_map<TextCacheKey, SDL_Surface*, TextCacheHash> mTextCache;
+    SDL_Surface* getCachedText(const std::string& str, int ptSize, SDL_Color col);
+
     PlayerProfile mProfile;
 
     bool        mNameActive    = false;
@@ -193,12 +213,12 @@ class PlayerCreatorScene : public Scene {
     // --- Draw helpers ---
     static void fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t = 1);
-    static void drawText(SDL_Surface* s, const std::string& str,
-                         int x, int y, int ptSize,
-                         SDL_Color col = {220, 220, 220, 255});
-    static void drawTextCentered(SDL_Surface* s, const std::string& str,
-                                 SDL_Rect r, int ptSize,
-                                 SDL_Color col = {220, 220, 220, 255});
+    void drawText(SDL_Surface* s, const std::string& str,
+                  int x, int y, int ptSize,
+                  SDL_Color col = {220, 220, 220, 255});
+    void drawTextCentered(SDL_Surface* s, const std::string& str,
+                          SDL_Rect r, int ptSize,
+                          SDL_Color col = {220, 220, 220, 255});
     static void blitScaled(SDL_Surface* dst, SDL_Surface* src, SDL_Rect dstRect);
     static void blitScaledRegion(SDL_Surface* dst, SDL_Surface* src,
                                  const SDL_Rect* srcRect, SDL_Rect dstRect);

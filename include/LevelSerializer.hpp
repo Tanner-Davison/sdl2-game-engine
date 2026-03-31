@@ -1,4 +1,5 @@
 #pragma once
+#include "LevelBinary.hpp"
 #include "LevelData.hpp"
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -114,6 +115,9 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
     }
     file << j.dump(4);
     std::print("Level saved: {}\n", path);
+
+    flvl::SaveLevelBin(level, flvl::BinPath(path));
+
     return true;
 }
 

@@ -4,6 +4,7 @@
 #include "Image.hpp"
 #include "LevelData.hpp"
 #include "LevelSerializer.hpp"
+#include "LevelBinary.hpp"
 #include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
@@ -134,6 +135,8 @@ class GameScene : public Scene {
     void RenderTurrets(SDL_Renderer* ren, int W, int H);
     void RenderShield(SDL_Renderer* ren, int W, int H);
     void RenderTurretPowerUp(SDL_Renderer* ren, int W, int H);
+
+    static void PreloadRawSurfaces(const Level& level);
 
     SpatialGrid mTileGrid{64.0f};
     SDL_Gamepad* mCachedPad = nullptr;

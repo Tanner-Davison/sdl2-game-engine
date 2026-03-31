@@ -14,7 +14,9 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <future>
 #include <print>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 namespace fs = std::filesystem;
@@ -112,6 +114,53 @@ void GameScene::ClearTextureCache() {
     sRawSurfaceCache.clear();
 }
 
+void GameScene::PreloadRawSurfaces(const Level& level) {
+    std::unordered_set<std::string> seen;
+    std::vector<std::string> pending;
+
+    auto enqueue = [&](const std::string& p) {
+        if (!p.empty() && !seen.count(p) && !sRawSurfaceCache.count(p)) {
+            seen.insert(p);
+            pending.push_back(p);
+        }
+    };
+
+    for (const auto& ts : level.tiles) enqueue(ts.imagePath);
+    enqueue(level.background);
+    for (const auto& pl : level.parallaxLayers) enqueue(pl.imagePath);
+
+    if (pending.empty()) return;
+
+    const int hw = std::max(1, (int)std::thread::hardware_concurrency());
+    const int batch = std::max(1, (int)pending.size() / hw);
+
+    std::vector<std::future<std::vector<std::pair<std::string, SDL_Surface*>>>> futures;
+    for (int i = 0; i < (int)pending.size(); i += batch) {
+        int end = std::min(i + batch, (int)pending.size());
+        std::vector<std::string> slice(pending.begin() + i, pending.begin() + end);
+        futures.push_back(std::async(std::launch::async, [slice = std::move(slice)]() {
+            std::vector<std::pair<std::string, SDL_Surface*>> out;
+            out.reserve(slice.size());
+            for (const auto& p : slice) {
+                SDL_Surface* raw = IMG_Load(p.c_str());
+                if (!raw) continue;
+                SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
+                SDL_DestroySurface(raw);
+                if (conv) SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
+                out.emplace_back(p, conv);
+            }
+            return out;
+        }));
+    }
+
+    for (auto& f : futures)
+        for (auto& [p, s] : f.get())
+            if (s) sRawSurfaceCache.emplace(p, s);
+
+    std::print("PreloadRawSurfaces: {} assets across {} threads\n",
+               pending.size(), std::min(hw, (int)pending.size()));
+}
+
 // --- Construction ---
 GameScene::GameScene(const std::string& levelPath,
                      bool               fromEditor,
@@ -128,8 +177,13 @@ void GameScene::Load(Window& window) {
     mDeathAnimTimer   = 0.0f;
     SDL_Renderer* ren = window.GetRenderer();
 
-    if (!mLevelPath.empty())
-        LoadLevel(mLevelPath, mLevel);
+    if (!mLevelPath.empty()) {
+        std::string binPath = flvl::BinPath(mLevelPath);
+        if (!flvl::LoadLevelBin(binPath, mLevel))
+            LoadLevel(mLevelPath, mLevel);
+    }
+
+    PreloadRawSurfaces(mLevel);
 
     PlayerProfile profile;
     bool useProfile = !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, profile);

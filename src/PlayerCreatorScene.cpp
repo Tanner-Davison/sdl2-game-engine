@@ -50,6 +50,8 @@ void PlayerCreatorScene::Unload() {
     stopTextInput();
     if (mRenderTexture) { SDL_DestroyTexture(mRenderTexture); mRenderTexture = nullptr; }
     if (mRenderSurface) { SDL_DestroySurface(mRenderSurface); mRenderSurface = nullptr; }
+    for (auto& [k, s] : mTextCache) if (s) SDL_DestroySurface(s);
+    mTextCache.clear();
 }
 
 // --- Layout ---
@@ -255,11 +257,17 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
         return true;
     }
 
+    auto ensurePreview = [&](int slot) {
+        if (!mPreviews[slot].has_value() && !mProfile.slots[slot].folderPath.empty())
+            rebuildPreview(slot);
+    };
+
     if (e.type == SDL_EVENT_KEY_DOWN) {
         if (e.key.key == SDLK_DOWN || e.key.key == SDLK_S) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mSelectedSlot = (mSelectedSlot + 1) % PLAYER_ANIM_SLOT_COUNT;
             mSelectedSfxFile = 0;
+            ensurePreview(mSelectedSlot);
             initHBFromProfile(mSelectedSlot);
             mAnimFrame = 0; mAnimTimer = 0; mFrameStripScroll = 0;
         }
@@ -267,6 +275,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
             if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
             mSelectedSlot = (mSelectedSlot - 1 + PLAYER_ANIM_SLOT_COUNT) % PLAYER_ANIM_SLOT_COUNT;
             mSelectedSfxFile = 0;
+            ensurePreview(mSelectedSlot);
             initHBFromProfile(mSelectedSlot);
             mAnimFrame = 0; mAnimTimer = 0; mFrameStripScroll = 0;
         }
@@ -403,6 +412,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
                 if (mHBInitialised && mPreviewCellRect.w > 0) commitHBToProfile(mSelectedSlot);
                 mSelectedSlot = i;
                 mSelectedSfxFile = 0;
+                ensurePreview(mSelectedSlot);
                 initHBFromProfile(mSelectedSlot);
                 mAnimFrame = 0; mAnimTimer = 0;
                 mFrameStripScroll = 0;
@@ -1370,10 +1380,9 @@ void PlayerCreatorScene::loadRosterEntry(int idx) {
         mWidthStr    = mProfile.spriteW > 0 ? std::to_string(mProfile.spriteW) : "120";
         mHeightStr   = mProfile.spriteH > 0 ? std::to_string(mProfile.spriteH) : "160";
         computeLayout();
-        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
-            if (!mProfile.slots[i].folderPath.empty())
-                rebuildPreview(i);
-        }
+        // Only rebuild the selected slot's preview now; others load lazily.
+        if (!mProfile.slots[0].folderPath.empty())
+            rebuildPreview(0);
         mSelectedSlot = 0;
         mSelectedSfxFile = 0;
         recomputePreviewRect();
@@ -1402,12 +1411,12 @@ void PlayerCreatorScene::stopTextInput() {
 // --- Draw helpers ---
 
 void PlayerCreatorScene::fillRect(SDL_Surface* s, SDL_Rect r, SDL_Color c) {
-    const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
+    static const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_ARGB8888);
     SDL_FillSurfaceRect(s, &r, SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a));
 }
 
 void PlayerCreatorScene::outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, int t) {
-    const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(s->format);
+    static const SDL_PixelFormatDetails* fmt = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_ARGB8888);
     Uint32 col = SDL_MapRGBA(fmt, nullptr, c.r, c.g, c.b, c.a);
     SDL_Rect sides[4] = {{r.x,       r.y,       r.w, t},
                          {r.x,       r.y+r.h-t, r.w, t},
@@ -1416,13 +1425,23 @@ void PlayerCreatorScene::outlineRect(SDL_Surface* s, SDL_Rect r, SDL_Color c, in
     for (auto& sr : sides) SDL_FillSurfaceRect(s, &sr, col);
 }
 
+SDL_Surface* PlayerCreatorScene::getCachedText(const std::string& str, int ptSize, SDL_Color col) {
+    Uint32 packed = ((Uint32)col.r << 24) | ((Uint32)col.g << 16) | ((Uint32)col.b << 8) | col.a;
+    TextCacheKey key{str, ptSize, packed};
+    auto it = mTextCache.find(key);
+    if (it != mTextCache.end()) return it->second;
+    TTF_Font* font = FontCache::Get(ptSize);
+    if (!font) return nullptr;
+    SDL_Surface* ts = TTF_RenderText_Blended(font, str.c_str(), 0, col);
+    mTextCache[key] = ts;
+    return ts;
+}
+
 void PlayerCreatorScene::drawText(SDL_Surface* s, const std::string& str,
                                    int x, int y, int ptSize, SDL_Color col) {
     if (str.empty()) return;
-    TTF_Font* font = FontCache::Get(ptSize);
-    if (!font) return;
-    SDL_Surface* ts = TTF_RenderText_Blended(font, str.c_str(), 0, col);
-    if (ts) { SDL_Rect dst = {x, y, ts->w, ts->h}; SDL_BlitSurface(ts, nullptr, s, &dst); SDL_DestroySurface(ts); }
+    SDL_Surface* ts = getCachedText(str, ptSize, col);
+    if (ts) { SDL_Rect dst = {x, y, ts->w, ts->h}; SDL_BlitSurface(ts, nullptr, s, &dst); }
 }
 
 void PlayerCreatorScene::drawTextCentered(SDL_Surface* s, const std::string& str,
