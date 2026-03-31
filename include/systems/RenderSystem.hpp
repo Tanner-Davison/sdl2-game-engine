@@ -8,12 +8,14 @@
 
 // camX/camY: viewport top-left. vw/vh: viewport size (0 = auto-query).
 // sortedTiles: pre-sorted from Spawn(); nullptr = build inline.
+// sortedFrontProps: pre-sorted front-prop list; nullptr = build inline.
 // alpha: fixed-step interpolation factor for smooth rendering.
 inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                          float camX = 0.0f, float camY = 0.0f,
                          int vw = 0, int vh = 0,
                          const std::vector<entt::entity>* sortedTiles = nullptr,
-                         float alpha = 1.0f) {
+                         float alpha = 1.0f,
+                         const std::vector<entt::entity>* sortedFrontProps = nullptr) {
     if (vw == 0 || vh == 0)
         SDL_GetRenderOutputSize(renderer, &vw, &vh);
 
@@ -24,26 +26,10 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
                wy      >= camY + vh;
     };
 
-    // --- Pass 1: tiles in spawn order ---
-    {
-        std::vector<entt::entity> localTiles;
-        const std::vector<entt::entity>* tiles = sortedTiles;
-        if (!tiles) {
-            auto tileView   = reg.view<Transform, Renderable, AnimationState, TileTag>();
-            auto ladderView = reg.view<Transform, Renderable, AnimationState, LadderTag>();
-            auto propView   = reg.view<Transform, Renderable, AnimationState, PropTag>();
-            localTiles.reserve(tileView.size_hint() + ladderView.size_hint() + propView.size_hint());
-            for (auto e : tileView)   localTiles.push_back(e);
-            for (auto e : ladderView) localTiles.push_back(e);
-            for (auto e : propView)   localTiles.push_back(e);
-            std::sort(localTiles.begin(), localTiles.end());
-            tiles = &localTiles;
-        }
-
-        for (auto entity : *tiles) {
-            // Destroyed action tiles may still be in the sorted list.
+    // Helper: render a sorted entity list (tiles / props)
+    auto renderTileList = [&](const std::vector<entt::entity>& list) {
+        for (auto entity : list) {
             if (!reg.valid(entity)) continue;
-
             auto* rp   = reg.try_get<Renderable>(entity);
             auto* tp   = reg.try_get<Transform>(entity);
             auto* anip = reg.try_get<AnimationState>(entity);
@@ -63,7 +49,6 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
 
             SDL_FRect dst = {t.x - camX, t.y - camY, (float)tDrawW, (float)tDrawH};
 
-            // Spin rotation for floating tiles
             double angle = 0.0;
             if (const auto* fs = reg.try_get<FloatState>(entity))
                 angle = (double)fs->spinAngle;
@@ -71,14 +56,31 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             SDL_FRect srcF = {(float)src.x, (float)src.y, (float)src.w, (float)src.h};
             SDL_RenderTextureRotated(renderer, r.sheet, &srcF, &dst, angle, nullptr, SDL_FLIP_NONE);
 
-            // HitFlash overlay
             if (const auto* hf = reg.try_get<HitFlash>(entity)) {
                 float frac  = hf->timer / hf->duration;
-                Uint8 alpha = (Uint8)(frac * 160.0f);
-                SDL_SetRenderDrawColor(renderer, 220, 30, 30, alpha);
+                Uint8 a     = (Uint8)(frac * 160.0f);
+                SDL_SetRenderDrawColor(renderer, 220, 30, 30, a);
                 SDL_RenderFillRect(renderer, &dst);
             }
         }
+    };
+
+    // --- Pass 1: tiles + ladders + behind-props in spawn order ---
+    {
+        std::vector<entt::entity> localTiles;
+        const std::vector<entt::entity>* tiles = sortedTiles;
+        if (!tiles) {
+            auto tileView   = reg.view<Transform, Renderable, AnimationState, TileTag>();
+            auto ladderView = reg.view<Transform, Renderable, AnimationState, LadderTag>();
+            auto propView   = reg.view<Transform, Renderable, AnimationState, PropTag>();
+            localTiles.reserve(tileView.size_hint() + ladderView.size_hint() + propView.size_hint());
+            for (auto e : tileView)   localTiles.push_back(e);
+            for (auto e : ladderView) localTiles.push_back(e);
+            for (auto e : propView)   localTiles.push_back(e);
+            std::sort(localTiles.begin(), localTiles.end());
+            tiles = &localTiles;
+        }
+        renderTileList(*tiles);
     }
 
     // --- Pass 2: player, enemies, coins ---
@@ -90,7 +92,7 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
     };
 
     auto view = reg.view<Transform, Renderable, AnimationState>(
-        entt::exclude<TileTag, LadderTag, PropTag>);
+        entt::exclude<TileTag, LadderTag, PropTag, PropFrontTag>);
 
     view.each([&](entt::entity entity, const Transform& t, Renderable& r,
                   const AnimationState& anim) {
@@ -189,7 +191,21 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
             SDL_SetTextureColorMod(r.sheet, 255, 255, 255);
     });
 
-    // --- Pass 3: enemy health bars ---
+    // --- Pass 3: front-props (rendered over the player) ---
+    {
+        std::vector<entt::entity> localFrontProps;
+        const std::vector<entt::entity>* frontProps = sortedFrontProps;
+        if (!frontProps) {
+            auto fpView = reg.view<Transform, Renderable, AnimationState, PropFrontTag>();
+            localFrontProps.reserve(fpView.size_hint());
+            for (auto e : fpView) localFrontProps.push_back(e);
+            std::sort(localFrontProps.begin(), localFrontProps.end());
+            frontProps = &localFrontProps;
+        }
+        renderTileList(*frontProps);
+    }
+
+    // --- Pass 4: enemy health bars ---
     {
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 

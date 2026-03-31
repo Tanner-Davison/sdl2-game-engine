@@ -47,9 +47,12 @@ struct MovingPlatformData {
 };
 
 struct PowerUpData {
-    std::string type;             // "antigravity", "turret", etc.
+    std::string type;             // "antigravity", "turret", "healthboost", "teleport", etc.
     float       duration = 15.0f; // seconds the effect lasts
     float       fireRate = 3.0f;  // shots/sec (turret power-up only)
+    float       healthPct = 25.0f; // % of base max HP to add (healthboost only)
+    int         teleportGroup = 0; // shared ID linking a teleport entrance to its destination
+    bool        teleportDest = false; // true = this tile is the destination, not the entrance
     std::string sfxPath;          // optional fire SFX (turret power-up)
 };
 
@@ -76,6 +79,7 @@ struct TileSpawn {
 
     // Mutually exclusive rules enforced by editor tools
     bool prop        = false; // rendered, no collision — background decoration
+    bool propBehind  = false; // when prop=true: false=front (over player), true=behind player
     bool ladder      = false; // rendered, no solid collision — player can climb
     bool hazard      = false; // solid tile that drains HP while player overlaps
     bool antiGravity = false; // floats — bobs in place, no gravity, pushable

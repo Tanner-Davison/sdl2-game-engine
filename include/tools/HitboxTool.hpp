@@ -158,18 +158,22 @@ class HitboxTool final : public EditorTool {
         const auto& t = ctx.level.tiles[mTileIdx];
         float camX = ctx.CamX(), camY = ctx.CamY(), zoom = ctx.Zoom();
 
+        int tileX = static_cast<int>((t.x - camX) * zoom);
+        int tileY = static_cast<int>((t.y - camY) * zoom);
+        int tileW = static_cast<int>(t.w * zoom);
+        int tileH = static_cast<int>(t.h * zoom);
+
         int hx = static_cast<int>((t.x - camX + t.hitbox->offX) * zoom);
         int hy = static_cast<int>((t.y - camY + t.hitbox->offY) * zoom);
         int hw = static_cast<int>(t.hitbox->w * zoom);
         int hh = static_cast<int>(t.hitbox->h * zoom);
 
-        EditorToolContext::DrawRect(screen, {hx, hy, hw, hh}, {80, 160, 255, 40});
+        // Semi-transparent gray over the full tile — tile stays visible underneath
+        EditorToolContext::DrawRect(screen, {tileX, tileY, tileW, tileH}, {20, 20, 30, 100});
+        EditorToolContext::DrawOutline(screen, {tileX, tileY, tileW, tileH}, {255, 255, 255, 80}, 1);
+        // Hitbox region: light blue tint so it pops against the dimmed tile
+        EditorToolContext::DrawRect(screen, {hx, hy, hw, hh}, {60, 140, 255, 30});
         EditorToolContext::DrawOutline(screen, {hx, hy, hw, hh}, {80, 180, 255, 255}, 2);
-        // Faint tile outline for reference
-        EditorToolContext::DrawOutline(screen,
-            {static_cast<int>((t.x - camX) * zoom), static_cast<int>((t.y - camY) * zoom),
-             static_cast<int>(t.w * zoom), static_cast<int>(t.h * zoom)},
-            {255, 255, 255, 60}, 1);
 
         constexpr int HS = 10;
         constexpr SDL_Color hcNorm = {80, 180, 255, 220};

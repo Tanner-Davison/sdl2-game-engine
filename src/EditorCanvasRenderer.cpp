@@ -5,6 +5,7 @@
 #include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <print>
 #include <string>
 
@@ -276,7 +277,13 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
                 blitBadge(badge(label, fg), bx + 2, tsy + 2);
                 bx += BW + GAP;
             };
-            if (t.prop)   drawBadge("P", {0, 180, 0, 210},       {255, 255, 255, 255});
+            if (t.prop) {
+                const char* pLabel = t.propBehind ? "PB" : "PF";
+                int pw = (int)std::strlen(pLabel) * 6 + 4;
+                DrawRect(screen, {bx, tsy + 2, pw, BH}, {0, 180, 0, 210});
+                blitBadge(badge(pLabel, {255, 255, 255, 255}), bx + 2, tsy + 2);
+                bx += pw + GAP;
+            }
             if (t.ladder) drawBadge("L", {0, 160, 180, 210},      {255, 255, 255, 255});
             if (t.HasAction()) {
                 std::string ab = "A";
@@ -366,11 +373,11 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
         }
 
         if (t.HasSlope()) {
-            int riseH = (int)(t.h * t.slope->heightFrac);
+            int riseH = (int)(tsh * t.slope->heightFrac);
             int highY = tsy, lowY = tsy + riseH;
             int lx0, ly0, lx1, ly1;
             if (t.slope->type == SlopeType::DiagUpLeft) {
-                lx0 = tsx;      ly0 = lowY;
+                lx0 = tsx;       ly0 = lowY;
                 lx1 = tsx + tsw; ly1 = highY;
             } else {
                 lx0 = tsx;       ly0 = highY;
@@ -379,10 +386,11 @@ void EditorCanvasRenderer::RenderTiles(SDL_Surface* screen, int canvasW, int too
             int ddx = lx1 - lx0, ddy = ly1 - ly0;
             int steps = std::max(std::abs(ddx), std::abs(ddy));
             if (steps > 0) {
+                int dotSz = std::max(1, (int)(2 * zoom));
                 float ssx = (float)ddx / steps, ssy = (float)ddy / steps;
                 float ccx = (float)lx0,         ccy = (float)ly0;
                 for (int s = 0; s <= steps; ++s) {
-                    DrawRect(screen, {(int)ccx, (int)ccy, 2, 2}, {255, 220, 50, 220});
+                    DrawRect(screen, {(int)ccx, (int)ccy, dotSz, dotSz}, {255, 220, 50, 220});
                     ccx += ssx; ccy += ssy;
                 }
             }

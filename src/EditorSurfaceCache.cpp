@@ -4,8 +4,11 @@
 #include "Text.hpp"
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
+
+std::unordered_map<std::string, SDL_Surface*> EditorSurfaceCache::sSeededCache;
 
 // ---------------------------------------------------------------------------
 // Destructor — frees all owned surfaces
@@ -56,7 +59,9 @@ SDL_Surface* EditorSurfaceCache::LoadPNG(const fs::path& p) {
 
 SDL_Surface* EditorSurfaceCache::FindTileSurface(const std::string& path) const {
     auto it = mTileSurfaceCache.find(path);
-    return (it != mTileSurfaceCache.end()) ? it->second : nullptr;
+    if (it != mTileSurfaceCache.end()) return it->second;
+    auto sit = sSeededCache.find(path);
+    return (sit != sSeededCache.end()) ? sit->second : nullptr;
 }
 
 void EditorSurfaceCache::InsertTileSurface(const std::string& path, SDL_Surface* surf) {
@@ -64,7 +69,7 @@ void EditorSurfaceCache::InsertTileSurface(const std::string& path, SDL_Surface*
 }
 
 bool EditorSurfaceCache::HasTileSurface(const std::string& path) const {
-    return mTileSurfaceCache.count(path) > 0;
+    return mTileSurfaceCache.count(path) > 0 || sSeededCache.count(path) > 0;
 }
 
 void EditorSurfaceCache::ClearTileSurfaceCache() {
@@ -174,6 +179,26 @@ SDL_Surface* EditorSurfaceCache::LoadAndCache(const std::string& path) {
     InsertTileSurface(path, surf);
     AddExtraTileSurface(surf);
     return surf;
+}
+
+// ---------------------------------------------------------------------------
+// Static stash — seeded surfaces survive scene teardown
+// ---------------------------------------------------------------------------
+
+void EditorSurfaceCache::StashSeededSurfaces() {
+    std::unordered_set<SDL_Surface*> extras(mExtraTileSurfaces.begin(),
+                                            mExtraTileSurfaces.end());
+    for (const auto& [path, surf] : mTileSurfaceCache) {
+        if (extras.count(surf) && !sSeededCache.count(path))
+            sSeededCache[path] = surf;
+    }
+    mExtraTileSurfaces.clear();
+}
+
+void EditorSurfaceCache::ClearStash() {
+    for (auto& [path, surf] : sSeededCache)
+        if (surf) SDL_DestroySurface(surf);
+    sSeededCache.clear();
 }
 
 // ---------------------------------------------------------------------------

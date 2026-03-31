@@ -241,7 +241,8 @@ struct EnemyAnimData {
 
 struct TileTag {};
 struct LadderTag {};
-struct PropTag {};
+struct PropTag {};       // prop rendered behind the player (Pass 1)
+struct PropFrontTag {};  // prop rendered in front of the player (Pass 3)
 struct HazardTag {};
 
 struct FloatTag {};
@@ -278,13 +279,33 @@ enum class PowerUpType {
     None,
     AntiGravity,
     Turret,
+    HealthBoost,
+    Teleport,
 };
 
 struct PowerUpTag {
-    PowerUpType type     = PowerUpType::None;
-    float       duration = 15.0f;
-    float       fireRate = 3.0f;
+    PowerUpType type      = PowerUpType::None;
+    float       duration  = 15.0f;
+    float       fireRate  = 3.0f;
+    float       healthPct = 25.0f;
+    int         teleportGroup = 0;
     std::string sfxPath;
+};
+
+// Marks a tile as a teleport entrance. On player overlap, moves player to the
+// matching TeleportDestTag with the same group ID.
+struct TeleportEntranceTag {
+    int group = 0;
+};
+
+// Marks a tile as a teleport destination (prop, no collision).
+struct TeleportDestTag {
+    int group = 0;
+};
+
+// Attached to the player after teleporting to prevent re-trigger.
+struct TeleportCooldown {
+    float remaining = 0.3f;
 };
 
 struct ActivePowerUp {

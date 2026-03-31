@@ -104,6 +104,9 @@ class EditorPalette {
 
     void Clear();
 
+    void StashTileItems();
+    bool RestoreTileItems(const std::string& dir, const Level& level);
+
   private:
     EditorSurfaceCache* mCache      = nullptr;
     SDL_Surface*        mFolderIcon = nullptr;
@@ -131,4 +134,9 @@ class EditorPalette {
     void SeedCacheForLevel(const Level& level);
     void SeedAnimatedTile(const std::string& path, int w, int h);
     void SeedStaticTile(const std::string& path, int w, int h);
+
+    static std::vector<PaletteItem> sStashedItems;
+    static std::string              sStashedDir;
+    static int                      sStashedSelectedTile;
+    static int                      sStashedScroll;
 };

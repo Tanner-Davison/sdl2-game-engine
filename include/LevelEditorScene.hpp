@@ -192,7 +192,7 @@ class LevelEditorScene : public Scene {
     std::vector<std::unique_ptr<Image>>     mParallaxImages;
     void RebuildParallaxImages();
     std::unique_ptr<SpriteSheet> enemySheet;
-    SDL_Surface*                 mFolderIcon = nullptr;
+    static SDL_Surface*          mFolderIcon;
 
     // Moving-platform placement state (popup state lives in mPopups)
     std::vector<int> mMovPlatIndices;
@@ -292,4 +292,10 @@ class LevelEditorScene : public Scene {
     std::string mMusicConfirmNewPath;
     SDL_Rect    mMusicConfirmYes{};
     SDL_Rect    mMusicConfirmNo{};
+
+    // Teleport linking: after placing a teleport entrance, the next click
+    // on a tile marks it as the destination with the same group.
+    bool mTeleportLinking      = false;
+    int  mTeleportLinkGroup    = 0;
+    int  mTeleportNextGroupId  = 1;
 };

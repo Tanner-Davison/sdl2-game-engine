@@ -10,6 +10,11 @@
 
 namespace fs = std::filesystem;
 
+std::vector<EditorPalette::PaletteItem> EditorPalette::sStashedItems;
+std::string                             EditorPalette::sStashedDir;
+int                                     EditorPalette::sStashedSelectedTile = 0;
+int                                     EditorPalette::sStashedScroll       = 0;
+
 // --- Destruction / cleanup ---
 
 EditorPalette::~EditorPalette() {
@@ -46,6 +51,32 @@ void EditorPalette::FreeBgItems() {
 void EditorPalette::Init(EditorSurfaceCache& cache, SDL_Surface* folderIcon) {
     mCache      = &cache;
     mFolderIcon = folderIcon;
+}
+
+// --- Palette stash (survives scene teardown) ---
+
+void EditorPalette::StashTileItems() {
+    sStashedDir          = mTileCurrentDir;
+    sStashedSelectedTile = mSelectedTile;
+    sStashedScroll       = mPaletteScroll;
+    sStashedItems        = std::move(mPaletteItems);
+}
+
+bool EditorPalette::RestoreTileItems(const std::string& dir, const Level& level) {
+    if (sStashedDir != dir || sStashedItems.empty())
+        return false;
+    mTileCurrentDir = sStashedDir;
+    mSelectedTile   = sStashedSelectedTile;
+    mPaletteScroll  = sStashedScroll;
+    mPaletteItems   = std::move(sStashedItems);
+    sStashedDir.clear();
+
+    mCache->ClearTileSurfaceCache();
+    for (const auto& item : mPaletteItems)
+        if (!item.isFolder && item.full)
+            mCache->InsertTileSurface(item.path, item.full);
+    SeedCacheForLevel(level);
+    return true;
 }
 
 // --- Tile palette ---

@@ -5,10 +5,10 @@
 
 // --- Player stats ---
 
-inline constexpr float PLAYER_HIT_DAMAGE       = 15.0f;
-inline constexpr float HAZARD_DAMAGE_PER_SEC   = 30.0f;
-inline constexpr float PLAYER_INVINCIBILITY    = 1.5f;
-inline constexpr float PLAYER_MAX_HEALTH       = 100.0f;
+inline constexpr float PLAYER_HIT_DAMAGE     = 15.0f;
+inline constexpr float HAZARD_DAMAGE_PER_SEC = 30.0f;
+inline constexpr float PLAYER_INVINCIBILITY  = 1.5f;
+inline constexpr float PLAYER_MAX_HEALTH     = 100.0f;
 
 inline constexpr int PLAYER_SPRITE_WIDTH  = 120;
 inline constexpr int PLAYER_SPRITE_HEIGHT = 160;
@@ -47,7 +47,7 @@ inline constexpr int SLIME_SPRITE_HEIGHT = 26;
 
 inline constexpr float GRAVITY_DURATION   = 5.0f;
 inline constexpr float GRAVITY_FORCE      = 1000.0f;
-inline constexpr float JUMP_FORCE         = 450.0f;
+inline constexpr float JUMP_FORCE         = 500.0f;
 inline constexpr float MAX_FALL_SPEED     = 1500.0f;
 inline constexpr float PLAYER_SPEED       = 250.0f;
 inline constexpr float CLIMB_SPEED        = 350.0f;
@@ -130,9 +130,12 @@ struct Camera {
         }
     }
 
-    void Update(float playerCX, float playerCY,
-                int viewW, int viewH,
-                float levelW, float levelH,
+    void Update(float playerCX,
+                float playerCY,
+                int   viewW,
+                int   viewH,
+                float levelW,
+                float levelH,
                 float dt) {
         float halfW = viewW * 0.5f;
         float halfH = viewH * 0.5f;

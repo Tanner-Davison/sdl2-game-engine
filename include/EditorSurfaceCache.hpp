@@ -31,6 +31,10 @@ class EditorSurfaceCache {
     bool         HasTileSurface(const std::string& path) const;
     void         ClearTileSurfaceCache();
 
+    // Move seeded (extra) tile surfaces to static storage so they survive scene teardown.
+    void StashSeededSurfaces();
+    static void ClearStash();
+
     // Returns cached surface, loading from disk on first call for a given path.
     SDL_Surface* LoadAndCache(const std::string& path);
 
@@ -59,4 +63,6 @@ class EditorSurfaceCache {
     std::unordered_map<std::string, SDL_Surface*> mBadgeCache;
 
     std::unordered_map<std::string, SDL_Surface*> mDestroyAnimThumbCache;
+
+    static std::unordered_map<std::string, SDL_Surface*> sSeededCache;
 };

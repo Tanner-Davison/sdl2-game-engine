@@ -15,8 +15,8 @@ inline SDL_Gamepad* GetFirstGamepad() {
     return pad;
 }
 
-inline void GamepadPollSystem(entt::registry& reg) {
-    SDL_Gamepad* pad = GetFirstGamepad();
+inline void GamepadPollSystem(entt::registry& reg, SDL_Gamepad* cachedPad = nullptr) {
+    SDL_Gamepad* pad = cachedPad ? cachedPad : GetFirstGamepad();
     if (!pad) return;
 
     constexpr float DEAD_ZONE       = 0.25f;

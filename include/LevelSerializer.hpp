@@ -54,6 +54,7 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
             {"img",         t.imagePath},
             {"rotation",    t.rotation},
             {"prop",        t.prop},
+            {"propBehind",  t.propBehind},
             {"ladder",      t.ladder},
             {"hazard",      t.hazard},
             {"antiGravity", t.antiGravity},
@@ -87,6 +88,9 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
             {"powerUpType",     t.HasPowerUp() ? t.powerUp->type     : std::string{}},
             {"powerUpDuration", t.HasPowerUp() ? t.powerUp->duration : 15.0f},
             {"powerUpFireRate", t.HasPowerUp() ? t.powerUp->fireRate : 3.0f},
+            {"powerUpHealthPct",t.HasPowerUp() ? t.powerUp->healthPct : 25.0f},
+            {"powerUpTpGroup",  t.HasPowerUp() ? t.powerUp->teleportGroup : 0},
+            {"powerUpTpDest",   t.HasPowerUp() ? t.powerUp->teleportDest  : false},
             {"powerUpSfx",      t.HasPowerUp() ? t.powerUp->sfxPath  : std::string{}},
             // Shooter
             {"shooter",         t.HasShooter()},
@@ -145,32 +149,47 @@ inline bool LoadLevel(const std::string& path, Level& out) {
     }
 
     out.enemies.clear();
-    for (const auto& e : j.value("enemies", json::array())) {
-        EnemySpawn es;
-        es.x           = e.value("x", 0.0f);
-        es.y           = e.value("y", 0.0f);
-        es.speed       = e.value("speed", 120.0f);
-        es.antiGravity = e.value("antiGravity", false);
-        es.startLeft   = e.value("startLeft", false);
-        es.enemyType   = e.value("enemyType", std::string{});
-        out.enemies.push_back(std::move(es));
+    if (j.contains("enemies")) {
+        const auto& enemies = j["enemies"];
+        out.enemies.reserve(enemies.size());
+        for (const auto& e : enemies) {
+            EnemySpawn es;
+            es.x           = e.value("x", 0.0f);
+            es.y           = e.value("y", 0.0f);
+            es.speed       = e.value("speed", 120.0f);
+            es.antiGravity = e.value("antiGravity", false);
+            es.startLeft   = e.value("startLeft", false);
+            es.enemyType   = e.value("enemyType", std::string{});
+            out.enemies.push_back(std::move(es));
+        }
     }
 
     out.musicPath   = j.value("music", std::string{});
     out.musicVolume = j.value("musicVolume", 1.0f);
 
     out.parallaxLayers.clear();
-    for (const auto& pl : j.value("parallaxLayers", json::array())) {
-        ParallaxLayer layer;
-        layer.imagePath    = pl.value("img", std::string{});
-        layer.scrollFactor = pl.value("scrollFactor", 0.5f);
-        layer.yOffset      = pl.value("yOffset", 0.0f);
-        if (!layer.imagePath.empty())
-            out.parallaxLayers.push_back(std::move(layer));
+    if (j.contains("parallaxLayers")) {
+        const auto& layers = j["parallaxLayers"];
+        out.parallaxLayers.reserve(layers.size());
+        for (const auto& pl : layers) {
+            ParallaxLayer layer;
+            layer.imagePath    = pl.value("img", std::string{});
+            layer.scrollFactor = pl.value("scrollFactor", 0.5f);
+            layer.yOffset      = pl.value("yOffset", 0.0f);
+            if (!layer.imagePath.empty())
+                out.parallaxLayers.push_back(std::move(layer));
+        }
     }
 
     out.tiles.clear();
-    for (const auto& t : j.value("tiles", json::array())) {
+    if (!j.contains("tiles")) {
+        std::print("Level loaded: {} ({} enemies, {} tiles)\n",
+                   out.name, out.enemies.size(), out.tiles.size());
+        return true;
+    }
+    const auto& tiles = j["tiles"];
+    out.tiles.reserve(tiles.size());
+    for (const auto& t : tiles) {
         TileSpawn ts;
         ts.x          = t.value("x", 0.0f);
         ts.y          = t.value("y", 0.0f);
@@ -179,6 +198,7 @@ inline bool LoadLevel(const std::string& path, Level& out) {
         ts.imagePath  = t.value("img", std::string{});
         ts.rotation   = t.value("rotation", 0);
         ts.prop       = t.value("prop", false);
+        ts.propBehind = t.value("propBehind", false);
         ts.ladder     = t.value("ladder", false);
         ts.hazard     = t.value("hazard", false);
         ts.antiGravity = t.value("antiGravity", false);
@@ -233,8 +253,11 @@ inline bool LoadLevel(const std::string& path, Level& out) {
             PowerUpData pu;
             pu.type     = t.value("powerUpType", std::string{});
             pu.duration = t.value("powerUpDuration", 15.0f);
-            pu.fireRate = t.value("powerUpFireRate", 3.0f);
-            pu.sfxPath  = t.value("powerUpSfx", std::string{});
+            pu.fireRate      = t.value("powerUpFireRate", 3.0f);
+            pu.healthPct     = t.value("powerUpHealthPct", 25.0f);
+            pu.teleportGroup = t.value("powerUpTpGroup", 0);
+            pu.teleportDest  = t.value("powerUpTpDest", false);
+            pu.sfxPath       = t.value("powerUpSfx", std::string{});
             ts.powerUp = pu;
         }
 

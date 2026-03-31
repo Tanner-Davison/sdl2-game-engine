@@ -7,6 +7,7 @@
 #include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
 #include "Scene.hpp"
+#include "SpatialGrid.hpp"
 #include "SpriteSheet.hpp"
 #include "GameConfig.hpp"
 #include "Systems.hpp"
@@ -30,6 +31,7 @@ class GameScene : public Scene {
 
     void Load(Window& window) override;
     void Unload() override;
+    static void ClearTextureCache();
     bool HandleEvent(SDL_Event& e) override;
     void Update(float dt) override;
     void Render(Window& window, float alpha = 1.0f) override;
@@ -92,14 +94,16 @@ class GameScene : public Scene {
     // Custom enemy type sprite sheets — kept alive so GPU textures remain valid
     std::vector<std::unique_ptr<SpriteSheet>> mEnemySpriteSheets;
     SDL_Texture*                 mBulletTex = nullptr;
-    std::vector<SDL_Texture*>    tileScaledTextures;
-    // Tile texture cache: key = "path|WxH|rROT" → non-owning ptr into tileScaledTextures.
-    // Populated in Spawn(), never cleared between Respawn() calls — only in Unload().
-    std::unordered_map<std::string, SDL_Texture*> tileTextureCache;
-    // Animated tile frame textures, keyed by entity (parallel to AnimationState frame count)
+    // Static tile texture cache — survives across scene instances so replaying a level
+    // or loading a level sharing assets skips all disk I/O and GPU uploads.
+    static std::vector<SDL_Texture*>                     sTileScaledTextures;
+    static std::unordered_map<std::string, SDL_Texture*> sTileTextureCache;
+    SDL_Texture* GetCachedTexture(SDL_Renderer* ren, const std::string& path,
+                                  int w, int h, int rot = 0);
     std::unordered_map<entt::entity, std::vector<SDL_Texture*>> tileAnimFrameMap;
     // Pre-sorted render list for tile Pass 1 (avoids per-frame allocation + sort in RenderSystem)
     std::vector<entt::entity> mSortedTileRenderList;
+    std::vector<entt::entity> mSortedFrontPropList;
     std::vector<SDL_Rect>        walkFrames;
     std::vector<SDL_Rect>        jumpFrames;
     std::vector<SDL_Rect>        idleFrames;
@@ -130,4 +134,12 @@ class GameScene : public Scene {
     void RenderTurrets(SDL_Renderer* ren, int W, int H);
     void RenderShield(SDL_Renderer* ren, int W, int H);
     void RenderTurretPowerUp(SDL_Renderer* ren, int W, int H);
+
+    SpatialGrid mTileGrid{64.0f};
+    SDL_Gamepad* mCachedPad = nullptr;
+
+  public:
+    // Raw surface cache: avoids redundant IMG_Load for the same path.
+    static std::unordered_map<std::string, SDL_Surface*> sRawSurfaceCache;
+    static SDL_Surface* GetRawSurface(const std::string& path);
 };

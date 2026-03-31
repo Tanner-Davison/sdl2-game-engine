@@ -41,6 +41,12 @@ class PlayerCreatorScene : public Scene {
     int  mH              = 0;
     SDL_Window* mSDLWin  = nullptr;
 
+    // Dirty flag: when true, Render() repaints the CPU surface.
+    bool mDirty          = true;
+    SDL_Surface* mRenderSurface = nullptr;
+    SDL_Texture* mRenderTexture = nullptr;
+    void markDirty() { mDirty = true; }
+
     PlayerProfile mProfile;
 
     bool        mNameActive    = false;

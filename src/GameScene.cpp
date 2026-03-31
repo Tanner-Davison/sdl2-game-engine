@@ -18,58 +18,98 @@
 #include <unordered_map>
 #include <unordered_set>
 namespace fs = std::filesystem;
-// Key: "<path>|<w>x<h>|r<rotation>" → non-owning ptr into tileScaledTextures. Avoids re-uploading on Respawn.
+
+static const std::vector<SDL_Rect> sBulletFrames = {{0, 0, 8, 8}};
+
 static std::string TileCacheKey(const std::string& path, int w, int h, int rot) {
     return path + '|' + std::to_string(w) + 'x' + std::to_string(h) + "|r" +
            std::to_string(rot);
 }
 
-// Returns nullptr on failure. Caller owns the texture.
-static SDL_Texture* LoadScaledTexture(
-    SDL_Renderer* ren, const std::string& path, int tw, int th, int rotation = 0) {
+std::vector<SDL_Texture*>                     GameScene::sTileScaledTextures;
+std::unordered_map<std::string, SDL_Texture*> GameScene::sTileTextureCache;
+std::unordered_map<std::string, SDL_Surface*> GameScene::sRawSurfaceCache;
+
+SDL_Surface* GameScene::GetRawSurface(const std::string& path) {
+    auto it = sRawSurfaceCache.find(path);
+    if (it != sRawSurfaceCache.end())
+        return it->second;
     SDL_Surface* raw = IMG_Load(path.c_str());
     if (!raw) {
         std::print("Failed to load tile: {}\n", path);
         return nullptr;
     }
-
     SDL_Surface* conv = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_ARGB8888);
     SDL_DestroySurface(raw);
-    if (!conv)
+    if (conv)
+        SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
+    sRawSurfaceCache[path] = conv;
+    return conv;
+}
+
+static SDL_Texture* LoadScaledTexture(
+    SDL_Renderer* ren, const std::string& path, int tw, int th, int rotation = 0) {
+    SDL_Surface* src = GameScene::GetRawSurface(path);
+    if (!src)
         return nullptr;
 
-    SDL_SetSurfaceBlendMode(conv, SDL_BLENDMODE_BLEND);
+    // Work on a copy since rotation/scale are destructive.
+    SDL_Surface* work = SDL_DuplicateSurface(src);
+    if (!work)
+        return nullptr;
 
-    // Rotation must happen on CPU before GPU upload.
-    SDL_Surface* final = conv;
+    SDL_SetSurfaceBlendMode(work, SDL_BLENDMODE_BLEND);
+
     if (rotation != 0) {
-        SDL_Surface* rot = RotateSurfaceDeg(conv, rotation);
+        SDL_Surface* rot = RotateSurfaceDeg(work, rotation);
         if (rot) {
-            SDL_DestroySurface(conv);
-            final = rot;
+            SDL_DestroySurface(work);
+            work = rot;
         }
     }
 
-    // Pre-scale on CPU so texture dimensions match renderW/renderH exactly.
-    if (tw > 0 && th > 0 && (final->w != tw || final->h != th)) {
+    if (tw > 0 && th > 0 && (work->w != tw || work->h != th)) {
         SDL_Surface* scaled = SDL_CreateSurface(tw, th, SDL_PIXELFORMAT_ARGB8888);
         if (scaled) {
-            SDL_SetSurfaceBlendMode(final, SDL_BLENDMODE_NONE);
-            SDL_BlitSurfaceScaled(final, nullptr, scaled, nullptr, SDL_SCALEMODE_NEAREST);
-            SDL_DestroySurface(final);
-            final = scaled;
+            SDL_SetSurfaceBlendMode(work, SDL_BLENDMODE_NONE);
+            SDL_BlitSurfaceScaled(work, nullptr, scaled, nullptr, SDL_SCALEMODE_NEAREST);
+            SDL_DestroySurface(work);
+            work = scaled;
         }
     }
 
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, final);
-    SDL_DestroySurface(final);
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, work);
+    SDL_DestroySurface(work);
     if (tex) {
-        // LINEAR for GPU-scaled native-res textures; NEAREST for pre-scaled (crisp pixels).
         SDL_SetTextureScaleMode(tex, (tw <= 0 || th <= 0)
                                          ? SDL_SCALEMODE_LINEAR
                                          : SDL_SCALEMODE_NEAREST);
     }
     return tex;
+}
+
+SDL_Texture* GameScene::GetCachedTexture(SDL_Renderer* ren, const std::string& path,
+                                         int w, int h, int rot) {
+    std::string key = TileCacheKey(path, w, h, rot);
+    auto it = sTileTextureCache.find(key);
+    if (it != sTileTextureCache.end())
+        return it->second;
+    SDL_Texture* tex = LoadScaledTexture(ren, path, w, h, rot);
+    if (tex) {
+        sTileScaledTextures.push_back(tex);
+        sTileTextureCache[key] = tex;
+    }
+    return tex;
+}
+
+void GameScene::ClearTextureCache() {
+    for (auto* t : sTileScaledTextures)
+        SDL_DestroyTexture(t);
+    sTileScaledTextures.clear();
+    sTileTextureCache.clear();
+    for (auto& [k, s] : sRawSurfaceCache)
+        if (s) SDL_DestroySurface(s);
+    sRawSurfaceCache.clear();
 }
 
 // --- Construction ---
@@ -315,12 +355,9 @@ void GameScene::Unload() {
         Audio()->Sfx().UnloadAll();
     }
     reg.clear();
-    for (auto* t : tileScaledTextures)
-        SDL_DestroyTexture(t);
-    tileScaledTextures.clear();
-    tileTextureCache.clear();
     tileAnimFrameMap.clear();
     mSortedTileRenderList.clear();
+    mTileGrid.Clear();
     if (mBulletTex) { SDL_DestroyTexture(mBulletTex); mBulletTex = nullptr; }
     mWindow = nullptr;
 }
@@ -441,24 +478,32 @@ void GameScene::Update(float dt) {
     if (gameOver)
         return;
 
+    // Cache gamepad for this frame to avoid repeated SDL_GetGamepads calls.
+    {
+        int count = 0;
+        SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        mCachedPad = (ids && count > 0) ? SDL_GetGamepadFromID(ids[0]) : nullptr;
+        SDL_free(ids);
+    }
+
+    // Rebuild spatial grid for bullet broadphase.
+    mTileGrid.Build(reg);
+
     if (mPlayerDying) {
         mDeathAnimTimer += dt;
         AnimationSystem(reg, dt);
         mCamera.TickShake(dt);
 
-        {
+        if (mCachedPad) {
             float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
             float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
             if (shakeAmp > 0.1f || punchAmp > 0.1f) {
-                SDL_Gamepad* pad = GetFirstGamepad();
-                if (pad) {
-                    float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
-                    float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
-                    Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
-                    Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
-                    lo = std::max(lo, hi);
-                    SDL_RumbleGamepad(pad, lo, hi, 50);
-                }
+                float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
+                float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
+                Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
+                Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
+                lo = std::max(lo, hi);
+                SDL_RumbleGamepad(mCachedPad, lo, hi, 50);
             }
         }
 
@@ -478,7 +523,7 @@ void GameScene::Update(float dt) {
         return;
     }
 
-    GamepadPollSystem(reg);
+    GamepadPollSystem(reg, mCachedPad);
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
@@ -495,7 +540,7 @@ void GameScene::Update(float dt) {
 
     PlayerStateSystem(reg);
 
-    MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW);
+    MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW, mCachedPad, &mTileGrid);
     BoundsSystem(reg,
                  dt,
                  mWindow->GetWidth(),
@@ -628,6 +673,19 @@ void GameScene::Update(float dt) {
             reg.remove<HitFlash>(e);
     }
 
+    // Tick teleport cooldown
+    {
+        std::vector<entt::entity> tpExpired;
+        auto tcv = reg.view<TeleportCooldown>();
+        tcv.each([&](entt::entity e, TeleportCooldown& tc) {
+            tc.remaining -= dt;
+            if (tc.remaining <= 0.0f)
+                tpExpired.push_back(e);
+        });
+        for (auto e : tpExpired)
+            reg.remove<TeleportCooldown>(e);
+    }
+
     CollisionResult collision =
         CollisionSystem(reg, dt, mWindow->GetWidth(), mWindow->GetHeight());
     for (auto e : floatResult.actionTilesTriggered)
@@ -663,6 +721,64 @@ void GameScene::Update(float dt) {
                 if (!reg.valid(e))
                     continue;
                 const PowerUpTag& pu = reg.get<PowerUpTag>(e);
+
+                // Teleport: only entrances trigger; destinations are inert.
+                if (pu.type == PowerUpType::Teleport) {
+                    if (reg.all_of<TeleportDestTag>(e)) continue;
+                    if (reg.all_of<TeleportCooldown>(playerEnt)) continue;
+
+                    int grp = pu.teleportGroup;
+                    bool teleported = false;
+                    auto destView = reg.view<TeleportDestTag, Transform>();
+                    destView.each([&](entt::entity de, const TeleportDestTag& dest,
+                                      const Transform& dt) {
+                        if (teleported || dest.group != grp) return;
+                        auto& pt = reg.get<Transform>(playerEnt);
+                        auto& pc = reg.get<Collider>(playerEnt);
+                        int dw = 0, dh = 0;
+                        if (auto* dc = reg.try_get<Collider>(de)) {
+                            dw = dc->w; dh = dc->h;
+                        } else if (auto* dr = reg.try_get<Renderable>(de)) {
+                            dw = dr->renderW; dh = dr->renderH;
+                        }
+                        if (dw <= 0) dw = 38;
+                        if (dh <= 0) dh = 38;
+                        // Center on destination tile; gravity handles landing.
+                        pt.x = dt.x + dw * 0.5f - pc.w * 0.5f;
+                        pt.y = dt.y + dh * 0.5f - pc.h * 0.5f;
+                        if (auto* prev = reg.try_get<PrevTransform>(playerEnt)) {
+                            prev->x = pt.x;
+                            prev->y = pt.y;
+                        }
+                        if (auto* g = reg.try_get<GravityState>(playerEnt)) {
+                            g->velocity   = 0.0f;
+                            g->isGrounded = false;
+                        }
+                        if (auto* v = reg.try_get<Velocity>(playerEnt))
+                            v->dy = 0.0f;
+                        teleported = true;
+                    });
+                    if (teleported)
+                        reg.emplace_or_replace<TeleportCooldown>(playerEnt, 0.3f);
+                    continue;
+                }
+
+                // Health boost is instant — no timed slot needed.
+                if (pu.type == PowerUpType::HealthBoost) {
+                    auto* hp = reg.try_get<Health>(playerEnt);
+                    if (hp) {
+                        float boost = hp->max * (pu.healthPct / 100.0f);
+                        hp->max    += boost;
+                        hp->current = hp->max;
+                    }
+                    auto it2 = std::find(
+                        mSortedTileRenderList.begin(), mSortedTileRenderList.end(), e);
+                    if (it2 != mSortedTileRenderList.end())
+                        mSortedTileRenderList.erase(it2);
+                    reg.destroy(e);
+                    continue;
+                }
+
                 if (!reg.all_of<ActivePowerUps>(playerEnt))
                     reg.emplace<ActivePowerUps>(playerEnt);
                 reg.get<ActivePowerUps>(playerEnt).add(pu.type, pu.duration);
@@ -718,6 +834,10 @@ void GameScene::Update(float dt) {
                         g.velocity = 0.0f;
                         break;
                     case PowerUpType::Turret:
+                        break;
+                    case PowerUpType::HealthBoost:
+                        break;
+                    case PowerUpType::Teleport:
                         break;
                     default:
                         break;
@@ -911,12 +1031,9 @@ void GameScene::Update(float dt) {
                 }
 
                 std::vector<SDL_Texture*> frameTex;
-                for (const auto& fp : def.framePaths) {
-                    SDL_Texture* t = LoadScaledTexture(ren, fp, 0, 0);
-                    frameTex.push_back(t);
-                    if (t)
-                        tileScaledTextures.push_back(t);
-                }
+                frameTex.reserve(def.framePaths.size());
+                for (const auto& fp : def.framePaths)
+                    frameTex.push_back(GetCachedTexture(ren, fp, 0, 0));
 
                 if (!frameTex.empty() && frameTex[0]) {
                     tileAnimFrameMap[e]        = std::move(frameTex);
@@ -1209,8 +1326,7 @@ void GameScene::Update(float dt) {
                 bt.sourceTurret = turretEnt;
                 reg.emplace<BulletTag>(bullet, bt);
                 if (mBulletTex) {
-                    std::vector<SDL_Rect> bf = {{0, 0, 8, 8}};
-                    reg.emplace<Renderable>(bullet, mBulletTex, bf, false, 8, 8);
+                    reg.emplace<Renderable>(bullet, mBulletTex, sBulletFrames, false, 8, 8);
                     reg.emplace<AnimationState>(bullet, 0, 1, 0.0f, 1.0f, false);
                 }
 
@@ -1225,6 +1341,11 @@ void GameScene::Update(float dt) {
     // --- Bullet movement + collision ---
     bool bulletKilledPlayer = false;
     {
+        const float cullL = mCamera.x - 200.f;
+        const float cullR = mCamera.x + mWindow->GetWidth() + 200.f;
+        const float cullT = mCamera.y - 200.f;
+        const float cullB = mCamera.y + mWindow->GetHeight() + 200.f;
+
         std::vector<entt::entity> bulletsToDestroy;
         auto bv = reg.view<BulletTag, Transform>();
         bv.each([&](entt::entity be, BulletTag& bt, Transform& btr) {
@@ -1235,14 +1356,20 @@ void GameScene::Update(float dt) {
                 bulletsToDestroy.push_back(be);
                 return;
             }
+            // Skip detailed collision for bullets far outside the viewport.
+            if (btr.x < cullL || btr.x > cullR || btr.y < cullT || btr.y > cullB)
+                return;
             SDL_FRect bulletR = {btr.x, btr.y, 8.f, 8.f};
 
-            // Hit solid tiles (skip source turret; player bullets pass through hazards & floats)
-            auto tv = reg.view<TileTag, Transform, Collider>();
-            for (auto te : tv) {
-                if (te == bt.sourceTurret) continue;
-                if (bt.playerOwned && reg.all_of<HazardTag>(te)) continue;
-                if (bt.playerOwned && reg.all_of<FloatTag>(te)) continue;
+            // Hit solid tiles via spatial grid (skip source turret; player bullets pass through hazards & floats)
+            bool hitTile = false;
+            mTileGrid.Query(btr.x - 4.f, btr.y - 4.f, 16.f, 16.f, [&](entt::entity te) {
+                if (hitTile) return;
+                if (!reg.valid(te)) return;
+                if (te == bt.sourceTurret) return;
+                if (!reg.all_of<TileTag>(te)) return;
+                if (bt.playerOwned && reg.all_of<HazardTag>(te)) return;
+                if (bt.playerOwned && reg.all_of<FloatTag>(te)) return;
                 auto& tt2 = reg.get<Transform>(te);
                 auto& tc2 = reg.get<Collider>(te);
                 SDL_FRect tileR = {tt2.x, tt2.y, (float)tc2.w, (float)tc2.h};
@@ -1251,9 +1378,10 @@ void GameScene::Update(float dt) {
                 }
                 if (SDL_HasRectIntersectionFloat(&bulletR, &tileR)) {
                     bulletsToDestroy.push_back(be);
-                    return;
+                    hitTile = true;
                 }
-            }
+            });
+            if (hitTile) return;
 
             // Hit shield (absorbs bullet)
             {
@@ -1394,12 +1522,18 @@ void GameScene::Update(float dt) {
 
             // Player-owned bullets destroy hazard tiles on contact
             if (bt.playerOwned) {
-                auto hv = reg.view<HazardTag, Transform, Collider>();
-                for (auto he : hv) {
+                entt::entity hitHazard = entt::null;
+                mTileGrid.Query(btr.x - 4.f, btr.y - 4.f, 16.f, 16.f, [&](entt::entity he) {
+                    if (hitHazard != entt::null) return;
+                    if (!reg.valid(he) || !reg.all_of<HazardTag>(he)) return;
                     auto& ht = reg.get<Transform>(he);
                     auto& hc = reg.get<Collider>(he);
                     SDL_FRect hazR = {ht.x, ht.y, (float)hc.w, (float)hc.h};
-                    if (SDL_HasRectIntersectionFloat(&bulletR, &hazR)) {
+                    if (SDL_HasRectIntersectionFloat(&bulletR, &hazR))
+                        hitHazard = he;
+                });
+                if (hitHazard != entt::null) {
+                    auto he = hitHazard;
                         if (reg.all_of<HazardTag>(he)) reg.remove<HazardTag>(he);
                         if (reg.all_of<TileTag>(he))   reg.remove<TileTag>(he);
                         if (reg.all_of<Collider>(he))   reg.remove<Collider>(he);
@@ -1419,11 +1553,9 @@ void GameScene::Update(float dt) {
                                     if (rnd.renderH > 0) tileH = rnd.renderH;
                                 }
                                 std::vector<SDL_Texture*> frameTex;
-                                for (const auto& fp : def.framePaths) {
-                                    SDL_Texture* t = LoadScaledTexture(ren2, fp, 0, 0);
-                                    frameTex.push_back(t);
-                                    if (t) tileScaledTextures.push_back(t);
-                                }
+                                frameTex.reserve(def.framePaths.size());
+                                for (const auto& fp : def.framePaths)
+                                    frameTex.push_back(GetCachedTexture(ren2, fp, 0, 0));
                                 if (!frameTex.empty() && frameTex[0]) {
                                     tileAnimFrameMap[he] = std::move(frameTex);
                                     auto& fvec = tileAnimFrameMap[he];
@@ -1469,43 +1601,46 @@ void GameScene::Update(float dt) {
                                 mSortedTileRenderList.erase(it);
                             reg.destroy(he);
                         }
-                        bulletsToDestroy.push_back(be);
-                        break;
-                    }
+                    bulletsToDestroy.push_back(be);
                 }
 
                 // Player-owned bullets trigger action tiles (floating objects, breakables)
-                auto actv = reg.view<ActionTag, Transform, Collider>();
-                for (auto ae : actv) {
-                    if (reg.all_of<HazardTag>(ae)) continue;
+                entt::entity hitAction = entt::null;
+                mTileGrid.Query(btr.x - 4.f, btr.y - 4.f, 16.f, 16.f, [&](entt::entity ae) {
+                    if (hitAction != entt::null) return;
+                    if (!reg.valid(ae) || !reg.all_of<ActionTag>(ae)) return;
+                    if (reg.all_of<HazardTag>(ae)) return;
+                    if (!reg.all_of<Collider>(ae)) return;
                     auto& at2 = reg.get<Transform>(ae);
                     auto& ac2 = reg.get<Collider>(ae);
                     SDL_FRect actR = {at2.x, at2.y, (float)ac2.w, (float)ac2.h};
                     if (const auto* off = reg.try_get<ColliderOffset>(ae)) {
                         actR.x += off->x; actR.y += off->y;
                     }
-                    if (SDL_HasRectIntersectionFloat(&bulletR, &actR)) {
-                        auto& atag = reg.get<ActionTag>(ae);
-                        atag.hitsRemaining--;
-                        if (atag.hitsRemaining <= 0) {
-                            collision.actionTilesTriggered.push_back(ae);
-                        } else {
-                            if (reg.all_of<HitFlash>(ae))
-                                reg.get<HitFlash>(ae).timer = HitFlash{}.duration;
-                            else
-                                reg.emplace<HitFlash>(ae);
-                        }
-                        if (reg.all_of<FloatTag>(ae)) {
-                            auto* fs = reg.try_get<FloatState>(ae);
-                            if (fs) {
-                                fs->driftVx += bt.dx * bt.speed * 0.3f;
-                                fs->driftVy += bt.dy * bt.speed * 0.3f;
-                                fs->spinSpeed += bt.dx * 180.f;
-                            }
-                        }
-                        bulletsToDestroy.push_back(be);
-                        break;
+                    if (SDL_HasRectIntersectionFloat(&bulletR, &actR))
+                        hitAction = ae;
+                });
+                if (hitAction != entt::null) {
+                    auto ae = hitAction;
+                    auto& atag = reg.get<ActionTag>(ae);
+                    atag.hitsRemaining--;
+                    if (atag.hitsRemaining <= 0) {
+                        collision.actionTilesTriggered.push_back(ae);
+                    } else {
+                        if (reg.all_of<HitFlash>(ae))
+                            reg.get<HitFlash>(ae).timer = HitFlash{}.duration;
+                        else
+                            reg.emplace<HitFlash>(ae);
                     }
+                    if (reg.all_of<FloatTag>(ae)) {
+                        auto* fs = reg.try_get<FloatState>(ae);
+                        if (fs) {
+                            fs->driftVx += bt.dx * bt.speed * 0.3f;
+                            fs->driftVy += bt.dy * bt.speed * 0.3f;
+                            fs->spinSpeed += bt.dx * 180.f;
+                        }
+                    }
+                    bulletsToDestroy.push_back(be);
                 }
             }
         });
@@ -1565,25 +1700,15 @@ void GameScene::Update(float dt) {
                 return;
             }
 
-            // Input: right stick (gamepad, direct positioning) or
-            // arrow keys (keyboard, wheel-style continuous rotation)
             bool gamepadAimed = false;
-            {
-                int count = 0;
-                SDL_JoystickID* ids = SDL_GetGamepads(&count);
-                if (ids && count > 0) {
-                    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
-                    if (pad) {
-                        float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
-                        float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
-                        constexpr float DEAD = 0.25f;
-                        if (rx * rx + ry * ry > DEAD * DEAD) {
-                            as.angle = std::atan2(ry, rx);
-                            gamepadAimed = true;
-                        }
-                    }
+            if (mCachedPad) {
+                float rx = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                float ry = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+                constexpr float DEAD = 0.25f;
+                if (rx * rx + ry * ry > DEAD * DEAD) {
+                    as.angle = std::atan2(ry, rx);
+                    gamepadAimed = true;
                 }
-                SDL_free(ids);
             }
             if (!gamepadAimed) {
                 constexpr float ROTATE_SPEED = 4.0f;
@@ -1605,24 +1730,15 @@ void GameScene::Update(float dt) {
                 return;
             }
 
-            // Input: same controls as shield
             bool gpAimed = false;
-            {
-                int count = 0;
-                SDL_JoystickID* ids = SDL_GetGamepads(&count);
-                if (ids && count > 0) {
-                    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
-                    if (pad) {
-                        float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
-                        float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
-                        constexpr float DEAD = 0.25f;
-                        if (rx * rx + ry * ry > DEAD * DEAD) {
-                            tp.angle = std::atan2(ry, rx);
-                            gpAimed = true;
-                        }
-                    }
+            if (mCachedPad) {
+                float rx = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                float ry = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+                constexpr float DEAD = 0.25f;
+                if (rx * rx + ry * ry > DEAD * DEAD) {
+                    tp.angle = std::atan2(ry, rx);
+                    gpAimed = true;
                 }
-                SDL_free(ids);
             }
             if (!gpAimed) {
                 constexpr float ROTATE_SPEED = 4.0f;
@@ -1656,8 +1772,7 @@ void GameScene::Update(float dt) {
                 bt.playerOwned  = true;
                 reg.emplace<BulletTag>(bullet, bt);
                 if (mBulletTex) {
-                    std::vector<SDL_Rect> bf = {{0, 0, 8, 8}};
-                    reg.emplace<Renderable>(bullet, mBulletTex, bf, false, 8, 8);
+                    reg.emplace<Renderable>(bullet, mBulletTex, sBulletFrames, false, 8, 8);
                     reg.emplace<AnimationState>(bullet, 0, 1, 0.0f, 1.0f, false);
                 }
 
@@ -1677,20 +1792,16 @@ void GameScene::Update(float dt) {
     }
     mCamera.TickShake(dt);
 
-    // Rumble the gamepad proportional to camera shake/punch
-    {
+    if (mCachedPad) {
         float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
         float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
         if (shakeAmp > 0.1f || punchAmp > 0.1f) {
-            SDL_Gamepad* pad = GetFirstGamepad();
-            if (pad) {
-                float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
-                float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
-                Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
-                Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
-                lo = std::max(lo, hi);
-                SDL_RumbleGamepad(pad, lo, hi, 50);
-            }
+            float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
+            float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
+            Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
+            Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
+            lo = std::max(lo, hi);
+            SDL_RumbleGamepad(mCachedPad, lo, hi, 50);
         }
     }
 }
@@ -1717,7 +1828,7 @@ void GameScene::Render(Window& window, float alpha) {
     const int W = window.GetWidth();
     const int H = window.GetHeight();
     if (levelComplete) {
-        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha, &mSortedFrontPropList);
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
@@ -1734,7 +1845,7 @@ void GameScene::Render(Window& window, float alpha) {
         if (levelCompleteText)
             levelCompleteText->Render(ren);
     } else if (gameOver) {
-        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha, &mSortedFrontPropList);
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
@@ -1749,7 +1860,7 @@ void GameScene::Render(Window& window, float alpha) {
     } else {
         locationText->Render(ren);
         actionText->Render(ren);
-        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha);
+        RenderSystem(reg, ren, mCamera.x, mCamera.y, W, H, &mSortedTileRenderList, alpha, &mSortedFrontPropList);
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
@@ -2186,14 +2297,14 @@ void GameScene::Spawn() {
     mLevelW += (float)mWindow->GetWidth() * 0.25f;
     mLevelH += (float)mWindow->GetHeight() * 0.25f;
 
-    // --- Player collider dimensions --- (computed early for camera centering)
+    // Load profile once for all spawn-time lookups.
+    PlayerProfile spawnProfile;
+    bool hasSpawnProfile = !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, spawnProfile);
+
     int pColW, pColH, pROffX, pROffY;
     {
-        PlayerProfile tmpProfile;
-        bool          hasProfile =
-            !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, tmpProfile);
         const AnimHitbox& idleHB =
-            hasProfile ? tmpProfile.Slot(PlayerAnimSlot::Idle).hitbox : AnimHitbox{};
+            hasSpawnProfile ? spawnProfile.Slot(PlayerAnimSlot::Idle).hitbox : AnimHitbox{};
         if (!idleHB.IsDefault()) {
             pColW  = idleHB.w;
             pColH  = idleHB.h;
@@ -2262,14 +2373,8 @@ void GameScene::Spawn() {
         base.standRoffX = pROffX;
         base.standRoffY = pROffY;
 
-        // Load all per-animation hitboxes from the profile.
-        PlayerProfile hbProfile;
-        bool hasHBProfile =
-            !mProfilePath.empty() && LoadPlayerProfile(mProfilePath, hbProfile);
-
-        // Crouch hitbox
         const AnimHitbox& crouchHB =
-            hasHBProfile ? hbProfile.Slot(PlayerAnimSlot::Crouch).hitbox : AnimHitbox{};
+            hasSpawnProfile ? spawnProfile.Slot(PlayerAnimSlot::Crouch).hitbox : AnimHitbox{};
         if (!crouchHB.IsDefault()) {
             base.duckW     = crouchHB.w;
             base.duckH     = crouchHB.h;
@@ -2287,13 +2392,13 @@ void GameScene::Spawn() {
             return {hb.w, hb.h, -hb.x, -hb.y};
         };
 
-        if (hasHBProfile) {
-            base.walk  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Walk).hitbox);
-            base.jump  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Jump).hitbox);
-            base.fall  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Fall).hitbox);
-            base.slash = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Slash).hitbox);
-            base.hurt  = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Hurt).hitbox);
-            base.death = toAnimCol(hbProfile.Slot(PlayerAnimSlot::Death).hitbox);
+        if (hasSpawnProfile) {
+            base.walk  = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Walk).hitbox);
+            base.jump  = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Jump).hitbox);
+            base.fall  = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Fall).hitbox);
+            base.slash = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Slash).hitbox);
+            base.hurt  = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Hurt).hitbox);
+            base.death = toAnimCol(spawnProfile.Slot(PlayerAnimSlot::Death).hitbox);
         }
 
         reg.emplace<PlayerBaseCollider>(player, base);
@@ -2320,14 +2425,11 @@ void GameScene::Spawn() {
     // so resolveSheet uses slot capability instead of pointer identity to pick the right texture.
     SDL_Texture* idleT = knightIdleSheet->GetTexture();
     std::unordered_set<int> customSlots;
-    if (mHasProfile) {
-        PlayerProfile spawnProfile;
-        if (!mProfilePath.empty() && LoadPlayerProfile(mProfilePath, spawnProfile)) {
-            for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
-                auto s = static_cast<PlayerAnimSlot>(i);
-                if (spawnProfile.HasSlot(s))
-                    customSlots.insert(i);
-            }
+    if (mHasProfile && hasSpawnProfile) {
+        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+            auto s = static_cast<PlayerAnimSlot>(i);
+            if (spawnProfile.HasSlot(s))
+                customSlots.insert(i);
         }
     }
     auto resolveSheet = [&](SDL_Texture* slotTex, PlayerAnimSlot slot) -> SDL_Texture* {
@@ -2373,30 +2475,21 @@ void GameScene::Spawn() {
             .deathFps   = slotFps(PlayerAnimSlot::Death),
         });
 
-    // Returns cached GPU texture on Respawn, loads from disk on first Spawn.
-    auto getCachedTex =
-        [&](const std::string& path, int w, int h, int rot = 0) -> SDL_Texture* {
-        std::string key = TileCacheKey(path, w, h, rot);
-        auto        it  = tileTextureCache.find(key);
-        if (it != tileTextureCache.end())
-            return it->second;
-        SDL_Texture* tex = LoadScaledTexture(ren, path, w, h, rot);
-        if (tex) {
-            tileScaledTextures.push_back(tex);
-            tileTextureCache[key] = tex;
-        }
-        return tex;
-    };
-
     // --- Spawn tiles ---
     totalGoals = 0;
+    std::unordered_map<std::string, AnimatedTileDef> animDefCache;
     for (const auto& ts : mLevel.tiles) {
         if (IsAnimatedTile(ts.imagePath)) {
-            AnimatedTileDef def;
-            if (!LoadAnimatedTileDef(ts.imagePath, def) || def.framePaths.empty()) {
-                std::print("Failed to load animated tile def: {}\n", ts.imagePath);
-                continue;
+            auto [defIt, inserted] = animDefCache.try_emplace(ts.imagePath);
+            if (inserted) {
+                if (!LoadAnimatedTileDef(ts.imagePath, defIt->second) ||
+                    defIt->second.framePaths.empty()) {
+                    std::print("Failed to load animated tile def: {}\n", ts.imagePath);
+                    animDefCache.erase(defIt);
+                    continue;
+                }
             }
+            const AnimatedTileDef& def = defIt->second;
 
             int animW = (ts.w > 0) ? ts.w : 38;
             int animH = (ts.h > 0) ? ts.h : 38;
@@ -2404,7 +2497,7 @@ void GameScene::Spawn() {
             // Native-res frames (0,0) — GPU scales at render time. CPU pre-scale destroyed lava detail.
             std::vector<SDL_Texture*> frameTex;
             for (const auto& fp : def.framePaths)
-                frameTex.push_back(getCachedTex(fp, 0, 0, ts.rotation));
+                frameTex.push_back(GetCachedTexture(ren, fp, 0, 0, ts.rotation));
             if (frameTex.empty() || !frameTex[0])
                 continue;
 
@@ -2433,8 +2526,12 @@ void GameScene::Spawn() {
                     reg.emplace<TileTag>(tile);
             } else if (!ts.prop)
                 reg.emplace<TileTag>(tile);
-            if (ts.prop)
-                reg.emplace<PropTag>(tile);
+            if (ts.prop) {
+                if (ts.propBehind)
+                    reg.emplace<PropFrontTag>(tile);
+                else
+                    reg.emplace<PropTag>(tile);
+            }
             if (ts.HasAction())
                 reg.emplace<ActionTag>(tile,
                                        ts.action->group,
@@ -2496,13 +2593,25 @@ void GameScene::Spawn() {
                     puType = PowerUpType::AntiGravity;
                 else if (ts.powerUp->type == "turret")
                     puType = PowerUpType::Turret;
+                else if (ts.powerUp->type == "healthboost")
+                    puType = PowerUpType::HealthBoost;
+                else if (ts.powerUp->type == "teleport")
+                    puType = PowerUpType::Teleport;
                 if (puType != PowerUpType::None) {
                     PowerUpTag pt2;
-                    pt2.type     = puType;
-                    pt2.duration = ts.powerUp->duration;
-                    pt2.fireRate = ts.powerUp->fireRate;
-                    pt2.sfxPath  = ts.powerUp->sfxPath;
+                    pt2.type          = puType;
+                    pt2.duration      = ts.powerUp->duration;
+                    pt2.fireRate      = ts.powerUp->fireRate;
+                    pt2.healthPct     = ts.powerUp->healthPct;
+                    pt2.teleportGroup = ts.powerUp->teleportGroup;
+                    pt2.sfxPath       = ts.powerUp->sfxPath;
                     reg.emplace<PowerUpTag>(tile, pt2);
+                    if (puType == PowerUpType::Teleport) {
+                        if (ts.powerUp->teleportDest)
+                            reg.emplace<TeleportDestTag>(tile, ts.powerUp->teleportGroup);
+                        else
+                            reg.emplace<TeleportEntranceTag>(tile, ts.powerUp->teleportGroup);
+                    }
                 }
             }
             if (ts.HasShooter()) {
@@ -2524,7 +2633,7 @@ void GameScene::Spawn() {
         }
 
         // --- Normal PNG tile ---
-        SDL_Texture* tex = getCachedTex(ts.imagePath, ts.w, ts.h, ts.rotation);
+        SDL_Texture* tex = GetCachedTexture(ren, ts.imagePath, ts.w, ts.h, ts.rotation);
         if (!tex)
             continue;
 
@@ -2552,8 +2661,12 @@ void GameScene::Spawn() {
             if (!ts.prop)
                 reg.emplace<TileTag>(tile);
         }
-        if (ts.prop)
-            reg.emplace<PropTag>(tile);
+        if (ts.prop) {
+            if (ts.propBehind)
+                reg.emplace<PropFrontTag>(tile);
+            else
+                reg.emplace<PropTag>(tile);
+        }
         if (ts.HasAction())
             reg.emplace<ActionTag>(
                 tile, ts.action->group, ts.action->hitsRequired, ts.action->hitsRequired,
@@ -2604,13 +2717,25 @@ void GameScene::Spawn() {
                 puType = PowerUpType::AntiGravity;
             else if (ts.powerUp->type == "turret")
                 puType = PowerUpType::Turret;
+            else if (ts.powerUp->type == "healthboost")
+                puType = PowerUpType::HealthBoost;
+            else if (ts.powerUp->type == "teleport")
+                puType = PowerUpType::Teleport;
             if (puType != PowerUpType::None) {
                 PowerUpTag pt2;
-                pt2.type     = puType;
-                pt2.duration = ts.powerUp->duration;
-                pt2.fireRate = ts.powerUp->fireRate;
-                pt2.sfxPath  = ts.powerUp->sfxPath;
+                pt2.type          = puType;
+                pt2.duration      = ts.powerUp->duration;
+                pt2.fireRate      = ts.powerUp->fireRate;
+                pt2.healthPct     = ts.powerUp->healthPct;
+                pt2.teleportGroup = ts.powerUp->teleportGroup;
+                pt2.sfxPath       = ts.powerUp->sfxPath;
                 reg.emplace<PowerUpTag>(tile, pt2);
+                if (puType == PowerUpType::Teleport) {
+                    if (ts.powerUp->teleportDest)
+                        reg.emplace<TeleportDestTag>(tile, ts.powerUp->teleportGroup);
+                    else
+                        reg.emplace<TeleportEntranceTag>(tile, ts.powerUp->teleportGroup);
+                }
             }
         }
 
@@ -2899,20 +3024,23 @@ void GameScene::Spawn() {
         }
     }
 
-    // Build the pre-sorted tile render list used by RenderSystem Pass 1.
+    // Build the pre-sorted tile render lists used by RenderSystem.
     {
         mSortedTileRenderList.clear();
         auto tv = reg.view<TileTag, AnimationState, Renderable>();
         auto lv = reg.view<LadderTag, AnimationState, Renderable>();
         auto pv = reg.view<PropTag, AnimationState, Renderable>();
         mSortedTileRenderList.reserve(tv.size_hint() + lv.size_hint() + pv.size_hint());
-        for (auto e : tv)
-            mSortedTileRenderList.push_back(e);
-        for (auto e : lv)
-            mSortedTileRenderList.push_back(e);
-        for (auto e : pv)
-            mSortedTileRenderList.push_back(e);
+        for (auto e : tv) mSortedTileRenderList.push_back(e);
+        for (auto e : lv) mSortedTileRenderList.push_back(e);
+        for (auto e : pv) mSortedTileRenderList.push_back(e);
         std::sort(mSortedTileRenderList.begin(), mSortedTileRenderList.end());
+
+        mSortedFrontPropList.clear();
+        auto fpv = reg.view<PropFrontTag, AnimationState, Renderable>();
+        mSortedFrontPropList.reserve(fpv.size_hint());
+        for (auto e : fpv) mSortedFrontPropList.push_back(e);
+        std::sort(mSortedFrontPropList.begin(), mSortedFrontPropList.end());
     }
 }
 
@@ -2920,9 +3048,8 @@ void GameScene::Respawn() {
     reg.clear();
     tileAnimFrameMap.clear();
     mSortedTileRenderList.clear();
-    // tileScaledTextures and tileTextureCache are intentionally NOT cleared here.
-    // All tile textures are already uploaded to the GPU and can be reused as-is.
-    // They are only freed in Unload() when the scene is torn down entirely.
+    // sTileScaledTextures / sTileTextureCache are static and persist across scene
+    // instances — textures stay on the GPU for instant reuse.
     gameOver           = false;
     mPlayerDying       = false;
     mDeathAnimTimer    = 0.0f;

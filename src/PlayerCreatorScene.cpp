@@ -1,4 +1,5 @@
 #include "PlayerCreatorScene.hpp"
+#include "GameScene.hpp"
 #include "TitleScene.hpp"
 #include "audio/AudioEngine.hpp"
 #include "audio/AudioEvents.hpp"
@@ -47,6 +48,8 @@ void PlayerCreatorScene::Unload() {
         Audio()->Sfx().StopPreview();
     mPreviewPlaying = false;
     stopTextInput();
+    if (mRenderTexture) { SDL_DestroyTexture(mRenderTexture); mRenderTexture = nullptr; }
+    if (mRenderSurface) { SDL_DestroySurface(mRenderSurface); mRenderSurface = nullptr; }
 }
 
 // --- Layout ---
@@ -128,6 +131,10 @@ void PlayerCreatorScene::computeLayout() {
 
 bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT) return false;
+
+    // Any event that modifies visible state should call markDirty().
+    // For simplicity, mark dirty on any user interaction.
+    markDirty();
 
     if (e.type == SDL_EVENT_DROP_BEGIN) {
         mDropHover = true;
@@ -570,6 +577,7 @@ void PlayerCreatorScene::Update(float dt) {
         if (mAnimTimer >= 1.0f / previewFps) {
             mAnimTimer = 0.0f;
             mAnimFrame = (mAnimFrame + 1) % (int)prev->frames.size();
+            markDirty();
         }
     }
 
@@ -633,7 +641,21 @@ void PlayerCreatorScene::Update(float dt) {
 void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
     window.Render();
     SDL_Renderer* ren = window.GetRenderer();
-    SDL_Surface* s = SDL_CreateSurface(mW, mH, SDL_PIXELFORMAT_ARGB8888);
+
+    // Reuse the cached texture when nothing changed.
+    if (!mDirty && mRenderTexture) {
+        SDL_RenderTexture(ren, mRenderTexture, nullptr, nullptr);
+        window.Update();
+        return;
+    }
+    mDirty = false;
+
+    // Reuse the surface allocation across frames.
+    if (!mRenderSurface || mRenderSurface->w != mW || mRenderSurface->h != mH) {
+        if (mRenderSurface) SDL_DestroySurface(mRenderSurface);
+        mRenderSurface = SDL_CreateSurface(mW, mH, SDL_PIXELFORMAT_ARGB8888);
+    }
+    SDL_Surface* s = mRenderSurface;
     if (!s) { window.Update(); return; }
 
     fillRect(s, {0, 0, mW, mH}, BG);
@@ -1000,13 +1022,12 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
         }
     }
 
-    // LINEAR keeps anti-aliased text smooth on HiDPI
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(ren, s);
-    SDL_DestroySurface(s);
-    if (tex) {
-        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
-        SDL_RenderTexture(ren, tex, nullptr, nullptr);
-        SDL_DestroyTexture(tex);
+    // Upload to GPU and cache for reuse on non-dirty frames.
+    if (mRenderTexture) SDL_DestroyTexture(mRenderTexture);
+    mRenderTexture = SDL_CreateTextureFromSurface(ren, s);
+    if (mRenderTexture) {
+        SDL_SetTextureScaleMode(mRenderTexture, SDL_SCALEMODE_LINEAR);
+        SDL_RenderTexture(ren, mRenderTexture, nullptr, nullptr);
     }
     window.Update();
 }
@@ -1048,13 +1069,14 @@ void PlayerCreatorScene::rebuildPreview(int slotIdx) {
     if (pngs.empty()) return;
     std::sort(pngs.begin(), pngs.end());
 
-    SDL_Surface* first = IMG_Load(pngs[0].string().c_str());
-    if (!first) {
+    // Probe dimensions from the first frame without a redundant load.
+    // GameScene's raw surface cache may already have this file.
+    SDL_Surface* firstSurf = GameScene::GetRawSurface(pngs[0].string());
+    if (!firstSurf) {
         mDropMsg = "Failed to load: " + pngs[0].filename().string();
         return;
     }
-    int fw = first->w, fh = first->h;
-    SDL_DestroySurface(first);
+    int fw = firstSurf->w, fh = firstSurf->h;
 
     // Auto-fill spriteW/H from raw frame size so the hitbox editor is
     // immediately accurate without requiring manual size entry.
@@ -1348,8 +1370,10 @@ void PlayerCreatorScene::loadRosterEntry(int idx) {
         mWidthStr    = mProfile.spriteW > 0 ? std::to_string(mProfile.spriteW) : "120";
         mHeightStr   = mProfile.spriteH > 0 ? std::to_string(mProfile.spriteH) : "160";
         computeLayout();
-        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i)
-            rebuildPreview(i);
+        for (int i = 0; i < PLAYER_ANIM_SLOT_COUNT; ++i) {
+            if (!mProfile.slots[i].folderPath.empty())
+                rebuildPreview(i);
+        }
         mSelectedSlot = 0;
         mSelectedSfxFile = 0;
         recomputePreviewRect();

@@ -14,6 +14,8 @@
 
 namespace fs = std::filesystem;
 
+SDL_Surface* LevelEditorScene::mFolderIcon = nullptr;
+
 static SDL_Surface* MakeThumb(SDL_Surface* src, int w, int h) {
     return EditorSurfaceCache::MakeThumb(src, w, h);
 }
@@ -81,8 +83,10 @@ void LevelEditorScene::CloseAnimPicker() {
 //   4. Handle the PowerUpType in MovementSystem / GameScene::Update
 const std::vector<EditorPopups::PowerUpEntry>& LevelEditorScene::GetPowerUpRegistry() {
     static const std::vector<EditorPopups::PowerUpEntry> kRegistry = {
-        {"antigravity", "Anti-Gravity (15s)", 15.0f},
-        {"turret",      "Orbiting Turret (15s)", 15.0f},
+        {"antigravity",  "Anti-Gravity (15s)",     15.0f},
+        {"turret",       "Orbiting Turret (15s)",  15.0f},
+        {"healthboost",  "Health Boost (+25%)",     0.0f},
+        {"teleport",     "Teleport (entrance)",     0.0f},
     };
     return kRegistry;
 }
@@ -173,7 +177,8 @@ void LevelEditorScene::Load(Window& window) {
     }
 
     mPalette.Init(mSurfaceCache, mFolderIcon);
-    LoadTileView(TILE_ROOT);
+    if (!mPalette.RestoreTileItems(TILE_ROOT, mLevel))
+        LoadTileView(TILE_ROOT);
     LoadBgPalette();
 
     mToolbar.RebuildLayout();
@@ -195,6 +200,13 @@ void LevelEditorScene::Load(Window& window) {
     mPopups.powerUpRegistry = &GetPowerUpRegistry();
     mPopups.movPlatGroupId  = mMovPlatCurGroupId;
 
+    // Find the highest teleport group ID already in the level.
+    mTeleportNextGroupId = 1;
+    for (const auto& ts : mLevel.tiles)
+        if (ts.HasPowerUp() && ts.powerUp->type == "teleport")
+            mTeleportNextGroupId = std::max(mTeleportNextGroupId, ts.powerUp->teleportGroup + 1);
+    mTeleportLinking = false;
+
     // Position camera so player spawn sits 100px from left edge, clamped to (0,0).
     {
         float spawnCamX = mLevel.player.x - 100.0f;
@@ -215,13 +227,10 @@ void LevelEditorScene::Unload() {
         mTool.reset();
     }
 
+    mPalette.StashTileItems();
     mPalette.Clear();
 
-    if (mFolderIcon) {
-        SDL_DestroySurface(mFolderIcon);
-        mFolderIcon = nullptr;
-    }
-
+    mSurfaceCache.StashSeededSurfaces();
     mSurfaceCache.Clear();
 
     mWindow = nullptr;
@@ -361,8 +370,29 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
     {
         auto pctx = MakePopupCtx();
-        if (mPopups.HandleEvent(e, pctx, mMovPlatIndices))
+        int prevPuTile = mPopups.powerUpTileIdx;
+        bool prevPuOpen = mPopups.powerUpOpen;
+        if (mPopups.HandleEvent(e, pctx, mMovPlatIndices)) {
+            // Detect: popup just closed after assigning teleport -> enter linking mode
+            if (prevPuOpen && !mPopups.powerUpOpen && prevPuTile >= 0 &&
+                prevPuTile < (int)mLevel.tiles.size()) {
+                auto& t = mLevel.tiles[prevPuTile];
+                std::print("[Teleport] Popup closed. tile={} hasPU={} type='{}' dest={}\n",
+                           prevPuTile, t.HasPowerUp(),
+                           t.HasPowerUp() ? t.powerUp->type : "(none)",
+                           t.HasPowerUp() ? t.powerUp->teleportDest : false);
+                if (t.HasPowerUp() && t.powerUp->type == "teleport" && !t.powerUp->teleportDest) {
+                    int grp = mTeleportNextGroupId++;
+                    t.powerUp->teleportGroup = grp;
+                    mTeleportLinking   = true;
+                    mTeleportLinkGroup = grp;
+                    SetStatus("Teleport entrance set (group " + std::to_string(grp) +
+                              "). Now click another tile to mark as DESTINATION.");
+                    std::print("[Teleport] Linking mode ON, group={}\n", grp);
+                }
+            }
             return true;
+        }
     }
 
     // EnemyTool speed popup text input
@@ -579,13 +609,17 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             }
         } else if (mActiveToolId == ToolId::PowerUp) {
             int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
-            if (hovTi >= 0 && mLevel.tiles[hovTi].HasPowerUp() &&
-                mLevel.tiles[hovTi].powerUp->type == "turret") {
+            if (hovTi >= 0 && mLevel.tiles[hovTi].HasPowerUp()) {
                 auto& pu = *mLevel.tiles[hovTi].powerUp;
-                pu.fireRate = std::clamp(pu.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "Turret PU fire rate: %.1f shots/sec", pu.fireRate);
-                SetStatus(buf);
+                if (pu.type == "turret") {
+                    pu.fireRate = std::clamp(pu.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf), "Turret PU fire rate: %.1f shots/sec", pu.fireRate);
+                    SetStatus(buf);
+                } else if (pu.type == "healthboost") {
+                    pu.healthPct = std::clamp(pu.healthPct + e.wheel.y * 25.0f, 25.0f, 200.0f);
+                    SetStatus("Health Boost: +" + std::to_string((int)pu.healthPct) + "% max HP");
+                }
             }
         }
     }
@@ -863,6 +897,12 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_RIGHT) {
         int mx = (int)e.button.x, my = (int)e.button.y;
         if (my >= TOOLBAR_H && mx < CanvasW()) {
+            if (mTool && mActiveToolId == ToolId::Prop) {
+                auto ctx = MakeToolCtx();
+                if (mTool->OnMouseDown(ctx, mx, my, SDL_BUTTON_RIGHT, SDL_GetModState())
+                    == ToolResult::Consumed)
+                    return true;
+            }
             int ti = HitTile(mx, my);
             if (ti >= 0) {
                 if (mActiveToolId == ToolId::Action && mLevel.tiles[ti].HasAction()) {
@@ -875,7 +915,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     mLevel.tiles[ti].shooter->side = static_cast<ShooterSide>(s);
                     static const char* kNames[] = {"Top","Right","Bottom","Left"};
                     SetStatus("Tile " + std::to_string(ti) + " shooter side -> " + kNames[s]);
-                } else {
+                } else if (mActiveToolId != ToolId::Prop) {
                     int& rot = mLevel.tiles[ti].rotation;
                     rot      = (rot + 90) % 360;
                     SetStatus("Tile " + std::to_string(ti) + " rotated to " +
@@ -1382,22 +1422,48 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             }
             case ToolId::PowerUp: {
                 // PowerUp popup clicks are handled by mPopups.HandleEvent.
-                // Here we handle opening the popup on tile click.
                 if (mPopups.powerUpOpen && mPopups.powerUpTileIdx >= 0)
-                    return true; // absorbed by HandleEvent
+                    return true;
                 mPopups.powerUpOpen    = false;
                 mPopups.powerUpTileIdx = -1;
                 int ti                 = HitTile(mx, my);
-                if (ti >= 0) {
-                    auto [wsx, wsy] = WorldToScreen(mLevel.tiles[ti].x, mLevel.tiles[ti].y);
-                    int winW        = mWindow ? mWindow->GetWidth() : 800;
-                    int winH        = mWindow ? mWindow->GetHeight() : 600;
-                    mPopups.OpenPowerUpPicker(
-                        ti, wsx, wsy + mLevel.tiles[ti].h, winW, winH, TOOLBAR_H);
-                    SetStatus("Tile " + std::to_string(ti) + ": choose power-up type");
-                } else {
+                if (ti < 0) {
+                    mTeleportLinking = false;
                     SetStatus("PowerUp: click a tile to assign a power-up pickup");
+                    return true;
                 }
+
+                // Teleport destination linking mode
+                if (mTeleportLinking) {
+                    std::print("[Teleport] Destination click on tile {}\n", ti);
+                    auto& t = mLevel.tiles[ti];
+                    t.powerUp = PowerUpData{"teleport", 0.0f, 3.0f, 25.0f, mTeleportLinkGroup, true, ""};
+                    t.prop = true;
+                    mTeleportLinking = false;
+                    SetStatus("Tile " + std::to_string(ti) +
+                              " -> teleport DESTINATION (group " +
+                              std::to_string(mTeleportLinkGroup) + ")");
+                    return true;
+                }
+
+                // If tile already has a teleport entrance, re-enter linking mode
+                if (mLevel.tiles[ti].HasPowerUp() &&
+                    mLevel.tiles[ti].powerUp->type == "teleport" &&
+                    !mLevel.tiles[ti].powerUp->teleportDest) {
+                    mTeleportLinking   = true;
+                    mTeleportLinkGroup = mLevel.tiles[ti].powerUp->teleportGroup;
+                    SetStatus("Teleport group " + std::to_string(mTeleportLinkGroup) +
+                              ": click another tile to set DESTINATION");
+                    return true;
+                }
+
+                // Normal: open the power-up picker popup
+                auto [wsx, wsy] = WorldToScreen(mLevel.tiles[ti].x, mLevel.tiles[ti].y);
+                int winW        = mWindow ? mWindow->GetWidth() : 800;
+                int winH        = mWindow ? mWindow->GetHeight() : 600;
+                mPopups.OpenPowerUpPicker(
+                    ti, wsx, wsy + mLevel.tiles[ti].h, winW, winH, TOOLBAR_H);
+                SetStatus("Tile " + std::to_string(ti) + ": choose power-up type");
                 return true;
             }
             case ToolId::MovingPlat: {

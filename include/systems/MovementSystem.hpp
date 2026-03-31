@@ -1,27 +1,22 @@
 #pragma once
 #include <Components.hpp>
+#include <SpatialGrid.hpp>
 #include <SDL3/SDL.h>
 #include <cmath>
 #include <entt/entt.hpp>
 
-inline void MovementSystem(entt::registry& reg, float dt, int windowW, float levelW = 0.0f) {
+inline void MovementSystem(entt::registry& reg, float dt, int windowW, float levelW = 0.0f,
+                           SDL_Gamepad* cachedPad = nullptr,
+                           const SpatialGrid* tileGrid = nullptr) {
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
     constexpr float PAD_DEAD_ZONE = 0.25f;
     float padAxisX = 0.0f, padAxisY = 0.0f;
-    {
-        int count = 0;
-        SDL_JoystickID* ids = SDL_GetGamepads(&count);
-        if (ids && count > 0) {
-            SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
-            if (pad) {
-                float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-                float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-                if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX = rx;
-                if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY = ry;
-            }
-        }
-        SDL_free(ids);
+    if (cachedPad) {
+        float rx = SDL_GetGamepadAxis(cachedPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        float ry = SDL_GetGamepadAxis(cachedPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX = rx;
+        if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY = ry;
     }
 
     {
@@ -254,13 +249,25 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 float stepDir   = 0.0f;
                 constexpr float PLAT_PROBE_H = 10.0f;
 
-                tileView.each([&](const Transform& tt, const Collider& tc) {
+                auto probeClimbPlatform = [&](const Transform& tt, const Collider& tc) {
                     if (canStep) return;
                     if (feetY < tt.y || feetY > tt.y + PLAT_PROBE_H) return;
-                    float tileR = tt.x + tc.w;
-                    if (tileR > ladL - 2.0f && tileR <= ladL + 8.0f) canStep = true;
+                    float tileR2 = tt.x + tc.w;
+                    if (tileR2 > ladL - 2.0f && tileR2 <= ladL + 8.0f) canStep = true;
                     if (tt.x >= ladR - 8.0f && tt.x < ladR + 2.0f)  canStep = true;
-                });
+                };
+                if (tileGrid) {
+                    tileGrid->Query(ladL - 10.f, feetY - 1.f, (ladR - ladL) + 20.f, PLAT_PROBE_H + 2.f,
+                        [&](entt::entity te) {
+                            if (canStep) return;
+                            if (!reg.valid(te) || !reg.all_of<TileTag>(te)) return;
+                            probeClimbPlatform(reg.get<Transform>(te), reg.get<Collider>(te));
+                        });
+                } else {
+                    tileView.each([&](const Transform& tt, const Collider& tc) {
+                        probeClimbPlatform(tt, tc);
+                    });
+                }
 
                 if (canStep) {
                     float playerCX = playerX + playerW * 0.5f;
@@ -286,13 +293,25 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 bool  canStep = false;
                 constexpr float PLAT_PROBE_H = 10.0f;
 
-                tileView.each([&](const Transform& tt, const Collider& tc) {
+                auto probeDescPlatform = [&](const Transform& tt, const Collider& tc) {
                     if (canStep) return;
                     if (feetY < tt.y || feetY > tt.y + PLAT_PROBE_H) return;
-                    float tileR = tt.x + tc.w;
-                    if (tileR > ladL - 2.0f && tileR <= ladL + 8.0f) canStep = true;
+                    float tileR2 = tt.x + tc.w;
+                    if (tileR2 > ladL - 2.0f && tileR2 <= ladL + 8.0f) canStep = true;
                     if (tt.x >= ladR - 8.0f && tt.x < ladR + 2.0f)  canStep = true;
-                });
+                };
+                if (tileGrid) {
+                    tileGrid->Query(ladL - 10.f, feetY - 1.f, (ladR - ladL) + 20.f, PLAT_PROBE_H + 2.f,
+                        [&](entt::entity te) {
+                            if (canStep) return;
+                            if (!reg.valid(te) || !reg.all_of<TileTag>(te)) return;
+                            probeDescPlatform(reg.get<Transform>(te), reg.get<Collider>(te));
+                        });
+                } else {
+                    tileView.each([&](const Transform& tt, const Collider& tc) {
+                        probeDescPlatform(tt, tc);
+                    });
+                }
 
                 // Only step off when descending if the player is at this level
                 float playerCY = playerY + playerH * 0.5f;
@@ -434,7 +453,6 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         }
 
         // Ledge detection: probe below leading foot; reverse if no ground.
-        // Ladder tiles count as ground so enemies walk over ladder columns.
         if (!reg.all_of<FloatTag>(ent) && !stunned) {
             constexpr float PROBE_DEPTH = 12.0f;
             float halfW  = c.w * 0.5f;
@@ -444,26 +462,33 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             float probeH = PROBE_DEPTH;
 
             bool groundBelow = false;
-            tileView.each([&](const Transform& tt, const Collider& tc) {
-                if (groundBelow) return;
-                if (probeX + probeW > tt.x &&
-                    probeX          < tt.x + tc.w &&
-                    probeY + probeH > tt.y &&
-                    probeY          < tt.y + tc.h) {
-                    groundBelow = true;
-                }
-            });
+            if (tileGrid) {
+                tileGrid->Query(probeX, probeY, probeW, probeH, [&](entt::entity te) {
+                    if (groundBelow) return;
+                    if (!reg.valid(te) || !reg.all_of<TileTag>(te)) return;
+                    if (reg.all_of<PropTag>(te) || reg.all_of<HazardTag>(te)) return;
+                    auto& tt = reg.get<Transform>(te);
+                    auto& tc = reg.get<Collider>(te);
+                    if (probeX + probeW > tt.x && probeX < tt.x + tc.w &&
+                        probeY + probeH > tt.y && probeY < tt.y + tc.h)
+                        groundBelow = true;
+                });
+            } else {
+                tileView.each([&](const Transform& tt, const Collider& tc) {
+                    if (groundBelow) return;
+                    if (probeX + probeW > tt.x && probeX < tt.x + tc.w &&
+                        probeY + probeH > tt.y && probeY < tt.y + tc.h)
+                        groundBelow = true;
+                });
+            }
 
             if (!groundBelow && climbState) {
                 ladderView.each([&](const Transform& lt, const Collider& lc) {
                     if (groundBelow) return;
                     float ladderTop = lt.y;
-                    if (probeX + probeW > lt.x &&
-                        probeX          < lt.x + lc.w &&
-                        probeY >= ladderTop - 4.0f &&
-                        probeY <= ladderTop + 4.0f) {
+                    if (probeX + probeW > lt.x && probeX < lt.x + lc.w &&
+                        probeY >= ladderTop - 4.0f && probeY <= ladderTop + 4.0f)
                         groundBelow = true;
-                    }
                 });
             }
 
