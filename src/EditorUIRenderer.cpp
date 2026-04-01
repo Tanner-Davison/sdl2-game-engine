@@ -159,7 +159,7 @@ void EditorUIRenderer::RenderToolbar(SDL_Surface* screen, int winW, int toolbarH
             case ToolId::AntiGrav:    return TBBtn::AntiGrav;
             case ToolId::MovingPlat:  return TBBtn::MovingPlat;
             case ToolId::PowerUp:     return TBBtn::PowerUp;
-            case ToolId::Shooter:     return TBBtn::Shooter;
+            case ToolId::Shooter:     return TBBtn::PowerUp;
             case ToolId::Shield:      return TBBtn::Shield;
         }
         return TBBtn::COUNT;
@@ -803,23 +803,30 @@ void EditorUIRenderer::RenderPowerUpPopup(SDL_Surface* screen, const Level& leve
     int ry = py + TITLE_H;
     const auto& puTile = level.tiles[pu.tileIdx];
     const std::string curType = puTile.HasPowerUp() ? puTile.powerUp->type : "";
+    const bool hasShooter = puTile.HasShooter();
     for (int i = 0; i < (int)reg.size(); i++) {
-        bool     isCur = (puTile.HasPowerUp() && curType==reg[i].id);
+        bool isCur = (reg[i].id == "shooter") ? hasShooter
+                                              : (puTile.HasPowerUp() && curType==reg[i].id);
         SDL_Rect row   = {px+PAD, ry+i*(ROW_H+2), PW-PAD*2, ROW_H};
         DrawRect(screen, row, isCur?SDL_Color{20,80,160,220}:SDL_Color{30,35,55,200});
         DrawOutline(screen, row, isCur?SDL_Color{80,180,255,255}:SDL_Color{50,60,90,200});
-        Text lbl(reg[i].label,{200,240,255,255},row.x+6,row.y+7,11);
+        std::string label = reg[i].label;
+        if (reg[i].id == "shooter" && hasShooter) {
+            static const char* kSides[] = {"Top","Right","Bottom","Left"};
+            label += "  [" + std::string(kSides[static_cast<int>(puTile.shooter->side)]) + "]";
+        }
+        Text lbl(label,{200,240,255,255},row.x+6,row.y+7,11);
         lbl.RenderToSurface(screen);
         if (isCur) BlitBadge(screen, cache.GetBadge("ON",{80,255,150,255}), row.x+row.w-28, row.y+8);
     }
     // None row
     {
         int noneY=(int)reg.size()*(ROW_H+2);
-        bool isCur=!level.tiles[pu.tileIdx].HasPowerUp();
+        bool isCur=!level.tiles[pu.tileIdx].HasPowerUp() && !hasShooter;
         SDL_Rect row={px+PAD, ry+noneY, PW-PAD*2, ROW_H};
         DrawRect(screen, row, isCur?SDL_Color{60,20,20,220}:SDL_Color{30,35,55,200});
         DrawOutline(screen, row, isCur?SDL_Color{200,80,80,255}:SDL_Color{50,60,90,200});
-        Text lbl("None (remove power-up)",{200,180,180,255},row.x+6,row.y+7,11);
+        Text lbl("None (remove all)",{200,180,180,255},row.x+6,row.y+7,11);
         lbl.RenderToSurface(screen);
     }
 }
@@ -865,13 +872,8 @@ void EditorUIRenderer::RenderDropOverlay(SDL_Surface* screen, int canvasW, int t
         d1.RenderToSurface(screen);
         BlitBadge(screen, cache.GetBadge("The tile will play that animation when destroyed",
                                          {200,160,255,255}), cx-164, cy+4);
-    } else if (activeToolId==ToolId::Shooter) {
-        Text d1("Drop audio onto a Turret tile for fire SFX",{255,200,140,255},cx-180,cy-32,20);
-        d1.RenderToSurface(screen);
-        BlitBadge(screen, cache.GetBadge(".wav .ogg .mp3 .flac — overwrites existing SFX",
-                                         {255,180,100,255}), cx-164, cy+4);
-    } else if (activeToolId==ToolId::PowerUp) {
-        Text d1("Drop audio onto a Power-Up tile for fire SFX",{200,140,255,255},cx-186,cy-32,20);
+    } else if (activeToolId==ToolId::PowerUp || activeToolId==ToolId::Shooter) {
+        Text d1("Drop audio onto a PowerUp/Turret tile for fire SFX",{200,140,255,255},cx-210,cy-32,20);
         d1.RenderToSurface(screen);
         BlitBadge(screen, cache.GetBadge(".wav .ogg .mp3 .flac — overwrites existing SFX",
                                          {180,120,255,255}), cx-164, cy+4);

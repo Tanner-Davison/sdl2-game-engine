@@ -124,8 +124,8 @@ class LevelEditorScene : public Scene {
             case ToolId::AntiGrav:    return TBBtn::AntiGrav;
             case ToolId::MovingPlat:  return TBBtn::MovingPlat;
             case ToolId::PowerUp:     return TBBtn::PowerUp;
-            case ToolId::Shooter:     return TBBtn::Shooter;
             case ToolId::Shield:      return TBBtn::Shield;
+            case ToolId::Shooter:     return TBBtn::PowerUp; // merged into PowerUp
         }
         return TBBtn::COUNT;
     }

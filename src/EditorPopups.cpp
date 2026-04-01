@@ -264,10 +264,23 @@ bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
         SDL_Rect row = {powerUpRect.x + PAD, py + i * (ROW_H + 2),
                         powerUpRect.w - PAD * 2, ROW_H};
         if (HitTest(row, mx, my)) {
-            auto& t           = ctx.level.tiles[powerUpTileIdx];
-            t.powerUp         = PowerUpData{reg[i].id, reg[i].defaultDuration};
-            ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) +
-                          " -> PowerUp: " + reg[i].label);
+            auto& t = ctx.level.tiles[powerUpTileIdx];
+            if (reg[i].id == "shooter") {
+                // Shooter uses its own ShooterData, not PowerUpData
+                if (t.HasShooter()) {
+                    t.shooter.reset();
+                    ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) +
+                                  " -> shooter removed");
+                } else {
+                    t.shooter = ShooterData{};
+                    ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) +
+                                  " -> shooter (RClick to cycle side, Scroll fire rate)");
+                }
+            } else {
+                t.powerUp = PowerUpData{reg[i].id, reg[i].defaultDuration};
+                ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) +
+                              " -> PowerUp: " + reg[i].label);
+            }
             ClosePowerUpPicker();
             return true;
         }
@@ -278,7 +291,8 @@ bool EditorPopups::HandlePowerUpPickerEvent(const SDL_Event& e, Ctx& ctx) {
                         powerUpRect.w - PAD * 2, ROW_H};
     if (HitTest(noneRow, mx, my)) {
         ctx.level.tiles[powerUpTileIdx].powerUp.reset();
-        ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) + " -> PowerUp removed");
+        ctx.level.tiles[powerUpTileIdx].shooter.reset();
+        ctx.setStatus("Tile " + std::to_string(powerUpTileIdx) + " -> PowerUp/Shooter removed");
         ClosePowerUpPicker();
         return true;
     }

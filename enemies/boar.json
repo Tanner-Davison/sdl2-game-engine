@@ -26,6 +26,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/pigsqueal.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],
@@ -44,6 +46,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/squealbite.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],
@@ -51,13 +55,22 @@
         },
         {
             "folderPath": "game_assets/enemy_sprites/boar/Hurt",
-            "fps": 0.0,
+            "fps": 6.0,
             "hitbox": {
                 "h": 60,
                 "w": 97,
                 "x": 10,
                 "y": 10
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/boarsqueal1.wav",
+                    "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 3
         },
         {
@@ -73,6 +86,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/deadpig.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],

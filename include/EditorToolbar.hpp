@@ -47,7 +47,6 @@ class EditorToolbar {
         AntiGrav,
         MovingPlat,
         PowerUp,
-        Shooter,
         Shield,
         // Group 3 - Action buttons
         Gravity,

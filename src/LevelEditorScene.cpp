@@ -91,6 +91,7 @@ const std::vector<EditorPopups::PowerUpEntry>& LevelEditorScene::GetPowerUpRegis
         {"turret",       "Orbiting Turret (15s)",  15.0f},
         {"healthboost",  "Health Boost (+25%)",     0.0f},
         {"teleport",     "Teleport (entrance)",     0.0f},
+        {"shooter",      "Turret (static)",         0.0f},
     };
     return kRegistry;
 }
@@ -316,25 +317,18 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     int mxA = (int)fmxA, myA = (int)fmyA;
                     int ti = (myA >= TOOLBAR_H && mxA < CanvasW()) ? HitTile(mxA, myA) : -1;
 
-                    // Tool-aware: Shooter tool targets turret tiles
-                    if (mActiveToolId == ToolId::Shooter) {
+                    // Tool-aware: PowerUp tool targets power-up or shooter tiles
+                    if (mActiveToolId == ToolId::PowerUp || mActiveToolId == ToolId::Shooter) {
                         if (ti >= 0 && mLevel.tiles[ti].HasShooter()) {
                             mLevel.tiles[ti].shooter->sfxPath = path;
                             SetStatus("Turret " + std::to_string(ti) + " fire SFX: "
                                       + p.filename().string());
-                        } else {
-                            SetStatus("No turret tile under cursor — select Turret tool & drop on a turret");
-                        }
-                        return true;
-                    }
-                    // Tool-aware: PowerUp tool targets power-up tiles
-                    if (mActiveToolId == ToolId::PowerUp) {
-                        if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
+                        } else if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
                             mLevel.tiles[ti].powerUp->sfxPath = path;
                             SetStatus("Power-up " + std::to_string(ti) + " fire SFX: "
                                       + p.filename().string());
                         } else {
-                            SetStatus("No power-up tile under cursor — select Power-Up tool & drop on a power-up");
+                            SetStatus("No power-up/turret tile under cursor");
                         }
                         return true;
                     }
@@ -618,18 +612,16 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                           (mPopups.movPlatLoop ? "  LOOP" : "") +
                           (mPopups.movPlatTrigger ? "  TRIGGER" : ""));
             }
-        } else if (mActiveToolId == ToolId::Shooter) {
+        } else if (mActiveToolId == ToolId::PowerUp) {
             int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
             if (hovTi >= 0 && mLevel.tiles[hovTi].HasShooter()) {
+                // Scroll adjusts static turret fire rate
                 auto& sd = *mLevel.tiles[hovTi].shooter;
                 sd.fireRate = std::clamp(sd.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
                 char buf[64];
                 std::snprintf(buf, sizeof(buf), "Turret fire rate: %.1f shots/sec", sd.fireRate);
                 SetStatus(buf);
-            }
-        } else if (mActiveToolId == ToolId::PowerUp) {
-            int hovTi = (my >= TOOLBAR_H && mx < CanvasW()) ? HitTile(mx, my) : -1;
-            if (hovTi >= 0 && mLevel.tiles[hovTi].HasPowerUp()) {
+            } else if (hovTi >= 0 && mLevel.tiles[hovTi].HasPowerUp()) {
                 auto& pu = *mLevel.tiles[hovTi].powerUp;
                 if (pu.type == "turret") {
                     pu.fireRate = std::clamp(pu.fireRate + e.wheel.y * 0.5f, 0.5f, 20.0f);
@@ -930,7 +922,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     grp      = (grp + 1) % 10;
                     SetStatus("Tile " + std::to_string(ti) + " group -> " +
                               (grp == 0 ? "standalone" : std::to_string(grp)));
-                } else if (mActiveToolId == ToolId::Shooter && mLevel.tiles[ti].HasShooter()) {
+                } else if ((mActiveToolId == ToolId::Shooter || mActiveToolId == ToolId::PowerUp)
+                           && mLevel.tiles[ti].HasShooter()) {
                     int s = (static_cast<int>(mLevel.tiles[ti].shooter->side) + 1) % 4;
                     mLevel.tiles[ti].shooter->side = static_cast<ShooterSide>(s);
                     static const char* kNames[] = {"Top","Right","Bottom","Left"};
@@ -1101,12 +1094,7 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                         mPopups.powerUpTileIdx  = -1;
                         mPopups.powerUpRegistry = &GetPowerUpRegistry();
                         lblTool->CreateSurface("PowerUp");
-                        SetStatus("PowerUp: click a tile to assign a power-up pickup");
-                        return true;
-                    case TBBtn::Shooter:
-                        SwitchTool(ToolId::Shooter);
-                        lblTool->CreateSurface("Turret");
-                        SetStatus("Turret: LClick toggle, RClick cycle side, Scroll adjust fire rate");
+                        SetStatus("PowerUp: click tile to assign  |  RClick=cycle turret side  |  Scroll=fire rate");
                         return true;
                     case TBBtn::Shield:
                         SwitchTool(ToolId::Shield);

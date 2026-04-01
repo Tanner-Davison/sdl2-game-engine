@@ -522,6 +522,10 @@ bool GameScene::HandleEvent(SDL_Event& e) {
 }
 
 void GameScene::Update(float dt) {
+    // Clean up finished overlap SFX tracks
+    if (Audio() && Audio()->IsReady())
+        Audio()->Sfx().PruneOverlaps();
+
     if (mPaused)
         return;
     if (levelComplete) {
@@ -601,14 +605,47 @@ void GameScene::Update(float dt) {
                  mLevel.gravityMode == GravityMode::WallRun,
                  mLevelW,
                  mLevelH);
+    // Snapshot enemy animation frames + sheets BEFORE AnimationSystem for SFX triggers
+    struct EnemySfxSnap { SDL_Texture* sheet; int frame; int totalFrames; };
+    std::unordered_map<entt::entity, EnemySfxSnap> prevEnemySnap;
+    if (Audio() && Audio()->IsReady()) {
+        auto ev = reg.view<EnemyTag, EnemyAnimData, Renderable, AnimationState>();
+        ev.each([&](entt::entity e, const EnemyAnimData&, const Renderable& r,
+                     const AnimationState& anim) {
+            prevEnemySnap[e] = {r.sheet, anim.currentFrame, anim.totalFrames};
+        });
+    }
+
     AnimationSystem(reg, dt);
 
-    // Snapshot enemy animation sheets before transitions for SFX trigger
-    std::unordered_map<entt::entity, SDL_Texture*> prevEnemySheet;
-    if (Audio() && Audio()->IsReady()) {
-        auto ev = reg.view<EnemyTag, EnemyAnimData, Renderable>();
-        ev.each([&](entt::entity e, const EnemyAnimData&, const Renderable& r) {
-            prevEnemySheet[e] = r.sheet;
+    // Detect animation loop wraps and re-trigger multi-file SFX (round-robin)
+    if (Audio() && Audio()->IsReady() && !prevEnemySnap.empty()) {
+        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>(
+            entt::exclude<DeadTag>);
+        ev.each([&](entt::entity e, EnemyAnimData& ead,
+                     const AnimationState& anim, const Renderable& r) {
+            auto pit = prevEnemySnap.find(e);
+            if (pit == prevEnemySnap.end()) return;
+            if (r.sheet != pit->second.sheet) return;  // sheet changed — handled below
+            if (!anim.looping) return;
+
+            // Detect frame wrap: was on last frame, now on frame 0
+            bool looped = (pit->second.frame == pit->second.totalFrames - 1 &&
+                           anim.currentFrame == 0 && pit->second.totalFrames > 1);
+            if (!looped) return;
+
+            int slotIdx = -1;
+            if (r.sheet == ead.moveSheet)        slotIdx = 1;
+            else if (r.sheet == ead.idleSheet)   slotIdx = 0;
+            if (slotIdx < 0) return;
+
+            auto& ss = ead.slotSfx[slotIdx];
+            if ((int)ss.files.size() <= 1) return;  // single file loops via SDL mixer
+
+            const auto& fi = ss.files[ss.nextIdx];
+            std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
+            if (!sfxId.empty() && Audio()->Sfx().PlayOverlap(sfxId, fi.volume))
+                ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
         });
     }
 
@@ -632,6 +669,11 @@ void GameScene::Update(float dt) {
                 anim.looping      = true;
                 ead.ApplyHitbox(ead.moveHitbox, reg, e);
             }
+            // Clear attack state so the enemy can re-trigger an attack
+            // after recovering from hurt (otherwise eas.attacking stays
+            // true and the proximity trigger never fires again).
+            if (auto* eas = reg.try_get<EnemyAttackState>(e))
+                eas->attacking = false;
         });
 
         // Attack recovery: when attack anim finishes, restore move and tick cooldown
@@ -928,16 +970,17 @@ void GameScene::Update(float dt) {
         stompCount++;
     }
 
-    // Fire enemy SFX on animation transitions
-    if (Audio() && Audio()->IsReady() && !prevEnemySheet.empty()) {
+    // Fire enemy SFX on animation sheet transitions
+    if (Audio() && Audio()->IsReady() && !prevEnemySnap.empty()) {
         auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>();
         ev.each([&](entt::entity e, EnemyAnimData& ead,
                      const AnimationState& anim, const Renderable& r) {
-            auto pit = prevEnemySheet.find(e);
-            if (pit == prevEnemySheet.end()) return;
-            if (r.sheet == pit->second) return;
+            auto pit = prevEnemySnap.find(e);
+            if (pit == prevEnemySnap.end()) return;
+            if (r.sheet == pit->second.sheet) return;  // no sheet change
             int slotIdx = -1;
-            if (r.sheet == ead.moveSheet)   slotIdx = 1;
+            if (r.sheet == ead.idleSheet)        slotIdx = 0;
+            else if (r.sheet == ead.moveSheet)   slotIdx = 1;
             else if (r.sheet == ead.attackSheet) slotIdx = 2;
             else if (r.sheet == ead.hurtSheet)   slotIdx = 3;
             else if (r.sheet == ead.deadSheet)   slotIdx = 4;
@@ -946,15 +989,16 @@ void GameScene::Update(float dt) {
             const auto& fi = ss.files[ss.nextIdx];
             std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
             if (sfxId.empty()) return;
-            if (ss.files.size() > 1) {
-                if (Audio()->Sfx().PlayOneShotSeq(sfxId, fi.volume))
-                    ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
-            } else {
-                float dur = 0.0f;
-                if (fi.timeStretch && anim.fps > 0.0f && anim.totalFrames > 0)
-                    dur = static_cast<float>(anim.totalFrames) / anim.fps;
+            if (fi.timeStretch && anim.fps > 0.0f && anim.totalFrames > 0) {
+                // Time-stretch: match sound duration to animation duration
+                float dur = static_cast<float>(anim.totalFrames) / anim.fps;
                 Audio()->Sfx().PlayTimed(sfxId, dur, anim.looping, fi.volume);
+            } else {
+                // No time-stretch: fire-and-forget, let sounds overlap naturally
+                Audio()->Sfx().PlayOverlap(sfxId, fi.volume);
             }
+            if (ss.files.size() > 1)
+                ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
         });
     }
 
@@ -3008,6 +3052,7 @@ void GameScene::Spawn() {
                     ead.moveFrames   = frames;
                     ead.moveFps      = fps;
                     ead.moveHitbox   = tc->moveHitbox;
+                    ead.idleSheet    = tc->idleSheet ? tc->idleSheet->GetTexture() : nullptr;
                     ead.idleHitbox   = tc->idleHitbox;
                     ead.attackSheet  = tc->attackSheet ? tc->attackSheet->GetTexture() : nullptr;
                     ead.attackFrames = tc->attackFrames;

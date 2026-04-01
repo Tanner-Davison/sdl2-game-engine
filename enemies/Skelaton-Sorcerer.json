@@ -6,44 +6,108 @@
             "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Idle",
             "fps": 0.0,
             "hitbox": {
-                "h": 103,
-                "w": 78,
-                "x": 46,
-                "y": 49
+                "h": 111,
+                "w": 37,
+                "x": 84,
+                "y": 46
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/evildeadzombie.wav",
+                    "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 0
         },
         {
             "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Move",
             "fps": 0.0,
             "hitbox": {
-                "h": 107,
-                "w": 74,
-                "x": 51,
+                "h": 106,
+                "w": 39,
+                "x": 67,
                 "y": 47
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/zombiefever.wav",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/zombiesound.wav",
+                    "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 1
         },
         {
             "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Attack",
             "fps": 0.0,
             "hitbox": {
-                "h": 117,
-                "w": 120,
-                "x": 52,
-                "y": 32
+                "h": 104,
+                "w": 96,
+                "x": 51,
+                "y": 45
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombie-attack-1.wav",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack2.wav",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack3.wav",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 2
         },
         {
             "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Hurt",
-            "fps": 0.0,
+            "fps": 7.0,
             "hitbox": {
-                "h": 130,
-                "w": 64,
-                "x": 55,
-                "y": 22
+                "h": 107,
+                "w": 73,
+                "x": 50,
+                "y": 47
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/zombiehurting.wav",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                },
+                {
+                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieehh.mp3",
+                    "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 3
         },
         {
@@ -55,6 +119,15 @@
                 "x": 32,
                 "y": 82
             },
+            "sfx": [
+                {
+                    "path": "/Users/tanner.davison/Downloads/zombiedeath.wav",
+                    "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
+                    "volume": 1.0
+                }
+            ],
             "slot": 4
         }
     ],

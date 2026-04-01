@@ -14,6 +14,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/heartbeat.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],
@@ -32,6 +34,8 @@
                 {
                     "path": "game_assets/audio/sfx/player/footsteps.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],
@@ -61,6 +65,8 @@
                 {
                     "path": "game_assets/audio/sfx/player/jump.wav",
                     "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 0.49999991059303284
                 }
             ],
@@ -81,7 +87,7 @@
             "folderPath": "game_assets/char_sprites/king/Slash",
             "fps": 40.0,
             "hitbox": {
-                "h": 103,
+                "h": 121,
                 "w": 111,
                 "x": 62,
                 "y": 45
@@ -90,6 +96,8 @@
                 {
                     "path": "game_assets/audio/sfx/player/slash.wav",
                     "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 0.2999999225139618
                 }
             ],
@@ -108,6 +116,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/gruntmale/malegruntpainone.wav",
                     "timeStretch": true,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],
@@ -126,6 +136,8 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/maledeath.wav",
                     "timeStretch": false,
+                    "trimEnd": 1.0,
+                    "trimStart": 0.0,
                     "volume": 1.0
                 }
             ],

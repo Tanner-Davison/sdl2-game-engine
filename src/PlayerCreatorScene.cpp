@@ -607,6 +607,31 @@ void PlayerCreatorScene::Update(float dt) {
         return;
     }
 
+    // Compute animation duration for time-stretch
+    float animDur = 0.0f;
+    {
+        const auto& prev = mPreviews[mSelectedSlot];
+        float slotFps = mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).fps;
+        float fps = (slotFps > 0.0f) ? slotFps : ANIM_FPS;
+        if (prev.has_value() && !prev->frames.empty() && fps > 0.0f)
+            animDur = (float)prev->frames.size() / fps;
+    }
+
+    auto calcRatio = [&](const PlayerProfile::SfxEntry& e, const std::string& id) -> float {
+        if (!e.timeStretch || animDur <= 0.0f) return 1.0f;
+        float naturalDur = sfx.GetDuration(id);
+        if (naturalDur <= 0.0f) return 1.0f;
+        return std::clamp(naturalDur / animDur, 0.25f, 4.0f);
+    };
+
+    auto effectiveDur = [&](const PlayerProfile::SfxEntry& e, const std::string& id) -> float {
+        float natural = sfx.GetDuration(id);
+        if (natural <= 0.0f) return 0.0f;
+        if (!e.timeStretch || animDur <= 0.0f) return natural;
+        float ratio = std::clamp(natural / animDur, 0.25f, 4.0f);
+        return natural / ratio;
+    };
+
     int fileIdx = std::clamp(mSelectedSfxFile, 0, (int)slotSfx.size() - 1);
     const auto& entry = slotSfx[fileIdx];
     std::string wantId = audio::PlayerSlotSfxId(mSelectedSlot, fileIdx);
@@ -627,23 +652,42 @@ void PlayerCreatorScene::Update(float dt) {
         mPreviewPlaying = false;
     }
 
-    float totalDur = sfx.GetDuration(mPreviewSfxId);
-    if (totalDur <= 0.0f) return;
+    float playDur = effectiveDur(entry, mPreviewSfxId);
+    if (playDur <= 0.0f) return;
 
-    float tStart = entry.trimStart * totalDur;
-    float tEnd   = entry.trimEnd   * totalDur;
+    float naturalDur = sfx.GetDuration(mPreviewSfxId);
+    float tStart = entry.trimStart * naturalDur;
+    float tEnd   = entry.trimEnd   * naturalDur;
     if (tEnd <= tStart) return;
 
     mPreviewTimer += dt;
 
-    if (!mPreviewPlaying || mPreviewTimer >= totalDur) {
-        sfx.PlayPreview(mPreviewSfxId, entry.volume);
+    auto startFile = [&](int fi) {
+        const auto& e = slotSfx[fi];
+        std::string id = audio::PlayerSlotSfxId(mSelectedSlot, fi);
+        if (!sfx.Has(id)) sfx.Load(id, e.path);
+        float ratio = calcRatio(e, id);
+        sfx.PlayPreview(id, e.volume, ratio);
+        mPreviewSfxId   = id;
+        mPreviewPath    = e.path;
+        mPreviewFile    = fi;
         mPreviewPlaying = true;
-        mPreviewTimer = 0.0f;
-    }
+        mPreviewTimer   = 0.0f;
+    };
 
-    bool inWindow = (mPreviewTimer >= tStart && mPreviewTimer < tEnd);
-    sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
+    if (!mPreviewPlaying || mPreviewTimer >= playDur) {
+        if (mPreviewPlaying && (int)slotSfx.size() > 1) {
+            mSelectedSfxFile = (mSelectedSfxFile + 1) % (int)slotSfx.size();
+            startFile(mSelectedSfxFile);
+        } else {
+            startFile(fileIdx);
+        }
+    } else {
+        float ratio = calcRatio(entry, mPreviewSfxId);
+        float curNatural = mPreviewTimer * ratio;
+        bool inWindow = (curNatural >= tStart && curNatural < tEnd);
+        sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
+    }
 }
 
 // --- Render ---
@@ -732,11 +776,19 @@ void PlayerCreatorScene::Render(Window& window, float /*alpha*/) {
             const auto& entry = mProfile.slots[i].sfx[fi];
 
             bool isSelected = (i == mSelectedSlot && fi == mSelectedSfxFile);
-            fillRect(s, ui.nameRect, isSelected ? SDL_Color{50, 65, 95, 255} : SDL_Color{35, 55, 80, 255});
-            outlineRect(s, ui.nameRect, isSelected ? SDL_Color{200, 140, 40, 255} : SDL_Color{60, 120, 180, 255});
+            bool isPlaying  = isSelected && mPreviewPlaying && mPreviewFile == fi;
+            SDL_Color bgCol  = isPlaying  ? SDL_Color{35, 75, 50, 255}
+                             : isSelected ? SDL_Color{50, 65, 95, 255}
+                                          : SDL_Color{35, 55, 80, 255};
+            SDL_Color outCol = isPlaying  ? SDL_Color{80, 255, 120, 255}
+                             : isSelected ? SDL_Color{200, 140, 40, 255}
+                                          : SDL_Color{60, 120, 180, 255};
+            fillRect(s, ui.nameRect, bgCol);
+            outlineRect(s, ui.nameRect, outCol);
             std::string fname = fs::path(entry.path).filename().string();
             if ((int)fname.size() > 20) fname = fname.substr(0, 18) + "..";
-            drawText(s, fname, ui.nameRect.x + 3, ui.nameRect.y + 2, 9, {120, 190, 255, 255});
+            SDL_Color nameCol = isPlaying ? SDL_Color{120, 255, 160, 255} : SDL_Color{120, 190, 255, 255};
+            drawText(s, (isPlaying ? "> " : "") + fname, ui.nameRect.x + 3, ui.nameRect.y + 2, 9, nameCol);
 
             bool ts = entry.timeStretch;
             SDL_Color tsBg  = ts ? SDL_Color{40, 80, 50, 255}  : SDL_Color{40, 35, 55, 255};

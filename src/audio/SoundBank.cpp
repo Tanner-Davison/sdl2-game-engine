@@ -13,28 +13,28 @@ namespace fs = std::filesystem;
 // Converted file cached next to original with "_pcm16" suffix.
 static std::string TryAutoConvert(const std::string& srcPath) {
     fs::path src(srcPath);
-    if (!fs::is_regular_file(src)) return "";
+    if (!fs::is_regular_file(src))
+        return "";
 
-    fs::path dstDir = src.parent_path();
-    std::string stem = src.stem().string();
-    fs::path dst = dstDir / (stem + "_pcm16.wav");
+    fs::path    dstDir = src.parent_path();
+    std::string stem   = src.stem().string();
+    fs::path    dst    = dstDir / (stem + "_pcm16.wav");
 
-    if (fs::exists(dst)) return dst.string();
+    if (fs::exists(dst))
+        return dst.string();
 
     std::print("[SoundBank] Auto-converting {} to PCM16 WAV...\n", srcPath);
 
-    std::string cmd = "afconvert -f WAVE -d LEI16@44100 "
-                    + std::string("'") + srcPath + "' '"
-                    + dst.string() + "' 2>/dev/null";
-    int ret = std::system(cmd.c_str());
+    std::string cmd = "afconvert -f WAVE -d LEI16@44100 " + std::string("'") + srcPath +
+                      "' '" + dst.string() + "' 2>/dev/null";
+    int         ret = std::system(cmd.c_str());
     if (ret == 0 && fs::exists(dst)) {
         std::print("[SoundBank] Converted via afconvert: {}\n", dst.string());
         return dst.string();
     }
 
-    cmd = "ffmpeg -y -loglevel error -i "
-        + std::string("'") + srcPath + "' -acodec pcm_s16le -ar 44100 '"
-        + dst.string() + "' 2>/dev/null";
+    cmd = "ffmpeg -y -loglevel error -i " + std::string("'") + srcPath +
+          "' -acodec pcm_s16le -ar 44100 '" + dst.string() + "' 2>/dev/null";
     ret = std::system(cmd.c_str());
     if (ret == 0 && fs::exists(dst)) {
         std::print("[SoundBank] Converted via ffmpeg: {}\n", dst.string());
@@ -49,6 +49,9 @@ namespace audio {
 
 SoundBank::~SoundBank() {
     UnloadAll();
+    for (auto* t : mOverlapTracks)
+        MIX_DestroyTrack(t);
+    mOverlapTracks.clear();
     if (mPreviewTrack) {
         MIX_DestroyTrack(mPreviewTrack);
         mPreviewTrack = nullptr;
@@ -77,26 +80,30 @@ SoundBank::SoundBank(SoundBank&& other) noexcept
     , mPreviewTrack(std::exchange(other.mPreviewTrack, nullptr))
     , mAudios(std::move(other.mAudios))
     , mVolume(other.mVolume) {
-    other.mSeqStartMs = 0;
+    other.mSeqStartMs    = 0;
     other.mSeqDurationMs = 0;
-    other.mVolume = 1.0f;
+    other.mVolume        = 1.0f;
 }
 
 SoundBank& SoundBank::operator=(SoundBank&& other) noexcept {
     if (this != &other) {
         UnloadAll();
-        if (mSeqTrack) MIX_DestroyTrack(mSeqTrack);
-        if (mOneShotTrack) MIX_DestroyTrack(mOneShotTrack);
-        if (mSfxTrack) MIX_DestroyTrack(mSfxTrack);
-        mMixer        = std::exchange(other.mMixer, nullptr);
-        mSfxTrack     = std::exchange(other.mSfxTrack, nullptr);
-        mOneShotTrack = std::exchange(other.mOneShotTrack, nullptr);
-        mSeqTrack     = std::exchange(other.mSeqTrack, nullptr);
-        mSeqStartMs   = other.mSeqStartMs;
-        mSeqDurationMs = other.mSeqDurationMs;
-        other.mSeqStartMs = 0;
+        if (mSeqTrack)
+            MIX_DestroyTrack(mSeqTrack);
+        if (mOneShotTrack)
+            MIX_DestroyTrack(mOneShotTrack);
+        if (mSfxTrack)
+            MIX_DestroyTrack(mSfxTrack);
+        mMixer               = std::exchange(other.mMixer, nullptr);
+        mSfxTrack            = std::exchange(other.mSfxTrack, nullptr);
+        mOneShotTrack        = std::exchange(other.mOneShotTrack, nullptr);
+        mSeqTrack            = std::exchange(other.mSeqTrack, nullptr);
+        mSeqStartMs          = other.mSeqStartMs;
+        mSeqDurationMs       = other.mSeqDurationMs;
+        other.mSeqStartMs    = 0;
         other.mSeqDurationMs = 0;
-        if (mPreviewTrack) MIX_DestroyTrack(mPreviewTrack);
+        if (mPreviewTrack)
+            MIX_DestroyTrack(mPreviewTrack);
         mPreviewTrack = std::exchange(other.mPreviewTrack, nullptr);
         mAudios       = std::move(other.mAudios);
         mVolume       = other.mVolume;
@@ -130,7 +137,8 @@ void SoundBank::SetMixer(MIX_Mixer* mixer) {
 }
 
 bool SoundBank::Load(const std::string& id, const std::string& path) {
-    if (path.empty() || !mMixer) return false;
+    if (path.empty() || !mMixer)
+        return false;
 
     Unload(id);
 
@@ -142,8 +150,8 @@ bool SoundBank::Load(const std::string& id, const std::string& path) {
             audio = MIX_LoadAudio(mMixer, converted.c_str(), true);
 
         if (!audio) {
-            std::print("[SoundBank] Failed to load '{}' from {}: {}\n",
-                       id, path, SDL_GetError());
+            std::print(
+                "[SoundBank] Failed to load '{}' from {}: {}\n", id, path, SDL_GetError());
             return false;
         }
     }
@@ -177,7 +185,7 @@ void SoundBank::UnloadAll() {
         MIX_StopTrack(mSeqTrack, 0);
         MIX_SetTrackAudio(mSeqTrack, nullptr);
     }
-    mSeqStartMs = 0;
+    mSeqStartMs    = 0;
     mSeqDurationMs = 0;
     if (mOneShotTrack) {
         MIX_StopTrack(mOneShotTrack, 0);
@@ -193,10 +201,12 @@ void SoundBank::UnloadAll() {
 }
 
 bool SoundBank::Play(std::string_view id) {
-    if (!mMixer) return false;
+    if (!mMixer)
+        return false;
 
     auto it = mAudios.find(id);
-    if (it == mAudios.end()) return false;
+    if (it == mAudios.end())
+        return false;
 
     if (!MIX_PlayAudio(mMixer, it->second)) {
         std::print("[SoundBank] Play '{}' failed: {}\n", id, SDL_GetError());
@@ -205,16 +215,56 @@ bool SoundBank::Play(std::string_view id) {
     return true;
 }
 
-bool SoundBank::PlayOneShotSeq(std::string_view id, float gain) {
-    if (!mMixer) return false;
+bool SoundBank::PlayOverlap(std::string_view id, float gain) {
+    if (!mMixer)
+        return false;
 
     auto it = mAudios.find(id);
-    if (it == mAudios.end()) return false;
+    if (it == mAudios.end())
+        return false;
 
-    if (!mSeqTrack) return Play(id);
+    // Create a temporary track so each sound plays independently.
+    MIX_Track* trk = MIX_CreateTrack(mMixer);
+    if (!trk)
+        return Play(id); // fallback to unmanaged
+
+    if (!MIX_SetTrackAudio(trk, it->second)) {
+        MIX_DestroyTrack(trk);
+        return Play(id);
+    }
+
+    MIX_SetTrackGain(trk, std::clamp(gain, 0.0f, 1.0f));
+    MIX_SetTrackFrequencyRatio(trk, 1.0f);
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
+    bool ok = MIX_PlayTrack(trk, props);
+    SDL_DestroyProperties(props);
+
+    if (!ok) {
+        MIX_DestroyTrack(trk);
+        return Play(id);
+    }
+
+    // Track auto-stops when the audio ends; stash for cleanup.
+    mOverlapTracks.push_back(trk);
+    return true;
+}
+
+bool SoundBank::PlayOneShotSeq(std::string_view id, float gain) {
+    if (!mMixer)
+        return false;
+
+    auto it = mAudios.find(id);
+    if (it == mAudios.end())
+        return false;
+
+    if (!mSeqTrack)
+        return Play(id);
 
     MIX_StopTrack(mSeqTrack, 0);
-    if (!MIX_SetTrackAudio(mSeqTrack, it->second)) return Play(id);
+    if (!MIX_SetTrackAudio(mSeqTrack, it->second))
+        return Play(id);
     MIX_SetTrackGain(mSeqTrack, std::clamp(gain, 0.0f, 1.0f));
     MIX_SetTrackFrequencyRatio(mSeqTrack, 1.0f);
 
@@ -224,30 +274,34 @@ bool SoundBank::PlayOneShotSeq(std::string_view id, float gain) {
     SDL_DestroyProperties(props);
 
     if (ok) {
-        mSeqStartMs = SDL_GetTicks();
+        mSeqStartMs   = SDL_GetTicks();
         Sint64 frames = MIX_GetAudioDuration(it->second);
-        mSeqDurationMs = (frames > 0)
-            ? static_cast<Uint64>(MIX_AudioFramesToMS(it->second, frames))
-            : 0;
+        mSeqDurationMs =
+            (frames > 0) ? static_cast<Uint64>(MIX_AudioFramesToMS(it->second, frames)) : 0;
     }
     return ok;
 }
 
 bool SoundBank::PlayTimed(std::string_view id, float targetSec, bool loop, float gain) {
-    if (!mMixer) return false;
+    if (!mMixer)
+        return false;
 
     // Non-looping, non-time-stretched: use one-shot track so sound finishes
     // naturally (StopManaged won't touch it).
     if (targetSec <= 0.0f && !loop) {
-        if (gain >= 0.99f && !mOneShotTrack) return Play(id);
+        if (gain >= 0.99f && !mOneShotTrack)
+            return Play(id);
 
         auto it = mAudios.find(id);
-        if (it == mAudios.end()) return false;
+        if (it == mAudios.end())
+            return false;
 
-        if (!mOneShotTrack) return Play(id);
+        if (!mOneShotTrack)
+            return Play(id);
 
         MIX_StopTrack(mOneShotTrack, 0);
-        if (!MIX_SetTrackAudio(mOneShotTrack, it->second)) return Play(id);
+        if (!MIX_SetTrackAudio(mOneShotTrack, it->second))
+            return Play(id);
         MIX_SetTrackGain(mOneShotTrack, std::clamp(gain, 0.0f, 1.0f));
         MIX_SetTrackFrequencyRatio(mOneShotTrack, 1.0f);
 
@@ -267,9 +321,11 @@ bool SoundBank::PlayTimed(std::string_view id, float targetSec, bool loop, float
     MIX_Audio* audio = it->second;
 
     Sint64 frames = MIX_GetAudioDuration(audio);
-    if (frames <= 0) return Play(id);
+    if (frames <= 0)
+        return Play(id);
     Sint64 naturalMs = MIX_AudioFramesToMS(audio, frames);
-    if (naturalMs <= 0) return Play(id);
+    if (naturalMs <= 0)
+        return Play(id);
 
     float naturalSec = static_cast<float>(naturalMs) / 1000.0f;
 
@@ -279,17 +335,24 @@ bool SoundBank::PlayTimed(std::string_view id, float targetSec, bool loop, float
         ratio = std::clamp(ratio, 0.25f, 4.0f);
     }
 
-    if (!mSfxTrack) return Play(id);
+    if (!mSfxTrack)
+        return Play(id);
 
     MIX_StopTrack(mSfxTrack, 0);
 
-    if (!MIX_SetTrackAudio(mSfxTrack, audio)) return Play(id);
+    if (!MIX_SetTrackAudio(mSfxTrack, audio))
+        return Play(id);
 
     MIX_SetTrackFrequencyRatio(mSfxTrack, ratio);
     MIX_SetTrackGain(mSfxTrack, std::clamp(gain, 0.0f, 1.0f));
 
-    std::print("[SoundBank] PlayTimed '{}': natural={:.2f}s target={:.2f}s ratio={:.2f} loop={}\n",
-              id, naturalSec, targetSec, ratio, loop);
+    std::print(
+        "[SoundBank] PlayTimed '{}': natural={:.2f}s target={:.2f}s ratio={:.2f} loop={}\n",
+        id,
+        naturalSec,
+        targetSec,
+        ratio,
+        loop);
 
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, loop ? -1 : 0);
@@ -297,7 +360,8 @@ bool SoundBank::PlayTimed(std::string_view id, float targetSec, bool loop, float
     SDL_DestroyProperties(props);
 
     if (!ok) {
-        std::print("[SoundBank] PlayTimed '{}' MIX_PlayTrack FAILED: {}\n", id, SDL_GetError());
+        std::print(
+            "[SoundBank] PlayTimed '{}' MIX_PlayTrack FAILED: {}\n", id, SDL_GetError());
         MIX_SetTrackFrequencyRatio(mSfxTrack, 1.0f);
         return false;
     }
@@ -332,25 +396,44 @@ void SoundBank::FadeOutSeq(int ms) {
 void SoundBank::StopSeq() {
     if (mSeqTrack)
         MIX_StopTrack(mSeqTrack, 0);
-    mSeqStartMs = 0;
+    mSeqStartMs    = 0;
     mSeqDurationMs = 0;
 }
 
 void SoundBank::StopAll() {
     if (mMixer)
         MIX_StopAllTracks(mMixer, 0);
+    for (auto* t : mOverlapTracks)
+        MIX_DestroyTrack(t);
+    mOverlapTracks.clear();
 }
 
-bool SoundBank::PlayPreview(std::string_view id, float gain) {
-    if (!mMixer || !mPreviewTrack) return false;
+void SoundBank::PruneOverlaps() {
+    mOverlapTracks.erase(std::remove_if(mOverlapTracks.begin(),
+                                        mOverlapTracks.end(),
+                                        [](MIX_Track* t) {
+                                            if (!MIX_TrackPlaying(t)) {
+                                                MIX_DestroyTrack(t);
+                                                return true;
+                                            }
+                                            return false;
+                                        }),
+                         mOverlapTracks.end());
+}
+
+bool SoundBank::PlayPreview(std::string_view id, float gain, float freqRatio) {
+    if (!mMixer || !mPreviewTrack)
+        return false;
 
     auto it = mAudios.find(id);
-    if (it == mAudios.end()) return false;
+    if (it == mAudios.end())
+        return false;
 
     MIX_StopTrack(mPreviewTrack, 0);
-    if (!MIX_SetTrackAudio(mPreviewTrack, it->second)) return false;
+    if (!MIX_SetTrackAudio(mPreviewTrack, it->second))
+        return false;
     MIX_SetTrackGain(mPreviewTrack, std::clamp(gain, 0.0f, 1.0f));
-    MIX_SetTrackFrequencyRatio(mPreviewTrack, 1.0f);
+    MIX_SetTrackFrequencyRatio(mPreviewTrack, std::clamp(freqRatio, 0.25f, 4.0f));
 
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
@@ -380,10 +463,12 @@ bool SoundBank::Has(std::string_view id) const {
 
 float SoundBank::GetDuration(std::string_view id) const {
     auto it = mAudios.find(id);
-    if (it == mAudios.end()) return 0.0f;
+    if (it == mAudios.end())
+        return 0.0f;
 
     Sint64 frames = MIX_GetAudioDuration(it->second);
-    if (frames <= 0) return 0.0f;
+    if (frames <= 0)
+        return 0.0f;
     Sint64 ms = MIX_AudioFramesToMS(it->second, frames);
     return static_cast<float>(ms) / 1000.0f;
 }

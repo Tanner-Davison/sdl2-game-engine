@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace audio {
 
@@ -35,6 +36,13 @@ class SoundBank {
     /// Fire-and-forget playback at natural speed.
     bool Play(std::string_view id);
 
+    /// Fire-and-forget with per-sound gain. Sounds overlap freely —
+    /// each call creates an independent playback that finishes on its own.
+    bool PlayOverlap(std::string_view id, float gain = 1.0f);
+
+    /// Destroy finished overlap tracks. Call once per frame.
+    void PruneOverlaps();
+
     /// Play SFX adjusted to fit @p targetSec by changing frequency ratio.
     /// If targetSec <= 0 and !loop, plays on the one-shot track instead.
     /// @param gain  Per-sound volume multiplier (0.0 .. 1.0).
@@ -61,7 +69,8 @@ class SoundBank {
     void StopAll();
 
     /// Play once on the dedicated preview track (non-looping, editor use).
-    bool PlayPreview(std::string_view id, float gain = 1.0f);
+    /// @param freqRatio  Playback speed multiplier (1.0 = natural, 2.0 = 2× faster).
+    bool PlayPreview(std::string_view id, float gain = 1.0f, float freqRatio = 1.0f);
 
     /// Adjust preview track gain in real-time (for trim muting).
     void SetPreviewGain(float gain);
@@ -108,6 +117,9 @@ class SoundBank {
 
     std::unordered_map<std::string, MIX_Audio*, StringHash, std::equal_to<>> mAudios;
     float mVolume = 1.0f;
+
+    // Tracks created by PlayOverlap — cleaned up once finished.
+    std::vector<MIX_Track*> mOverlapTracks;
 };
 
 } // namespace audio

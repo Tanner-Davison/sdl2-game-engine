@@ -201,6 +201,14 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         if (auto* hf = reg.try_get<HitFlash>(ent))
             stunned = hf->timer > 0.0f;
 
+        // Also freeze movement while playing hurt animation
+        if (!stunned) {
+            if (auto* ead = reg.try_get<EnemyAnimData>(ent)) {
+                if (ead->hurtSheet && r.sheet == ead->hurtSheet && !reg.all_of<DeadTag>(ent))
+                    stunned = true;
+            }
+        }
+
         auto* climbState = reg.try_get<EnemyClimbState>(ent);
 
         // Stepping off ladder: walk horizontally toward player until clear of

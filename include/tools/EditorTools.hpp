@@ -26,11 +26,11 @@ inline std::unique_ptr<EditorTool> MakeEditorTool(ToolId id) {
         case ToolId::Slope:       return std::make_unique<SlopeTool>();
         case ToolId::Hazard:      return std::make_unique<HazardTool>();
         case ToolId::AntiGrav:    return std::make_unique<AntiGravTool>();
-        case ToolId::Shooter:     return std::make_unique<ShooterTool>();
         case ToolId::Shield:      return std::make_unique<ShieldTool>();
 
         case ToolId::Action:
         case ToolId::PowerUp:
+        case ToolId::Shooter:  // merged into PowerUp popup
         case ToolId::MovingPlat:
             return nullptr;
     }

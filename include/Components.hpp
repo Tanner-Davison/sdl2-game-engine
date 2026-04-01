@@ -196,6 +196,7 @@ struct EnemyAnimData {
     float                 moveFps     = 7.0f;
     EnemyHitbox           moveHitbox;
 
+    SDL_Texture*          idleSheet   = nullptr;  // nullptr = same as moveSheet
     EnemyHitbox           idleHitbox;
     int spriteW = 40, spriteH = 40;
     std::string typeName;
