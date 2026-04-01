@@ -25,7 +25,7 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/pigsqueal.wav",
-                    "timeStretch": false,
+                    "timeStretch": true,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
@@ -35,7 +35,7 @@
         },
         {
             "folderPath": "game_assets/enemy_sprites/boar/Attack",
-            "fps": 42.0,
+            "fps": 10.0,
             "hitbox": {
                 "h": 61,
                 "w": 105,
@@ -45,9 +45,9 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/squealbite.wav",
-                    "timeStretch": false,
-                    "trimEnd": 1.0,
-                    "trimStart": 0.0,
+                    "timeStretch": true,
+                    "trimEnd": 0.4151785671710968,
+                    "trimStart": 0.3125,
                     "volume": 1.0
                 }
             ],
@@ -55,7 +55,7 @@
         },
         {
             "folderPath": "game_assets/enemy_sprites/boar/Hurt",
-            "fps": 6.0,
+            "fps": 5.0,
             "hitbox": {
                 "h": 60,
                 "w": 97,
@@ -65,9 +65,9 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/boarsqueal1.wav",
-                    "timeStretch": false,
+                    "timeStretch": true,
                     "trimEnd": 1.0,
-                    "trimStart": 0.0,
+                    "trimStart": 0.4598214328289032,
                     "volume": 1.0
                 }
             ],
@@ -86,7 +86,7 @@
                 {
                     "path": "/Users/tanner.davison/Downloads/deadpig.wav",
                     "timeStretch": false,
-                    "trimEnd": 1.0,
+                    "trimEnd": 0.71875,
                     "trimStart": 0.0,
                     "volume": 1.0
                 }

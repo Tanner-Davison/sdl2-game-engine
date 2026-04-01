@@ -28,6 +28,11 @@ class SoundBank {
     /// If @p id already exists the old audio is freed.
     bool Load(const std::string& id, const std::string& path);
 
+    /// Load a trimmed portion of the audio (trimStart/trimEnd are 0–1 ratios).
+    /// Uses ffmpeg to extract the sub-clip if trim is non-default.
+    bool LoadTrimmed(const std::string& id, const std::string& path,
+                     float trimStart, float trimEnd);
+
     /// Free a single SFX by id. No-op if not found.
     void Unload(const std::string& id);
 
@@ -69,8 +74,8 @@ class SoundBank {
     void StopAll();
 
     /// Play once on the dedicated preview track (non-looping, editor use).
-    /// @param freqRatio  Playback speed multiplier (1.0 = natural, 2.0 = 2× faster).
-    bool PlayPreview(std::string_view id, float gain = 1.0f, float freqRatio = 1.0f);
+    /// @param startSec  Seek to this position (in seconds) after starting.
+    bool PlayPreview(std::string_view id, float gain = 1.0f, float startSec = 0.0f);
 
     /// Adjust preview track gain in real-time (for trim muting).
     void SetPreviewGain(float gain);

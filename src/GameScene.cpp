@@ -389,7 +389,8 @@ void GameScene::Load(Window& window) {
                     std::print("[Audio] Loading slot {} file {} sfxId='{}' path='{}'\n",
                                i, fi, sfxId, slot.sfx[fi].path);
                     if (!sfxId.empty()) {
-                        bool ok = Audio()->Sfx().Load(sfxId, slot.sfx[fi].path);
+                        bool ok = Audio()->Sfx().LoadTrimmed(sfxId, slot.sfx[fi].path,
+                                                              slot.sfx[fi].trimStart, slot.sfx[fi].trimEnd);
                         std::print("[Audio]   -> {}\n", ok ? "OK" : "FAILED");
                     }
                 }
@@ -522,7 +523,6 @@ bool GameScene::HandleEvent(SDL_Event& e) {
 }
 
 void GameScene::Update(float dt) {
-    // Clean up finished overlap SFX tracks
     if (Audio() && Audio()->IsReady())
         Audio()->Sfx().PruneOverlaps();
 
@@ -669,11 +669,10 @@ void GameScene::Update(float dt) {
                 anim.looping      = true;
                 ead.ApplyHitbox(ead.moveHitbox, reg, e);
             }
-            // Clear attack state so the enemy can re-trigger an attack
-            // after recovering from hurt (otherwise eas.attacking stays
-            // true and the proximity trigger never fires again).
-            if (auto* eas = reg.try_get<EnemyAttackState>(e))
-                eas->attacking = false;
+            if (auto* eas = reg.try_get<EnemyAttackState>(e)) {
+                eas->attacking   = false;
+                eas->dealtDamage = false;
+            }
         });
 
         // Attack recovery: when attack anim finishes, restore move and tick cooldown
@@ -696,7 +695,8 @@ void GameScene::Update(float dt) {
                     anim.looping      = true;
                     ead.ApplyHitbox(ead.moveHitbox, reg, e);
                 }
-                eas.attacking = false;
+                eas.attacking   = false;
+                eas.dealtDamage = false;
             }
         });
     }
@@ -977,7 +977,9 @@ void GameScene::Update(float dt) {
                      const AnimationState& anim, const Renderable& r) {
             auto pit = prevEnemySnap.find(e);
             if (pit == prevEnemySnap.end()) return;
-            if (r.sheet == pit->second.sheet) return;  // no sheet change
+            bool retrigger = ead.sfxRetrigger;
+            ead.sfxRetrigger = false;
+            if (r.sheet == pit->second.sheet && !retrigger) return;
             int slotIdx = -1;
             if (r.sheet == ead.idleSheet)        slotIdx = 0;
             else if (r.sheet == ead.moveSheet)   slotIdx = 1;
@@ -989,14 +991,7 @@ void GameScene::Update(float dt) {
             const auto& fi = ss.files[ss.nextIdx];
             std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
             if (sfxId.empty()) return;
-            if (fi.timeStretch && anim.fps > 0.0f && anim.totalFrames > 0) {
-                // Time-stretch: match sound duration to animation duration
-                float dur = static_cast<float>(anim.totalFrames) / anim.fps;
-                Audio()->Sfx().PlayTimed(sfxId, dur, anim.looping, fi.volume);
-            } else {
-                // No time-stretch: fire-and-forget, let sounds overlap naturally
-                Audio()->Sfx().PlayOverlap(sfxId, fi.volume);
-            }
+            Audio()->Sfx().PlayOverlap(sfxId, fi.volume);
             if (ss.files.size() > 1)
                 ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
         });
@@ -2990,7 +2985,8 @@ void GameScene::Spawn() {
                 for (int fi = 0; fi < (int)slot.sfx.size(); ++fi) {
                     std::string sfxId = audio::EnemySfxId(typeName, i, fi);
                     if (!sfxId.empty())
-                        Audio()->Sfx().Load(sfxId, slot.sfx[fi].path);
+                        Audio()->Sfx().LoadTrimmed(sfxId, slot.sfx[fi].path,
+                                                   slot.sfx[fi].trimStart, slot.sfx[fi].trimEnd);
                     tc->slotSfx[i].files.push_back({slot.sfx[fi].volume, slot.sfx[fi].timeStretch, slot.sfx[fi].trimStart, slot.sfx[fi].trimEnd});
                 }
             }

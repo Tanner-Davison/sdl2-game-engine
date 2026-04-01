@@ -168,6 +168,50 @@ bool SoundBank::Load(const std::string& id, const std::string& path) {
     return true;
 }
 
+bool SoundBank::LoadTrimmed(const std::string& id, const std::string& path,
+                            float trimStart, float trimEnd) {
+    if (trimStart <= 0.0f && trimEnd >= 1.0f)
+        return Load(id, path);
+
+    if (path.empty() || !mMixer)
+        return false;
+
+    // Load full audio first to get duration
+    MIX_Audio* full = MIX_LoadAudio(mMixer, path.c_str(), true);
+    if (!full) {
+        std::string converted = TryAutoConvert(path);
+        if (!converted.empty())
+            full = MIX_LoadAudio(mMixer, converted.c_str(), true);
+        if (!full)
+            return Load(id, path);
+    }
+
+    Sint64 totalFrames = MIX_GetAudioDuration(full);
+    if (totalFrames <= 0) {
+        MIX_DestroyAudio(full);
+        return Load(id, path);
+    }
+
+    float totalSec = static_cast<float>(MIX_AudioFramesToMS(full, totalFrames)) / 1000.0f;
+    MIX_DestroyAudio(full);
+
+    float startSec = trimStart * totalSec;
+    float endSec   = trimEnd   * totalSec;
+
+    fs::path src(path);
+    fs::path dst = fs::temp_directory_path() / (id + "_trim.wav");
+
+    std::string cmd = "ffmpeg -y -loglevel error -i '" + path +
+                      "' -ss " + std::to_string(startSec) +
+                      " -to " + std::to_string(endSec) +
+                      " -acodec pcm_s16le -ar 44100 '" + dst.string() + "' 2>/dev/null";
+    int ret = std::system(cmd.c_str());
+    if (ret != 0 || !fs::exists(dst))
+        return Load(id, path);
+
+    return Load(id, dst.string());
+}
+
 void SoundBank::Unload(const std::string& id) {
     auto it = mAudios.find(id);
     if (it != mAudios.end()) {
@@ -223,7 +267,6 @@ bool SoundBank::PlayOverlap(std::string_view id, float gain) {
     if (it == mAudios.end())
         return false;
 
-    // Create a temporary track so each sound plays independently.
     MIX_Track* trk = MIX_CreateTrack(mMixer);
     if (!trk)
         return Play(id); // fallback to unmanaged
@@ -246,7 +289,6 @@ bool SoundBank::PlayOverlap(std::string_view id, float gain) {
         return Play(id);
     }
 
-    // Track auto-stops when the audio ends; stash for cleanup.
     mOverlapTracks.push_back(trk);
     return true;
 }
@@ -421,7 +463,7 @@ void SoundBank::PruneOverlaps() {
                          mOverlapTracks.end());
 }
 
-bool SoundBank::PlayPreview(std::string_view id, float gain, float freqRatio) {
+bool SoundBank::PlayPreview(std::string_view id, float gain, float startSec) {
     if (!mMixer || !mPreviewTrack)
         return false;
 
@@ -433,12 +475,19 @@ bool SoundBank::PlayPreview(std::string_view id, float gain, float freqRatio) {
     if (!MIX_SetTrackAudio(mPreviewTrack, it->second))
         return false;
     MIX_SetTrackGain(mPreviewTrack, std::clamp(gain, 0.0f, 1.0f));
-    MIX_SetTrackFrequencyRatio(mPreviewTrack, std::clamp(freqRatio, 0.25f, 4.0f));
+    MIX_SetTrackFrequencyRatio(mPreviewTrack, 1.0f);
 
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetNumberProperty(props, MIX_PROP_PLAY_LOOPS_NUMBER, 0);
     bool ok = MIX_PlayTrack(mPreviewTrack, props);
     SDL_DestroyProperties(props);
+
+    if (ok && startSec > 0.0f) {
+        Uint64 ms = static_cast<Uint64>(startSec * 1000.0f);
+        Sint64 frames = MIX_TrackMSToFrames(mPreviewTrack, ms);
+        if (frames > 0)
+            MIX_SetTrackPlaybackPosition(mPreviewTrack, frames);
+    }
     return ok;
 }
 

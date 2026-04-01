@@ -34,7 +34,7 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/zombiefever.wav",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
@@ -61,21 +61,21 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombie-attack-1.wav",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
                     "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack2.wav",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
                     "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack3.wav",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
@@ -95,14 +95,14 @@
             "sfx": [
                 {
                     "path": "/Users/tanner.davison/Downloads/zombiehurting.wav",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
                     "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieehh.mp3",
-                    "timeStretch": true,
+                    "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0

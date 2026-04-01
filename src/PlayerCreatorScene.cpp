@@ -617,21 +617,6 @@ void PlayerCreatorScene::Update(float dt) {
             animDur = (float)prev->frames.size() / fps;
     }
 
-    auto calcRatio = [&](const PlayerProfile::SfxEntry& e, const std::string& id) -> float {
-        if (!e.timeStretch || animDur <= 0.0f) return 1.0f;
-        float naturalDur = sfx.GetDuration(id);
-        if (naturalDur <= 0.0f) return 1.0f;
-        return std::clamp(naturalDur / animDur, 0.25f, 4.0f);
-    };
-
-    auto effectiveDur = [&](const PlayerProfile::SfxEntry& e, const std::string& id) -> float {
-        float natural = sfx.GetDuration(id);
-        if (natural <= 0.0f) return 0.0f;
-        if (!e.timeStretch || animDur <= 0.0f) return natural;
-        float ratio = std::clamp(natural / animDur, 0.25f, 4.0f);
-        return natural / ratio;
-    };
-
     int fileIdx = std::clamp(mSelectedSfxFile, 0, (int)slotSfx.size() - 1);
     const auto& entry = slotSfx[fileIdx];
     std::string wantId = audio::PlayerSlotSfxId(mSelectedSlot, fileIdx);
@@ -652,13 +637,17 @@ void PlayerCreatorScene::Update(float dt) {
         mPreviewPlaying = false;
     }
 
-    float playDur = effectiveDur(entry, mPreviewSfxId);
-    if (playDur <= 0.0f) return;
-
     float naturalDur = sfx.GetDuration(mPreviewSfxId);
+    if (naturalDur <= 0.0f) return;
+
     float tStart = entry.trimStart * naturalDur;
     float tEnd   = entry.trimEnd   * naturalDur;
     if (tEnd <= tStart) return;
+
+    float trimmedDur = tEnd - tStart;
+    float playDur = (entry.timeStretch && animDur > 0.0f)
+                        ? std::min(trimmedDur, animDur)
+                        : trimmedDur;
 
     mPreviewTimer += dt;
 
@@ -666,8 +655,9 @@ void PlayerCreatorScene::Update(float dt) {
         const auto& e = slotSfx[fi];
         std::string id = audio::PlayerSlotSfxId(mSelectedSlot, fi);
         if (!sfx.Has(id)) sfx.Load(id, e.path);
-        float ratio = calcRatio(e, id);
-        sfx.PlayPreview(id, e.volume, ratio);
+        float nat = sfx.GetDuration(id);
+        float seekTo = e.trimStart * nat;
+        sfx.PlayPreview(id, e.volume, seekTo);
         mPreviewSfxId   = id;
         mPreviewPath    = e.path;
         mPreviewFile    = fi;
@@ -682,11 +672,6 @@ void PlayerCreatorScene::Update(float dt) {
         } else {
             startFile(fileIdx);
         }
-    } else {
-        float ratio = calcRatio(entry, mPreviewSfxId);
-        float curNatural = mPreviewTimer * ratio;
-        bool inWindow = (curNatural >= tStart && curNatural < tEnd);
-        sfx.SetPreviewGain(inWindow ? entry.volume : 0.0f);
     }
 }
 

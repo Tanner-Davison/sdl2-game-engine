@@ -152,8 +152,9 @@ struct DeadTag {};
 struct FaceRightTag {};  // sprite art faces right by default (flip when moving left)
 
 struct EnemyAttackState {
-    bool  attacking = false;
-    float cooldown  = 0.0f;
+    bool  attacking   = false;
+    bool  dealtDamage = false;
+    float cooldown    = 0.0f;
 };
 
 struct EnemyClimbState {
@@ -207,6 +208,7 @@ struct EnemyAnimData {
         int nextIdx = 0;
     };
     std::array<SlotSfx, 5> slotSfx{};
+    bool sfxRetrigger = false;
 
     // Applies hitbox dims to entity Collider/RenderOffset, pinning the collider bottom
     // so feet stay on the ground when hitbox changes between animations.

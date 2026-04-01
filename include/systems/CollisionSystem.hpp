@@ -152,6 +152,8 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
                         auto& r    = reg.get<Renderable>(enemy);
                         auto& anim = reg.get<AnimationState>(enemy);
+                        if (r.sheet == ead->hurtSheet)
+                            ead->sfxRetrigger = true;
                         r.sheet         = ead->hurtSheet;
                         r.frames        = ead->hurtFrames;
                         r.renderW       = ead->spriteW;
@@ -181,31 +183,21 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 bool isAttacking   = eas && eas->attacking;
 
                 if (hasAttackAnim) {
-                    // --- Proximity-triggered attack ---
-                    // Build a directional reach box that extends in front of the
-                    // enemy.  The reach = attack-hitbox width (or sprite width if
-                    // default), with a minimum of half the walk collider so the
-                    // enemy always starts swinging BEFORE body contact.
+                    // Attack reach box — extends in front of the enemy
                     const auto& rend = reg.get<Renderable>(enemy);
                     int rawAtkW = ead->attackHitbox.IsDefault() ? ead->spriteW : ead->attackHitbox.w;
                     int atkH    = ead->attackHitbox.IsDefault() ? ead->spriteH : ead->attackHitbox.h;
-
-                    // Extra reach beyond the walk collider (at least half the body)
                     float reach = std::max((float)(rawAtkW - ec.w), ec.w * 0.5f);
 
                     float atkBottom = et.y + ec.h;
                     float atkY      = atkBottom - atkH;
 
-                    // Determine which side the enemy is actually facing.
-                    // FaceRightTag sprites face right by default (flipH == true → facing left).
-                    // Legacy sprites face left by default   (flipH == true → facing right).
                     bool facingLeft;
                     if (reg.all_of<FaceRightTag>(enemy))
-                        facingLeft = rend.flipH;          // flip mirrors right→left
+                        facingLeft = rend.flipH;
                     else
-                        facingLeft = !rend.flipH;         // default is left, flip mirrors to right
+                        facingLeft = !rend.flipH;
 
-                    // Extend reach in the direction the enemy faces
                     float atkX, atkW;
                     if (facingLeft) {
                         atkX = et.x - reach;
@@ -218,7 +210,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     bool inAttackRange = pt.x < atkX + atkW && pt.x + pw > atkX &&
                                          pt.y < atkY + atkH && pt.y + ph > atkY;
 
-                    // Start the attack animation when player enters range
                     if (!isAttacking && inAttackRange) {
                         auto& r    = reg.get<Renderable>(enemy);
                         auto& anim = reg.get<AnimationState>(enemy);
@@ -231,15 +222,14 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         anim.fps          = ead->attackFps;
                         anim.looping      = false;
                         eas->attacking    = true;
+                        eas->dealtDamage  = false;
                         eas->cooldown     = 0.8f;
                         ead->ApplyHitbox(ead->attackHitbox, reg, enemy);
-                        isAttacking = true;   // so damage check below fires this frame
+                        isAttacking = true;
                     }
 
-                    // Deal damage while attacking & player overlaps the directional
-                    // reach box (same box used for the trigger, since the slash
-                    // extends in front of the enemy).
-                    if (isAttacking && inAttackRange) {
+                    if (isAttacking && !eas->dealtDamage && inAttackRange) {
+                        eas->dealtDamage = true;
                         health.current -= PLAYER_HIT_DAMAGE;
                         if (health.current <= 0.0f) {
                             health.current    = 0.0f;
@@ -256,7 +246,6 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         }
                     }
                 } else if (aabb(et, ec)) {
-                    // Legacy enemies (no attack anim): contact damage as before
                     health.current -= PLAYER_HIT_DAMAGE;
                     if (health.current <= 0.0f) {
                         health.current    = 0.0f;
