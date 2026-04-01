@@ -18,6 +18,10 @@ std::string                             EditorPalette::sStashedDir;
 int                                     EditorPalette::sStashedSelectedTile = 0;
 int                                     EditorPalette::sStashedScroll       = 0;
 
+std::vector<EditorPalette::BgItem>      EditorPalette::sStashedBgItems;
+int                                     EditorPalette::sStashedBgSelected = 0;
+int                                     EditorPalette::sStashedBgScroll   = 0;
+
 // --- Destruction / cleanup ---
 
 EditorPalette::~EditorPalette() {
@@ -79,6 +83,21 @@ bool EditorPalette::RestoreTileItems(const std::string& dir, const Level& level)
         if (!item.isFolder && item.full)
             mCache->InsertTileSurface(item.path, item.full);
     SeedCacheForLevel(level);
+    return true;
+}
+
+void EditorPalette::StashBgItems() {
+    sStashedBgSelected = mSelectedBg;
+    sStashedBgScroll   = mBgPaletteScroll;
+    sStashedBgItems    = std::move(mBgItems);
+}
+
+bool EditorPalette::RestoreBgItems(const Level& level) {
+    if (sStashedBgItems.empty())
+        return false;
+    mSelectedBg      = sStashedBgSelected;
+    mBgPaletteScroll = sStashedBgScroll;
+    mBgItems         = std::move(sStashedBgItems);
     return true;
 }
 

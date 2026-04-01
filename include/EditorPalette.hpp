@@ -106,6 +106,8 @@ class EditorPalette {
 
     void StashTileItems();
     bool RestoreTileItems(const std::string& dir, const Level& level);
+    void StashBgItems();
+    bool RestoreBgItems(const Level& level);
 
   private:
     EditorSurfaceCache* mCache      = nullptr;
@@ -139,4 +141,8 @@ class EditorPalette {
     static std::string              sStashedDir;
     static int                      sStashedSelectedTile;
     static int                      sStashedScroll;
+
+    static std::vector<BgItem>      sStashedBgItems;
+    static int                      sStashedBgSelected;
+    static int                      sStashedBgScroll;
 };

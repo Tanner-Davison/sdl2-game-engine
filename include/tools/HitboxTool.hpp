@@ -168,11 +168,9 @@ class HitboxTool final : public EditorTool {
         int hw = static_cast<int>(t.hitbox->w * zoom);
         int hh = static_cast<int>(t.hitbox->h * zoom);
 
-        // Semi-transparent gray over the full tile — tile stays visible underneath
-        EditorToolContext::DrawRect(screen, {tileX, tileY, tileW, tileH}, {20, 20, 30, 100});
+        EditorToolContext::DrawRectAlpha(screen, {tileX, tileY, tileW, tileH}, {20, 20, 30, 80});
         EditorToolContext::DrawOutline(screen, {tileX, tileY, tileW, tileH}, {255, 255, 255, 80}, 1);
-        // Hitbox region: light blue tint so it pops against the dimmed tile
-        EditorToolContext::DrawRect(screen, {hx, hy, hw, hh}, {60, 140, 255, 30});
+        EditorToolContext::DrawRectAlpha(screen, {hx, hy, hw, hh}, {60, 140, 255, 30});
         EditorToolContext::DrawOutline(screen, {hx, hy, hw, hh}, {80, 180, 255, 255}, 2);
 
         constexpr int HS = 10;

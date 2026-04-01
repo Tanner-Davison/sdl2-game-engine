@@ -1,6 +1,7 @@
 #pragma once
 #include "LevelBinary.hpp"
 #include "LevelData.hpp"
+#include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <print>
@@ -114,9 +115,24 @@ inline bool SaveLevel(const Level& level, const std::string& path) {
         return false;
     }
     file << j.dump(4);
+    file.close();
     std::print("Level saved: {}\n", path);
 
-    flvl::SaveLevelBin(level, flvl::BinPath(path));
+    const std::string binPath = flvl::BinPath(path);
+    if (flvl::SaveLevelBin(level, binPath)) {
+        Level verify;
+        if (!flvl::LoadLevelBin(binPath, verify) ||
+            verify.tiles.size()          != level.tiles.size() ||
+            verify.enemies.size()        != level.enemies.size() ||
+            verify.parallaxLayers.size() != level.parallaxLayers.size() ||
+            verify.name                  != level.name) {
+            std::print("flvl round-trip failed — removing {}\n", binPath);
+            std::filesystem::remove(binPath);
+        } else {
+            std::print("flvl verified: {} ({} tiles, {} enemies)\n",
+                       binPath, verify.tiles.size(), verify.enemies.size());
+        }
+    }
 
     return true;
 }

@@ -75,24 +75,23 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
             }
 
             if (!onSlopeThisFrame) {
+                constexpr float STEP_UP = 8.0f;
                 tileView.each([&](const Transform& tt, const Collider& tc) {
                     if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
-                    if (et.y + ec.h >= tt.y && et.y + ec.h <= tt.y + tc.h + ev.dy * dt + 2.0f) {
+                    float penetration = (et.y + ec.h) - tt.y;
+                    if (penetration >= 0.0f && penetration <= STEP_UP + std::max(0.0f, ev.dy * dt)) {
                         et.y  = tt.y - ec.h;
                         ev.dy = 0.0f;
                     }
                 });
             }
 
-            // Only resolves horizontal penetration when feet are below
-            // the tile's top face (hitting the side, not landing on top).
             tileView.each([&](const Transform& tt, const Collider& tc) {
                 if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
                 if (et.y + ec.h <= tt.y || et.y >= tt.y + tc.h) return;
 
-                float feetY = et.y + ec.h;
-                bool hittingSide = feetY > tt.y + 4.f;
-                if (!hittingSide) return;
+                float penetration = (et.y + ec.h) - tt.y;
+                if (penetration <= 8.0f) return;
 
                 float overlapL = (et.x + ec.w) - tt.x;
                 float overlapR = (tt.x + tc.w) - et.x;
@@ -102,6 +101,31 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
                 } else {
                     et.x = tt.x + tc.w;
                     if (ev.dx < 0.f) ev.dx = std::abs(ev.dx);
+                }
+            });
+        });
+    }
+
+    // --- 1b. Gravity for dead enemies (fall to ground after dying) ---
+    {
+        constexpr float DEAD_GRAVITY  = 800.0f;
+        constexpr float DEAD_MAX_FALL = 900.0f;
+        constexpr float STEP_UP       = 8.0f;
+
+        auto tileView2 = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag>);
+        auto deadView  = reg.view<DeadTag, EnemyTag, Transform, Collider, Velocity>(
+            entt::exclude<FloatTag>);
+
+        deadView.each([&](Transform& et, const Collider& ec, Velocity& ev) {
+            ev.dy = std::min(ev.dy + DEAD_GRAVITY * dt, DEAD_MAX_FALL);
+            et.y += ev.dy * dt;
+
+            tileView2.each([&](const Transform& tt, const Collider& tc) {
+                if (et.x + ec.w <= tt.x || et.x >= tt.x + tc.w) return;
+                float penetration = (et.y + ec.h) - tt.y;
+                if (penetration >= 0.0f && penetration <= STEP_UP + std::max(0.0f, ev.dy * dt)) {
+                    et.y  = tt.y - ec.h;
+                    ev.dy = 0.0f;
                 }
             });
         });

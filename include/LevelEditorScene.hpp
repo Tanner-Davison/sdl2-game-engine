@@ -194,6 +194,11 @@ class LevelEditorScene : public Scene {
     std::unique_ptr<SpriteSheet> enemySheet;
     static SDL_Surface*          mFolderIcon;
 
+    // Level stash — survives scene transitions so we skip re-parsing JSON.
+    static Level       sLevelStash;
+    static std::string sLevelStashName;
+    static bool        sHasLevelStash;
+
     // Moving-platform placement state (popup state lives in mPopups)
     std::vector<int> mMovPlatIndices;
     int              mMovPlatNextGroupId = 1;

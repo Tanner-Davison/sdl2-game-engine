@@ -243,7 +243,10 @@ inline bool SaveLevelBin(const Level& level, const std::string& path) {
         WF32(f, pl.yOffset);
     }
 
-    return f.good();
+    f.flush();
+    bool ok = f.good();
+    f.close();
+    return ok;
 }
 
 // ---------------------------------------------------------------------------

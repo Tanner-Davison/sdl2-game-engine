@@ -250,7 +250,6 @@ void GameScene::Load(Window& window) {
     knightSlashSheet = loadSlot(PlayerAnimSlot::Slash, "Slashing", "0_Knight_Slashing_", 12);
     knightDeathSheet = loadSlot(PlayerAnimSlot::Death, "Hurt", "0_Knight_Hurt_", 12);
 
-    // Upload to GPU and free CPU surfaces (PlayerCreatorScene skips FreeSurface for preview blits).
     knightIdleSheet->CreateTexture(ren);
     knightIdleSheet->FreeSurface();
     knightWalkSheet->CreateTexture(ren);

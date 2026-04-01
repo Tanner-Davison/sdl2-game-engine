@@ -5,6 +5,7 @@
 #include "EditorPopups.hpp"
 #include "EditorUIRenderer.hpp"
 #include "GameScene.hpp"
+#include "LevelBinary.hpp"
 #include "SurfaceUtils.hpp"
 #include "TitleScene.hpp"
 #include <SDL3_ttf/SDL_ttf.h>
@@ -14,7 +15,10 @@
 
 namespace fs = std::filesystem;
 
-SDL_Surface* LevelEditorScene::mFolderIcon = nullptr;
+SDL_Surface* LevelEditorScene::mFolderIcon   = nullptr;
+Level        LevelEditorScene::sLevelStash;
+std::string  LevelEditorScene::sLevelStashName;
+bool         LevelEditorScene::sHasLevelStash = false;
 
 static SDL_Surface* MakeThumb(SDL_Surface* src, int w, int h) {
     return EditorSurfaceCache::MakeThumb(src, w, h);
@@ -117,13 +121,9 @@ void LevelEditorScene::RebuildParallaxImages() {
 void LevelEditorScene::Load(Window& window) {
     mWindow     = &window;
     mLaunchGame = false;
-    // Disable SDL motion event coalescing so every mouse move is delivered
-    // immediately — without this macOS batches motion events causing pan lag.
     SDL_SetHint(SDL_HINT_MOUSE_AUTO_CAPTURE, "0");
     SDL_SetHint("SDL_MOUSE_TOUCH_EVENTS", "0");
 
-    background = std::make_unique<Image>("game_assets/backgrounds/deepspace_scene.png",
-                                         FitModeFromString(mLevel.bgFitMode));
     enemySheet = std::make_unique<SpriteSheet>(
         "game_assets/base_pack/Enemies/enemies_spritesheet.png",
         "game_assets/base_pack/Enemies/enemies_spritesheet.txt");
@@ -138,25 +138,39 @@ void LevelEditorScene::Load(Window& window) {
         } else {
             autoPath = "levels/" + mLevelName + ".json";
         }
-        if (fs::exists(autoPath)) {
-            LoadLevel(autoPath, mLevel);
-            SetStatus("Resumed: " + autoPath);
-            if (!mLevel.background.empty()) {
-                background = std::make_unique<Image>(mLevel.background,
-                                                     FitModeFromString(mLevel.bgFitMode));
-                background->SetRepeat(mLevel.bgRepeat);
+
+        bool loaded = false;
+        if (sHasLevelStash && sLevelStashName == mLevelName) {
+            mLevel = std::move(sLevelStash);
+            sHasLevelStash = false;
+            sLevelStashName.clear();
+            loaded = true;
+        } else {
+            if (fs::exists(autoPath)) {
+                LoadLevel(autoPath, mLevel);
+                loaded = true;
             }
+        }
+
+        if (loaded) {
+            SetStatus("Resumed: " + autoPath);
             RebuildParallaxImages();
         } else if (!mOpenPath.empty()) {
-            // Path given but file doesn't exist yet — new level with that name
             SetStatus("New level: " + mLevelName);
         }
     } else if (mForceNew) {
-        // Apply the name chosen in the title-screen modal, if one was given
         if (!mPresetName.empty())
             mLevelName = mPresetName;
         SetStatus("New level: " + mLevelName);
     }
+
+    if (!mLevel.background.empty())
+        background = std::make_unique<Image>(mLevel.background,
+                                             FitModeFromString(mLevel.bgFitMode));
+    else
+        background = std::make_unique<Image>("game_assets/backgrounds/deepspace_scene.png",
+                                             FitModeFromString(mLevel.bgFitMode));
+    background->SetRepeat(mLevel.bgRepeat);
 
     if (mLevel.player.x == 0 && mLevel.player.y == 0) {
         mLevel.player.x = static_cast<float>(CanvasW() / 2 - PLAYER_STAND_WIDTH / 2);
@@ -179,7 +193,8 @@ void LevelEditorScene::Load(Window& window) {
     mPalette.Init(mSurfaceCache, mFolderIcon);
     if (!mPalette.RestoreTileItems(TILE_ROOT, mLevel))
         LoadTileView(TILE_ROOT);
-    LoadBgPalette();
+    if (!mPalette.RestoreBgItems(mLevel))
+        LoadBgPalette();
 
     mToolbar.RebuildLayout();
     mToolbar.CreateLabels();
@@ -227,7 +242,12 @@ void LevelEditorScene::Unload() {
         mTool.reset();
     }
 
+    sLevelStash     = mLevel;
+    sLevelStashName = mLevelName;
+    sHasLevelStash  = true;
+
     mPalette.StashTileItems();
+    mPalette.StashBgItems();
     mPalette.Clear();
 
     mSurfaceCache.StashSeededSurfaces();
@@ -1619,11 +1639,6 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
 // --- Update ---
 void LevelEditorScene::Update(float /*dt*/) {
-    // Pan is driven entirely by SDL_EVENT_MOUSE_MOTION in HandleEvent using
-    // absolute position delta from the recorded start point. SDL_CaptureMouse
-    // ensures motion events are delivered reliably, so no polling catch-up is
-    // needed here. Having two writers to mCamX/Y caused jitter, especially
-    // under thermal throttling where frame timing is inconsistent.
 }
 
 // --- Render ---
