@@ -20,7 +20,6 @@ class SoundBank {
     SoundBank& operator=(SoundBank&& other) noexcept;
     SoundBank(const SoundBank&)            = delete;
     SoundBank& operator=(const SoundBank&) = delete;
-
     /// Bind to a mixer. Must be called before Load/Play.
     void SetMixer(MIX_Mixer* mixer);
 
@@ -30,8 +29,10 @@ class SoundBank {
 
     /// Load a trimmed portion of the audio (trimStart/trimEnd are 0–1 ratios).
     /// Uses ffmpeg to extract the sub-clip if trim is non-default.
-    bool LoadTrimmed(const std::string& id, const std::string& path,
-                     float trimStart, float trimEnd);
+    bool LoadTrimmed(const std::string& id,
+                     const std::string& path,
+                     float              trimStart,
+                     float              trimEnd);
 
     /// Free a single SFX by id. No-op if not found.
     void Unload(const std::string& id);
@@ -51,8 +52,10 @@ class SoundBank {
     /// Play SFX adjusted to fit @p targetSec by changing frequency ratio.
     /// If targetSec <= 0 and !loop, plays on the one-shot track instead.
     /// @param gain  Per-sound volume multiplier (0.0 .. 1.0).
-    bool PlayTimed(std::string_view id, float targetSec, bool loop = false,
-                   float gain = 1.0f);
+    bool PlayTimed(std::string_view id,
+                   float            targetSec,
+                   bool             loop = false,
+                   float            gain = 1.0f);
 
     /// Play SFX sequentially — always cuts the previous sound and starts
     /// the new one. Callers advance their round-robin index when true is returned.
@@ -84,15 +87,19 @@ class SoundBank {
 
     [[nodiscard]] bool IsPreviewPlaying() const;
 
-    [[nodiscard]] bool Has(std::string_view id) const;
-    [[nodiscard]] std::size_t Count() const { return mAudios.size(); }
+    [[nodiscard]] bool        Has(std::string_view id) const;
+    [[nodiscard]] std::size_t Count() const {
+        return mAudios.size();
+    }
 
     /// Returns 0 if not found or duration unknown.
     [[nodiscard]] float GetDuration(std::string_view id) const;
 
     /// Set the master mixer gain (0.0 = silent, 1.0 = unity).
-    void SetVolume(float v);
-    [[nodiscard]] float GetVolume() const { return mVolume; }
+    void                SetVolume(float v);
+    [[nodiscard]] float GetVolume() const {
+        return mVolume;
+    }
 
   private:
     struct StringHash {
@@ -118,10 +125,10 @@ class SoundBank {
     Uint64     mSeqStartMs    = 0;
     Uint64     mSeqDurationMs = 0;
 
-    MIX_Track* mPreviewTrack  = nullptr;
+    MIX_Track* mPreviewTrack = nullptr;
 
     std::unordered_map<std::string, MIX_Audio*, StringHash, std::equal_to<>> mAudios;
-    float mVolume = 1.0f;
+    float                                                                    mVolume = 1.0f;
 
     // Tracks created by PlayOverlap — cleaned up once finished.
     std::vector<MIX_Track*> mOverlapTracks;
