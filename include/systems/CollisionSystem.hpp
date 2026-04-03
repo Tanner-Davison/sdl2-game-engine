@@ -39,6 +39,14 @@
 inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int windowW, int windowH) {
     CollisionResult result;
 
+    // Maps a damage fraction (0–1) to a blood intensity.
+    // At 0 damage → ~0.4 (very light drip); at 100% hp → 3.0 (huge burst).
+    // killBonus adds extra particles for lethal hits.
+    auto bloodIntensity = [](float dmgFrac, float killBonus = 0.f) -> float {
+        float base = std::clamp(0.4f + dmgFrac * 3.0f, 0.4f, 3.0f);
+        return std::min(base + killBonus, 3.0f);
+    };
+
     auto timerView = reg.view<InvincibilityTimer>();
     timerView.each([dt](InvincibilityTimer& inv) {
         if (inv.isInvincible) {
@@ -126,10 +134,18 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             if (dashing) return;
 
             if (isStomp(et, ec)) {
+                float eCX = et.x + ec.w * 0.5f;
+                float eCY = et.y + ec.h * 0.5f;
+
                 auto* eh = reg.try_get<Health>(enemy);
                 if (!eh) {
                     toKill.push_back(enemy);
                     result.lowestHitHpFrac = 0.0f;
+                    // Instant-kill stomp — treat as 100% damage for maximum blood
+                    result.bloodEvents.push_back({eCX, eCY, 0.f, -1.f,
+                                                  BloodEventType::EnemyStomp, bloodIntensity(1.f, 0.5f)});
+                    result.bloodEvents.push_back({eCX, eCY, 0.f, -1.f,
+                                                  BloodEventType::EnemyDeath, bloodIntensity(1.f, 0.5f)});
                 } else {
                     float dmg = eh->max * STOMP_DAMAGE_FRAC;
                     eh->current -= dmg;
@@ -168,6 +184,20 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     if (eh->current <= 0.0f) {
                         eh->current = 0.0f;
                         toKill.push_back(enemy);
+                        // Stomp kill — squirt + full death burst, scaled by the damage dealt
+                        float stompFrac = std::min(dmg / eh->max, 1.0f);
+                        result.bloodEvents.push_back({eCX, eCY, 0.f, -1.f,
+                                                      BloodEventType::EnemyStomp,
+                                                      bloodIntensity(stompFrac, 0.5f)});
+                        result.bloodEvents.push_back({eCX, eCY, 0.f, -1.f,
+                                                      BloodEventType::EnemyDeath,
+                                                      bloodIntensity(stompFrac, 0.5f)});
+                    } else {
+                        // Stomp hit (survives) — upward squirt scaled by damage fraction
+                        float stompFrac = std::min(dmg / eh->max, 1.0f);
+                        result.bloodEvents.push_back({eCX, eCY, 0.f, -1.f,
+                                                      BloodEventType::EnemyStomp,
+                                                      bloodIntensity(stompFrac)});
                     }
                 }
                 result.enemiesStomped++;
@@ -231,6 +261,10 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     if (isAttacking && !eas->dealtDamage && inAttackRange) {
                         eas->dealtDamage = true;
                         health.current -= PLAYER_HIT_DAMAGE;
+                        float playerCX = pt.x + pw * 0.5f;
+                        float playerCY = pt.y + ph * 0.5f;
+                        float enemyCX  = et.x + ec.w * 0.5f;
+                        float kbDir    = (playerCX >= enemyCX) ? 1.0f : -1.0f;
                         if (health.current <= 0.0f) {
                             health.current    = 0.0f;
                             result.playerDied = true;
@@ -238,29 +272,18 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                         result.playerHit  = true;
                         inv.isInvincible  = true;
                         inv.remaining     = 0.15f;
-                        {
-                            float playerCX = pt.x + pw * 0.5f;
-                            float enemyCX  = et.x + ec.w * 0.5f;
-                            float kbDir    = (playerCX >= enemyCX) ? 1.0f : -1.0f;
-                            pt.x += kbDir * 24.0f;
-                        }
-                    }
-                } else if (aabb(et, ec)) {
-                    health.current -= PLAYER_HIT_DAMAGE;
-                    if (health.current <= 0.0f) {
-                        health.current    = 0.0f;
-                        result.playerDied = true;
-                    }
-                    result.playerHit  = true;
-                    inv.isInvincible  = true;
-                    inv.remaining     = 0.15f;
-                    {
-                        float playerCX = pt.x + pw * 0.5f;
-                        float enemyCX  = et.x + ec.w * 0.5f;
-                        float kbDir    = (playerCX >= enemyCX) ? 1.0f : -1.0f;
                         pt.x += kbDir * 24.0f;
+                        // Blood spurts away from the attacker — scaled by damage fraction
+                        float playerDmgFrac = std::min(PLAYER_HIT_DAMAGE / health.max, 1.0f);
+                        float playerKillBonus = (health.current <= 0.0f) ? 0.6f : 0.0f;
+                        result.bloodEvents.push_back({playerCX, playerCY,
+                                                      kbDir, -0.4f,
+                                                      BloodEventType::PlayerHit,
+                                                      bloodIntensity(playerDmgFrac, playerKillBonus)});
                     }
                 }
+                // NOTE: body-contact (non-attack) damage intentionally removed.
+                // Enemies only deal damage while their attack animation is playing.
             }
 
             if (aabb(et, ec)) {
@@ -275,14 +298,28 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
         });
 
         // --- Dead enemy platforms ---
+        // Rule: a corpse only blocks the player when approached from the correct
+        // gravity-axis side (i.e. the player was beyond the surface last frame).
+        // This prevents walking laterally into a corpse's bounding box from
+        // teleporting the player to the top/bottom/side of the body.
+        // PrevTransform captures where the player was at the end of the previous
+        // physics tick, giving us a reliable "came from above / below / left / right"
+        // test without needing dt.
         bool onDeadEnemy = false;
+        const auto* playerPrev = reg.try_get<PrevTransform>(playerEnt);
+
         deadEnemyView.each([&](const Transform& et, const Collider& ec) {
             if (g.velocity < 0.0f) return;
             switch (g.direction) {
                 case GravityDir::DOWN: {
-                    float bottom = pt.y + pc.h;
+                    // Only land on top: player feet must have been at or above
+                    // the corpse's top surface last frame.
+                    float bottom     = pt.y + pc.h;
+                    float prevBottom = playerPrev ? playerPrev->y + (float)pc.h : bottom;
                     if (pt.x < et.x + ec.w && pt.x + pc.w > et.x &&
-                        bottom >= et.y && bottom <= et.y + ec.h) {
+                        prevBottom <= et.y + 2.f   &&   // was above (or just touching) top
+                        bottom     >= et.y         &&
+                        bottom     <= et.y + ec.h) {
                         pt.y         = et.y - pc.h;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
@@ -290,8 +327,13 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     break;
                 }
                 case GravityDir::UP: {
+                    // Only land on underside: player top must have been at or
+                    // below the corpse's bottom surface last frame.
+                    float prevTop = playerPrev ? playerPrev->y : pt.y;
                     if (pt.x < et.x + ec.w && pt.x + pc.w > et.x &&
-                        pt.y <= et.y + ec.h && pt.y >= et.y) {
+                        prevTop   >= et.y + ec.h - 2.f &&
+                        pt.y      <= et.y + ec.h       &&
+                        pt.y      >= et.y) {
                         pt.y         = et.y + ec.h;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
@@ -299,8 +341,13 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     break;
                 }
                 case GravityDir::LEFT: {
+                    // Only land on right face: player left edge must have been
+                    // at or to the right of the corpse's right surface last frame.
+                    float prevLeft = playerPrev ? playerPrev->x : pt.x;
                     if (pt.y < et.y + ec.h && pt.y + pc.h > et.y &&
-                        pt.x <= et.x + ec.w && pt.x >= et.x) {
+                        prevLeft  >= et.x + ec.w - 2.f &&
+                        pt.x      <= et.x + ec.w       &&
+                        pt.x      >= et.x) {
                         pt.x         = et.x + ec.w;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
@@ -308,10 +355,15 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     break;
                 }
                 case GravityDir::RIGHT: {
-                    float right = pt.x + pc.h;
-                    if (pt.y < et.y + ec.h && pt.y + pc.w > et.y &&
-                        right >= et.x && right <= et.x + ec.w) {
-                        pt.x         = et.x - pc.h;
+                    // Only land on left face: player right edge must have been
+                    // at or to the left of the corpse's left surface last frame.
+                    float right     = pt.x + pc.w;
+                    float prevRight = playerPrev ? playerPrev->x + (float)pc.w : right;
+                    if (pt.y < et.y + ec.h && pt.y + pc.h > et.y &&
+                        prevRight <= et.x + 2.f &&
+                        right     >= et.x       &&
+                        right     <= et.x + ec.w) {
+                        pt.x         = et.x - pc.w;
                         g.velocity   = 0.0f;
                         g.isGrounded = onDeadEnemy = true;
                     }
@@ -627,12 +679,23 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                 if (!swordHits(et.x, et.y, (float)ec.w, (float)ec.h)) return;
                 if (atk->hitEntities.count(enemy)) return; // already hit this swing
                 atk->hitEntities.insert(enemy);
+
+                float eCX = et.x + ec.w * 0.5f;
+                float eCY = et.y + ec.h * 0.5f;
+
                 auto* eh = reg.try_get<Health>(enemy);
                 if (!eh) {
                     toKill.push_back(enemy);
                     result.enemiesSlashed++;
                     result.slashHits++;
                     result.lowestHitHpFrac = 0.0f;
+                    // Instant kill — treat as 100% damage for max carnage
+                    result.bloodEvents.push_back({eCX, eCY, fx, fy,
+                                                  BloodEventType::EnemySlash,
+                                                  bloodIntensity(1.f, 0.5f)});
+                    result.bloodEvents.push_back({eCX, eCY, fx, fy,
+                                                  BloodEventType::EnemyDeath,
+                                                  bloodIntensity(1.f, 0.5f)});
                     return;
                 }
                 eh->current -= SLASH_DAMAGE;
@@ -679,6 +742,20 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
                     eh->current = 0.0f;
                     toKill.push_back(enemy);
                     result.enemiesSlashed++;
+                    // Slash killed it — arc spray + death burst, scaled by damage fraction
+                    float slashFrac = std::min(SLASH_DAMAGE / eh->max, 1.0f);
+                    result.bloodEvents.push_back({eCX, eCY, fx, fy,
+                                                  BloodEventType::EnemySlash,
+                                                  bloodIntensity(slashFrac, 0.5f)});
+                    result.bloodEvents.push_back({eCX, eCY, fx, fy,
+                                                  BloodEventType::EnemyDeath,
+                                                  bloodIntensity(slashFrac, 0.5f)});
+                } else {
+                    // Slash hit, enemy survives — directional arc scaled by damage fraction
+                    float slashFrac = std::min(SLASH_DAMAGE / eh->max, 1.0f);
+                    result.bloodEvents.push_back({eCX, eCY, fx, fy,
+                                                  BloodEventType::EnemySlash,
+                                                  bloodIntensity(slashFrac)});
                 }
             });
         }

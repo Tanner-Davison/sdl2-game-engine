@@ -147,6 +147,19 @@ struct DashState {
 
 struct PlayerTag {};
 struct EnemyTag {};
+
+// Which player slot this entity belongs to.
+// index 0 = P1 (keyboard + gamepad 0)
+// index 1 = P2 (gamepad 1 only, active when two controllers are connected)
+struct PlayerIndex {
+    int index = 0;
+};
+
+// Optional color tint applied by RenderSystem when present (for player distinction).
+// Values are SDL color-mod multipliers [0,255].
+struct PlayerTint {
+    Uint8 r = 255, g = 255, b = 255;
+};
 struct GoalTag {};
 struct DeadTag {};
 struct FaceRightTag {};  // sprite art faces right by default (flip when moving left)

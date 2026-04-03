@@ -1,0 +1,45 @@
+{
+    "background": "game_assets/backgrounds/halloween-witchhouse-1.png",
+    "bgFitMode": "cover",
+    "bgRepeat": false,
+    "enemies": [],
+    "gravityMode": "platformer",
+    "name": "halloween",
+    "parallaxLayers": [
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-2.png",
+            "scrollFactor": 0.7000000476837158,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-3.png",
+            "scrollFactor": 0.5,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-4.png",
+            "scrollFactor": 0.5,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-5.png",
+            "scrollFactor": 0.5,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-6.png",
+            "scrollFactor": 0.5,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/halloween-witchhouse-7.png",
+            "scrollFactor": 0.5,
+            "yOffset": 0.0
+        }
+    ],
+    "player": {
+        "x": 266.0,
+        "y": 1026.0
+    },
+    "tiles": []
+}

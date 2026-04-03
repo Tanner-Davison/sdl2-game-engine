@@ -1,0 +1,40 @@
+{
+    "background": "game_assets/backgrounds/dusk-layer-6.png",
+    "bgFitMode": "scroll",
+    "bgRepeat": true,
+    "enemies": [],
+    "gravityMode": "platformer",
+    "name": "blocked-in",
+    "parallaxLayers": [
+        {
+            "img": "game_assets/backgrounds/dusk-layer-5.png",
+            "scrollFactor": 0.7000000476837158,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/dusk-layer-4.png",
+            "scrollFactor": 0.7000000476837158,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/dusk-layer-3.png",
+            "scrollFactor": 0.6500000357627869,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/dusk-layer-2.png",
+            "scrollFactor": 0.6000000238418579,
+            "yOffset": 0.0
+        },
+        {
+            "img": "game_assets/backgrounds/dusk-layer-1.png",
+            "scrollFactor": 0.550000011920929,
+            "yOffset": 0.0
+        }
+    ],
+    "player": {
+        "x": 638.0,
+        "y": 740.0
+    },
+    "tiles": []
+}

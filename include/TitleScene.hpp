@@ -1,5 +1,6 @@
 #pragma once
 #include "DrawPrimitives.hpp"
+#include "GlobalSettings.hpp"
 #include "Image.hpp"
 #include "PlayerProfile.hpp"
 #include "Rectangle.hpp"
@@ -124,6 +125,9 @@ class TitleScene : public Scene {
         auto [vlx, vly] = Text::CenterInRect("Play Level", 22, viewLevelsBtnRect);
         viewLevelsBtnText = std::make_unique<Text>("Play Level",
             SDL_Color{255, 255, 255, 255}, vlx, vly, 22);
+
+        // Settings button — top-right corner
+        mSettingsBtnRect = {mWindowW - 116, 14, 102, 32};
 
         scanLevels();
     }
@@ -382,8 +386,55 @@ class TitleScene : public Scene {
             return true;
         }
 
+        // ---- Settings panel intercepts input when open ----
+        if (mSettingsOpen) {
+            // Mouse button up: stop slider drag
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT) {
+                if (mSliderDragging) { mSliderDragging = false; saveSettings(); }
+                return true;
+            }
+            // Mouse motion: hover + slider drag
+            if (e.type == SDL_EVENT_MOUSE_MOTION) {
+                int mx = (int)e.motion.x, my = (int)e.motion.y;
+                mSettingsHoverClose  = hit(mSettingsCloseRect, mx, my);
+                mSettingsHoverToggle = hit(mBloodToggleRect, mx, my);
+                mSettingsHoverSlider = hit(mBloodSliderTrack, mx, my) || mSliderDragging;
+                if (mSliderDragging) {
+                    float t = (float)(mx - mBloodSliderTrack.x) / (float)mBloodSliderTrack.w;
+                    GlobalSettings::Get().bloodIntensity = GlobalSettings::SliderTToIntensity(t);
+                }
+                return true;
+            }
+            // Mouse button down: close / toggle / slider
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
+                int mx = (int)e.button.x, my = (int)e.button.y;
+                if (hit(mSettingsCloseRect, mx, my)) {
+                    mSettingsOpen = false; saveSettings(); return true;
+                }
+                if (hit(mBloodToggleRect, mx, my)) {
+                    GlobalSettings::Get().bloodEnabled = !GlobalSettings::Get().bloodEnabled;
+                    saveSettings(); return true;
+                }
+                if (hit(mBloodSliderTrack, mx, my)) {
+                    mSliderDragging = true;
+                    float t = (float)(mx - mBloodSliderTrack.x) / (float)mBloodSliderTrack.w;
+                    GlobalSettings::Get().bloodIntensity = GlobalSettings::SliderTToIntensity(t);
+                    return true;
+                }
+                // Click outside panel closes it
+                SDL_Rect panel = settingsPanelRect();
+                if (!hit(panel, mx, my)) { mSettingsOpen = false; saveSettings(); }
+                return true;
+            }
+            if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
+                mSettingsOpen = false; saveSettings(); return true;
+            }
+            return true;
+        }
+
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
+            if (hit(mSettingsBtnRect, mx, my))     { mSettingsOpen = true; return true; }
             if (hit(editorBtnRect, mx, my))        { mEditorPath = ""; mEditorForce = false; mEditorName = ""; openEditor = true; }
             if (hit(createPlayerBtnRect, mx, my))  { openPlayerCreator  = true; return true; }
             if (hit(tileAnimBtnRect, mx, my))       { openTileAnimCreator = true; return true; }
@@ -491,6 +542,26 @@ class TitleScene : public Scene {
                 SDL_Rect expanded = {fr.x - 3, fr.y - 3, fr.w + 6, fr.h + 6};
                 outlineRect(ren, expanded, {255, 220, 60, 255}, 3);
             }
+        }
+
+        // --- Settings button (always visible) ---
+        {
+            float _smx = 0, _smy = 0; SDL_GetMouseState(&_smx, &_smy);
+            bool hover = hit(mSettingsBtnRect, (int)_smx, (int)_smy);
+            SDL_Color sbBg  = hover ? SDL_Color{70,60,100,255} : SDL_Color{45,38,70,255};
+            fillRounded(ren, mSettingsBtnRect, sbBg, 6.f);
+            if (hover)
+                outlineRounded(ren, mSettingsBtnRect, {255,220,60,255}, 2.f, 6.f, 1.f);
+            else
+                outlineRounded(ren, mSettingsBtnRect, {80,70,120,255}, 1.f, 6.f);
+            auto [stx, sty] = Text::CenterInRect("Settings", 14, mSettingsBtnRect);
+            Text settingsLbl("Settings", {210, 200, 255, 255}, stx, sty, 14);
+            settingsLbl.Render(ren);
+        }
+
+        // --- Settings overlay ---
+        if (mSettingsOpen) {
+            renderSettingsPanel(ren);
         }
 
         // --- Character picker popup ---
@@ -884,7 +955,9 @@ class TitleScene : public Scene {
 
     void saveSettings() const {
         json j;
-        j["chosenProfile"] = mChosenProfile;
+        j["chosenProfile"]   = mChosenProfile;
+        j["bloodEnabled"]    = GlobalSettings::Get().bloodEnabled;
+        j["bloodIntensity"]  = GlobalSettings::Get().bloodIntensity;
         std::ofstream f(kSettingsPath);
         if (f.is_open()) f << j.dump(4);
     }
@@ -894,6 +967,8 @@ class TitleScene : public Scene {
         json j;
         try { f >> j; } catch (...) { return; }
         mChosenProfile = j.value("chosenProfile", std::string{});
+        GlobalSettings::Get().bloodEnabled   = j.value("bloodEnabled",   true);
+        GlobalSettings::Get().bloodIntensity = j.value("bloodIntensity", 1.0f);
     }
 
     void restoreProfileFromSettings() {
@@ -940,6 +1015,173 @@ class TitleScene : public Scene {
     void openCharPicker();
     void buildWalkSheet(CharCard& c);
     void renderCharPicker(SDL_Renderer* ren);
+
+    // --- Settings panel ------------------------------------------------------
+    SDL_Rect settingsPanelRect() const {
+        constexpr int PW = 460, PH = 310;
+        return {(mWindowW - PW) / 2, (mWindowH - PH) / 2, PW, PH};
+    }
+
+    void renderSettingsPanel(SDL_Renderer* ren) {
+        // Dim background
+        SDL_SetRenderDrawColor(ren, 0, 0, 0, 190);
+        SDL_FRect full = {0, 0, (float)mWindowW, (float)mWindowH};
+        SDL_RenderFillRect(ren, &full);
+
+        SDL_Rect p = settingsPanelRect();
+
+        // Panel body
+        fillRounded(ren, p, {14, 12, 22, 255}, 10.f);
+        outlineRounded(ren, p, {90, 70, 140, 255}, 2.f, 10.f);
+
+        // Header bar
+        SDL_Rect hdr = {p.x, p.y, p.w, 46};
+        fillRounded(ren, hdr, {26, 20, 44, 255}, 10.f);
+        // Bottom of rounded header → straight edge
+        fillRounded(ren, {p.x, p.y + 24, p.w, 22}, {26, 20, 44, 255}, 0.f);
+
+        Text title("Settings", {220, 210, 255, 255}, p.x + 18, p.y + 10, 22);
+        title.Render(ren);
+
+        // Close button
+        mSettingsCloseRect = {p.x + p.w - 38, p.y + 7, 30, 30};
+        SDL_Color closeBg = mSettingsHoverClose ? SDL_Color{190, 50, 50, 255}
+                                                : SDL_Color{140, 35, 35, 255};
+        fillRounded(ren, mSettingsCloseRect, closeBg, 4.f);
+        if (mSettingsHoverClose)
+            outlineRounded(ren, mSettingsCloseRect, {255, 100, 100, 255}, 1.5f, 4.f);
+        auto [cxx, cxy] = Text::CenterInRect("X", 14, mSettingsCloseRect);
+        Text closeX("X", {255, 220, 220, 255}, cxx, cxy, 14);
+        closeX.Render(ren);
+
+        // ---- Section: Blood & Gore ------------------------------------------
+        int sy = p.y + 56;
+        Text sectionLbl("Blood & Gore", {160, 120, 200, 255}, p.x + 18, sy, 12);
+        sectionLbl.Render(ren);
+
+        // Thin divider under section label
+        SDL_SetRenderDrawColor(ren, 60, 45, 90, 255);
+        SDL_FRect div = {(float)(p.x + 18), (float)(sy + 18), (float)(p.w - 36), 1.f};
+        SDL_RenderFillRect(ren, &div);
+
+        // ---- Blood toggle ---------------------------------------------------
+        int toggleY = sy + 30;
+        Text toggleLbl("Blood Effects", {210, 205, 230, 255}, p.x + 18, toggleY + 5, 16);
+        toggleLbl.Render(ren);
+
+        // Pill switch: 60 × 28, right-aligned inside panel
+        constexpr int PILL_W = 60, PILL_H = 28;
+        mBloodToggleRect = {p.x + p.w - PILL_W - 20, toggleY, PILL_W, PILL_H};
+        bool on = GlobalSettings::Get().bloodEnabled;
+
+        // Pill background
+        SDL_Color pillBg = on ? SDL_Color{180, 30, 30, 255} : SDL_Color{45, 40, 60, 255};
+        fillRounded(ren, mBloodToggleRect, pillBg, 14.f);
+        if (mSettingsHoverToggle)
+            outlineRounded(ren, mBloodToggleRect, {255, 180, 180, 255}, 1.5f, 14.f);
+
+        // Toggle knob (circle) — moves left/right
+        constexpr int KNOB = 22;
+        int knobX = on ? (mBloodToggleRect.x + PILL_W - KNOB - 3)
+                       : (mBloodToggleRect.x + 3);
+        int knobY = mBloodToggleRect.y + (PILL_H - KNOB) / 2;
+        SDL_Rect knob = {knobX, knobY, KNOB, KNOB};
+        fillRounded(ren, knob, {245, 240, 255, 255}, 11.f);
+
+        // ON / OFF label inside pill
+        const char* pillTxt = on ? "ON" : "OFF";
+        int textSide = on ? (mBloodToggleRect.x + 7) : (mBloodToggleRect.x + 28);
+        Text pillLbl(pillTxt, on ? SDL_Color{255,200,200,255} : SDL_Color{130,120,160,255},
+                     textSide, mBloodToggleRect.y + 7, 11);
+        pillLbl.Render(ren);
+
+        // ---- Blood Intensity slider -----------------------------------------
+        int sliderLabelY = toggleY + 52;
+        Text sliderLbl("Blood Intensity", {210, 205, 230, 255}, p.x + 18, sliderLabelY, 16);
+        sliderLbl.Render(ren);
+
+        // Grey-out label + slider when blood is disabled
+        if (!on) {
+            SDL_SetRenderDrawColor(ren, 14, 12, 22, 140);
+            SDL_FRect veil = {(float)(p.x + 16), (float)(sliderLabelY - 2),
+                              (float)(p.w - 32), 100.f};
+            SDL_RenderFillRect(ren, &veil);
+        }
+
+        // Track rect
+        constexpr int TRACK_H = 8;
+        int trackY = sliderLabelY + 32;
+        mBloodSliderTrack = {p.x + 20, trackY, p.w - 40, TRACK_H};
+
+        // Track background
+        fillRounded(ren, mBloodSliderTrack, {40, 32, 55, 255}, 4.f);
+
+        // Red fill up to handle position
+        float sliderT = GlobalSettings::Get().SliderT();
+        int fillW = (int)(sliderT * mBloodSliderTrack.w);
+        if (fillW > 0) {
+            SDL_Rect fill = {mBloodSliderTrack.x, mBloodSliderTrack.y,
+                             std::max(fillW, 8), TRACK_H};
+            fillRounded(ren, fill, {190, 30, 30, 255}, 4.f);
+        }
+
+        // Handle (circle knob centered on track)
+        constexpr int HANDLE = 22;
+        int handleX = mBloodSliderTrack.x + fillW - HANDLE / 2;
+        handleX = std::clamp(handleX, mBloodSliderTrack.x,
+                             mBloodSliderTrack.x + mBloodSliderTrack.w - HANDLE);
+        int handleY = mBloodSliderTrack.y + (TRACK_H - HANDLE) / 2;
+        SDL_Rect handleRect = {handleX, handleY, HANDLE, HANDLE};
+
+        // Subtle drop-shadow
+        SDL_Rect shadow = {handleX + 2, handleY + 2, HANDLE, HANDLE};
+        fillRounded(ren, shadow, {0, 0, 0, 80}, 11.f);
+
+        // Handle fill — brighter when dragging/hovered
+        bool hoverH = mSettingsHoverSlider || mSliderDragging;
+        SDL_Color handleFill = hoverH ? SDL_Color{255, 60, 60, 255}
+                                      : SDL_Color{220, 40, 40, 255};
+        fillRounded(ren, handleRect, handleFill, 11.f);
+        outlineRounded(ren, handleRect, {255, 200, 200, 255}, 2.f, 11.f);
+
+        // Current intensity label below the handle
+        const char* iLabel = GlobalSettings::Get().IntensityLabel();
+        auto iLabelSz = Text::Measure(iLabel, 13);
+        int lblX = handleX + HANDLE / 2 - iLabelSz.x / 2;
+        lblX = std::clamp(lblX, mBloodSliderTrack.x,
+                          mBloodSliderTrack.x + mBloodSliderTrack.w - iLabelSz.x);
+        SDL_Color lblCol = (std::string(iLabel) == "INSANE!")
+                           ? SDL_Color{255, 80, 80, 255}
+                           : SDL_Color{220, 180, 180, 255};
+        Text iLbl(iLabel, lblCol, lblX, handleY + HANDLE + 5, 13);
+        iLbl.Render(ren);
+
+        // Track end-cap labels: "Low" left, "INSANE!" right
+        Text capL("Low", {110, 90, 130, 255}, mBloodSliderTrack.x, trackY + TRACK_H + 24, 11);
+        capL.Render(ren);
+        auto insaneSz = Text::Measure("Insane!", 11);
+        Text capR("Insane!", {160, 60, 60, 255},
+                  mBloodSliderTrack.x + mBloodSliderTrack.w - insaneSz.x,
+                  trackY + TRACK_H + 24, 11);
+        capR.Render(ren);
+
+        // Normal tick mark at 50% position
+        int tickX = mBloodSliderTrack.x + mBloodSliderTrack.w / 2;
+        SDL_SetRenderDrawColor(ren, 100, 80, 130, 255);
+        SDL_FRect tickLine = {(float)tickX, (float)(trackY - 4), 1.f, (float)(TRACK_H + 8)};
+        SDL_RenderFillRect(ren, &tickLine);
+        auto normSz = Text::Measure("Normal", 10);
+        Text normTick("Normal", {100, 80, 130, 255},
+                      tickX - normSz.x / 2, trackY + TRACK_H + 24, 10);
+        normTick.Render(ren);
+
+        // Foot hint
+        auto hintStr = std::string("Esc to close");
+        auto hintSz  = Text::Measure(hintStr, 11);
+        Text hint(hintStr, {70, 60, 100, 255},
+                  p.x + p.w / 2 - hintSz.x / 2, p.y + p.h - 18, 11);
+        hint.Render(ren);
+    }
 
     // --- Gamepad navigation ---
     int   mPadFocus       = -1;
@@ -1014,6 +1256,17 @@ class TitleScene : public Scene {
             mPadFocus = -1;
         return false;
     }
+
+    // --- Settings panel state ---
+    SDL_Rect mSettingsBtnRect   = {};
+    SDL_Rect mSettingsCloseRect = {};
+    SDL_Rect mBloodToggleRect   = {};
+    SDL_Rect mBloodSliderTrack  = {};
+    bool     mSettingsOpen      = false;
+    bool     mSliderDragging    = false;
+    bool     mSettingsHoverClose  = false;
+    bool     mSettingsHoverToggle = false;
+    bool     mSettingsHoverSlider = false;
 
     // --- State ---
     SDL_Window*   mSDLWindow           = nullptr;

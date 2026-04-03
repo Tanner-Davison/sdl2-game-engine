@@ -179,4 +179,53 @@ struct Camera {
                 y = 0.0f;
         }
     }
+
+    // Shared-screen multiplayer camera.
+    // Target = midpoint of both players. The camera only moves when the midpoint
+    // drifts far enough to push one player toward the edge of the viewport.
+    // The effective deadzone expands with player spread so small independent
+    // movements don't drag the camera — it only scrolls when both players are
+    // pulling in the same direction together.
+    void UpdateMulti(float p1cx, float p1cy,
+                     float p2cx, float p2cy,
+                     int   viewW, int viewH,
+                     float levelW, float levelH,
+                     float dt) {
+        float midX = (p1cx + p2cx) * 0.5f;
+        float midY = (p1cy + p2cy) * 0.5f;
+
+        // Deadzone grows with half the inter-player spread so we only scroll
+        // when the combined midpoint actually crosses the outer threshold.
+        float halfSpreadX = std::abs(p2cx - p1cx) * 0.5f;
+        float halfSpreadY = std::abs(p2cy - p1cy) * 0.5f;
+        float dzX = std::max(CAM_DEADZONE_X, halfSpreadX * 0.4f);
+        float dzY = std::max(CAM_DEADZONE_Y, halfSpreadY * 0.4f);
+
+        float desiredX = midX - viewW * 0.5f;
+        float desiredY = midY - viewH * 0.5f;
+
+        float diffX = desiredX - x;
+        float diffY = desiredY - y;
+        if      (diffX >  dzX) desiredX = x + diffX - dzX;
+        else if (diffX < -dzX) desiredX = x + diffX + dzX;
+        else                    desiredX = x;
+        if      (diffY >  dzY) desiredY = y + diffY - dzY;
+        else if (diffY < -dzY) desiredY = y + diffY + dzY;
+        else                    desiredY = y;
+
+        float t = 1.0f - std::exp(-CAM_LERP_SPEED * dt);
+        x += (desiredX - x) * t;
+        y += (desiredY - y) * t;
+
+        if (levelW > 0.0f) {
+            if (x < 0.0f)           x = 0.0f;
+            if (x + viewW > levelW) x = levelW - viewW;
+            if (x < 0.0f)           x = 0.0f;
+        }
+        if (levelH > 0.0f) {
+            if (y < 0.0f)            y = 0.0f;
+            if (y + viewH > levelH)  y = levelH - viewH;
+            if (y < 0.0f)            y = 0.0f;
+        }
+    }
 };

@@ -14,6 +14,7 @@
 #include "Systems.hpp"
 #include "Text.hpp"
 #include "Window.hpp"
+#include "systems/BloodParticleSystem.hpp"
 #include <SDL3/SDL.h>
 #include <entt/entt.hpp>
 #include <memory>
@@ -138,8 +139,15 @@ class GameScene : public Scene {
 
     static void PreloadRawSurfaces(const Level& level);
 
-    SpatialGrid mTileGrid{64.0f};
-    SDL_Gamepad* mCachedPad = nullptr;
+    SpatialGrid          mTileGrid{64.0f};
+    SDL_Gamepad*         mCachedPad      = nullptr;
+    SDL_Gamepad*         mCachedPad2     = nullptr;   // P2 gamepad (nullptr when <2 controllers)
+    bool                 mMultiplayerActive = false;  // true once P2 has been spawned
+    BloodParticleSystem  mBloodParticles;
+
+    // Spawns the second player entity using the current sprite sheets.
+    // Called automatically when two Xbox controllers are first detected.
+    void SpawnPlayer2();
 
   public:
     // Raw surface cache: avoids redundant IMG_Load for the same path.

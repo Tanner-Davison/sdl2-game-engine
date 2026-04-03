@@ -404,6 +404,7 @@ void GameScene::Load(Window& window) {
 }
 
 void GameScene::Unload() {
+    mBloodParticles.Clear();
     if (Audio() && Audio()->IsReady()) {
         Audio()->StopLevelMusic(300);
         Audio()->Sfx().UnloadAll();
@@ -503,7 +504,7 @@ bool GameScene::HandleEvent(SDL_Event& e) {
             return true;
         }
         InputSystem(reg, e);
-        GamepadInputEvent(reg, e);
+        GamepadInputEvent(reg, e, mCachedPad, mCachedPad2);
     } else {
         if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_R)
             Respawn();
@@ -535,23 +536,90 @@ void GameScene::Update(float dt) {
     if (gameOver)
         return;
 
-    // Cache gamepad for this frame to avoid repeated SDL_GetGamepads calls.
+    // Cache gamepads for this frame to avoid repeated SDL_GetGamepads calls.
+    // If two Xbox controllers are connected and P2 hasn't been spawned yet,
+    // spawn them now so multiplayer activates automatically at runtime.
     {
         int count = 0;
         SDL_JoystickID* ids = SDL_GetGamepads(&count);
-        mCachedPad = (ids && count > 0) ? SDL_GetGamepadFromID(ids[0]) : nullptr;
+        mCachedPad  = (ids && count > 0) ? SDL_GetGamepadFromID(ids[0]) : nullptr;
+        mCachedPad2 = (ids && count > 1) ? SDL_GetGamepadFromID(ids[1]) : nullptr;
         SDL_free(ids);
+
+        if (mCachedPad2 && !mMultiplayerActive) {
+            mMultiplayerActive = true;
+            SpawnPlayer2();
+        }
     }
 
     // Rebuild spatial grid for bullet broadphase.
     mTileGrid.Build(reg);
+
+    // ---- Blood emit helper — applies global toggle + intensity multiplier ----
+    // All blood emissions go through this so GlobalSettings is the single
+    // point of control; no scattered if-checks throughout the update code.
+    auto emitBlood = [&](BloodEmitParams evt) {
+        const auto& gs = GlobalSettings::Get();
+        if (!gs.bloodEnabled) return;
+        evt.intensity *= gs.bloodIntensity;
+        // Speed ramps smoothly from 1.0x (Normal) up to 2.0x (INSANE=10).
+        // Formula: 1.0 + clamp((intensity-1) / 9, 0, 1) * 1.0
+        // At intensity=1 → 1.0x, intensity=5 → 1.44x, intensity=10 → 2.0x
+        evt.speedMul = 1.0f + std::clamp((gs.bloodIntensity - 1.0f) / 9.0f, 0.0f, 1.0f);
+        mBloodParticles.Emit(evt);
+    };
+
+    // ---- Blood particle callbacks (shared by normal and death-anim paths) ----
+    // tileQuery: falling particles snap to solid tile surfaces.
+    auto tileQueryFn = [&](float px, float pyBottom, float& tileTopY) -> bool {
+        bool hit = false;
+        mTileGrid.Query(px - 2.f, pyBottom - 2.f, 4.f, 4.f,
+            [&](entt::entity te) {
+                if (hit) return;
+                if (reg.all_of<HazardTag>(te) || reg.all_of<LadderTag>(te)) return;
+                if (!reg.all_of<Transform, Collider>(te)) return;
+                const auto& tt = reg.get<Transform>(te);
+                const auto& tc = reg.get<Collider>(te);
+                if (px >= tt.x && px <= tt.x + tc.w &&
+                    pyBottom >= tt.y && pyBottom <= tt.y + tc.h) {
+                    tileTopY = tt.y;
+                    hit = true;
+                }
+            });
+        return hit;
+    };
+
+    // tileMoveQuery: stains/grounded particles ride moving platforms.
+    // Returns the per-frame world-space displacement (dvx, dvy) of any moving
+    // platform tile found at the probe point.  The spatial grid is built before
+    // MovingPlatformTick so it still holds last-frame positions — probing from
+    // the stain's current (= last-frame) world position finds the tile correctly.
+    auto tileMoveQueryFn = [&](float probeX, float probeY, float& dvx, float& dvy) -> bool {
+        bool found = false;
+        mTileGrid.Query(probeX - 2.f, probeY - 2.f, 4.f, 4.f,
+            [&](entt::entity te) {
+                if (found) return;
+                if (!reg.all_of<MovingPlatformTag, MovingPlatformState, Transform, Collider>(te)) return;
+                const auto& tt  = reg.get<Transform>(te);
+                const auto& tc  = reg.get<Collider>(te);
+                const auto& mps = reg.get<MovingPlatformState>(te);
+                if (probeX >= tt.x && probeX <= tt.x + tc.w &&
+                    probeY >= tt.y && probeY <= tt.y + tc.h) {
+                    dvx   = mps.vx;
+                    dvy   = mps.vy;
+                    found = true;
+                }
+            });
+        return found;
+    };
 
     if (mPlayerDying) {
         mDeathAnimTimer += dt;
         AnimationSystem(reg, dt);
         mCamera.TickShake(dt);
 
-        if (mCachedPad) {
+        auto deathRumble = [&](SDL_Gamepad* pad) {
+            if (!pad) return;
             float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
             float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
             if (shakeAmp > 0.1f || punchAmp > 0.1f) {
@@ -560,9 +628,15 @@ void GameScene::Update(float dt) {
                 Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
                 Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
                 lo = std::max(lo, hi);
-                SDL_RumbleGamepad(mCachedPad, lo, hi, 50);
+                SDL_RumbleGamepad(pad, lo, hi, 50);
             }
-        }
+        };
+        deathRumble(mCachedPad);
+        deathRumble(mCachedPad2);
+
+        // Keep blood physics running during the death animation so particles
+        // continue to arc, fall, and splat on the floor rather than freezing.
+        mBloodParticles.Update(dt, tileQueryFn, tileMoveQueryFn);
 
         bool animDone = false;
         auto pv = reg.view<PlayerTag, AnimationState>();
@@ -580,7 +654,19 @@ void GameScene::Update(float dt) {
         return;
     }
 
-    GamepadPollSystem(reg, mCachedPad);
+    GamepadPollSystem(reg, mCachedPad, mCachedPad2);
+
+    // Snapshot current Transform → PrevTransform before physics runs so that
+    // CollisionSystem can query where each entity was at the *start* of this tick.
+    // (Used by the dead-enemy platform guard and render interpolation.)
+    {
+        auto snapView = reg.view<Transform, PrevTransform>();
+        snapView.each([](const Transform& t, PrevTransform& p) {
+            p.x = t.x;
+            p.y = t.y;
+        });
+    }
+
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
@@ -597,7 +683,7 @@ void GameScene::Update(float dt) {
 
     PlayerStateSystem(reg);
 
-    MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW, mCachedPad, &mTileGrid);
+    MovementSystem(reg, dt, mWindow->GetWidth(), mLevelW, mCachedPad, &mTileGrid, mCachedPad2);
     BoundsSystem(reg,
                  dt,
                  mWindow->GetWidth(),
@@ -997,11 +1083,23 @@ void GameScene::Update(float dt) {
         });
     }
 
+    // --- Blood particle events from CollisionSystem ---
+    for (const auto& evt : collision.bloodEvents)
+        emitBlood(evt);
+
     goalsCollected += collision.goalsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
     if (collision.playerDied && !mPlayerDying) {
         mPlayerDying    = true;
         mDeathAnimTimer = 0.0f;
+        // Massive blood burst at player centre
+        {
+            auto pv = reg.view<PlayerTag, Transform, Collider>();
+            pv.each([&](const Transform& pt, const Collider& pc) {
+                emitBlood({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f,
+                           0.f, -1.f, BloodEventType::PlayerDeath, 1.0f});
+            });
+        }
         auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
         dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
                    const AnimationSet& set) {
@@ -1510,18 +1608,29 @@ void GameScene::Update(float dt) {
                         playerR.x += off->x; playerR.y += off->y;
                     }
                     if (SDL_HasRectIntersectionFloat(&bulletR, &playerR)) {
+                        float pCX = pt.x + pc.w * 0.5f;
+                        float pCY = pt.y + pc.h * 0.5f;
+                        float bulletBloodIntensity = 1.0f;
                         if (auto* hp = reg.try_get<Health>(pe)) {
+                            float dmgFrac = std::min(bt.damage / hp->max, 1.0f);
                             hp->current -= bt.damage;
                             if (hp->current <= 0.f) {
                                 hp->current = 0.f;
                                 bulletKilledPlayer = true;
                             }
+                            float killBonus = bulletKilledPlayer ? 0.6f : 0.f;
+                            bulletBloodIntensity = std::min(
+                                std::clamp(0.4f + dmgFrac * 3.0f, 0.4f, 3.0f) + killBonus, 3.0f);
                         }
                         inv.isInvincible = true;
                         inv.remaining    = 0.3f;
 
                         pt.x += bt.dx * -16.f;
                         pt.y += bt.dy * -16.f;
+
+                        // Blood spurts from the player scaled by how much damage the bullet dealt
+                        emitBlood({pCX, pCY, bt.dx, bt.dy,
+                                   BloodEventType::PlayerHit, bulletBloodIntensity});
 
                         if (!bulletKilledPlayer) {
                             auto* anim = reg.try_get<AnimationState>(pe);
@@ -1553,12 +1662,21 @@ void GameScene::Update(float dt) {
                 SDL_FRect enemyR = {et.x, et.y, (float)ec.w, (float)ec.h};
                 if (SDL_HasRectIntersectionFloat(&bulletR, &enemyR)) {
                     auto& eh = reg.get<Health>(ee);
+                    float bulletDmgFrac = std::min(bt.damage / eh.max, 1.0f);
                     eh.current -= bt.damage;
+
+                    float hitX = et.x + ec.w * 0.5f;
+                    float hitY = et.y + ec.h * 0.5f;
 
                     et.x += bt.dx * 24.f;
 
                     if (eh.current <= 0.f) {
                         eh.current = 0.f;
+                        // Bullet kill — burst scaled by how much of enemy's health was taken
+                        float killIntensity = std::min(
+                            std::clamp(0.4f + bulletDmgFrac * 3.0f, 0.4f, 3.0f) + 0.5f, 3.0f);
+                        emitBlood({hitX, hitY, bt.dx, bt.dy,
+                                   BloodEventType::BulletKillEnemy, killIntensity});
                         if (reg.all_of<Velocity>(ee)) {
                             auto& v = reg.get<Velocity>(ee);
                             v.dx = v.dy = 0.f;
@@ -1584,6 +1702,10 @@ void GameScene::Update(float dt) {
                         if (!reg.all_of<DeadTag>(ee))
                             reg.emplace<DeadTag>(ee);
                     } else {
+                        // Bullet wound — puff scaled by damage fraction
+                        float woundIntensity = std::clamp(0.4f + bulletDmgFrac * 3.0f, 0.4f, 3.0f);
+                        emitBlood({hitX, hitY, bt.dx, bt.dy,
+                                   BloodEventType::BulletHitEnemy, woundIntensity});
                         // Hurt flash + animation
                         if (auto* ead = reg.try_get<EnemyAnimData>(ee);
                             ead && ead->hurtSheet && !ead->hurtFrames.empty()) {
@@ -1743,6 +1865,14 @@ void GameScene::Update(float dt) {
     if (bulletKilledPlayer && !mPlayerDying) {
         mPlayerDying    = true;
         mDeathAnimTimer = 0.0f;
+        // Massive death burst from player centre
+        {
+            auto pv = reg.view<PlayerTag, Transform, Collider>();
+            pv.each([&](const Transform& pt, const Collider& pc) {
+                emitBlood({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f,
+                           0.f, -1.f, BloodEventType::PlayerDeath, 1.0f});
+            });
+        }
         auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
         dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
                    const AnimationSet& set) {
@@ -1875,27 +2005,84 @@ void GameScene::Update(float dt) {
     }
 
     {
-        auto pView = reg.view<PlayerTag, Transform, Collider>();
+        // Collect all living player centers for camera targeting.
+        struct PCenter { float cx, cy; };
+        std::vector<PCenter> pcenters;
+        auto pView = reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>);
         pView.each([&](const Transform& pt, const Collider& pc) {
-            float cx = pt.x + pc.w * 0.5f, cy = pt.y + pc.h * 0.5f;
-            mCamera.Update(
-                cx, cy, mWindow->GetWidth(), mWindow->GetHeight(), mLevelW, mLevelH, dt);
+            pcenters.push_back({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f});
         });
+
+        if (pcenters.size() >= 2) {
+            // Shared-screen: camera keeps both players visible.
+            mCamera.UpdateMulti(pcenters[0].cx, pcenters[0].cy,
+                                pcenters[1].cx, pcenters[1].cy,
+                                mWindow->GetWidth(), mWindow->GetHeight(),
+                                mLevelW, mLevelH, dt);
+        } else if (!pcenters.empty()) {
+            mCamera.Update(pcenters[0].cx, pcenters[0].cy,
+                           mWindow->GetWidth(), mWindow->GetHeight(),
+                           mLevelW, mLevelH, dt);
+        }
     }
     mCamera.TickShake(dt);
 
-    if (mCachedPad) {
+    // Advance blood particle physics.
+    // The tile query snaps falling particles onto solid tile surfaces so they
+    // never hang in mid-air or pass through floors.
+    mBloodParticles.Update(dt,
+        [&](float px, float pyBottom, float& tileTopY) -> bool {
+            bool  hit     = false;
+            float bestTop = 1e9f;
+
+            // Query a small rect at the particle's bottom centre.
+            // Only solid TileTags count — skip hazards and ladders.
+            mTileGrid.Query(px - 2.f, pyBottom - 2.f, 4.f, 4.f,
+                            [&](entt::entity te) {
+                if (hit) return;
+                if (!reg.valid(te)) return;
+                if (!reg.all_of<TileTag, Transform, Collider>(te)) return;
+                if ( reg.all_of<HazardTag>(te)) return;
+                if ( reg.all_of<LadderTag>(te)) return;
+
+                const auto& tt = reg.get<Transform>(te);
+                const auto& tc = reg.get<Collider>(te);
+                float tx = tt.x, ty = tt.y;
+                if (const auto* off = reg.try_get<ColliderOffset>(te)) {
+                    tx += off->x;
+                    ty += off->y;
+                }
+
+                // Particle bottom must be inside the tile's AABB
+                if (px >= tx && px <= tx + tc.w &&
+                    pyBottom >= ty && pyBottom <= ty + tc.h) {
+                    if (ty < bestTop) {
+                        bestTop = ty;
+                        hit     = true;
+                    }
+                }
+            });
+
+            if (hit) tileTopY = bestTop;
+            return hit;
+        },
+        tileMoveQueryFn);
+
+    auto doRumble = [&](SDL_Gamepad* pad) {
+        if (!pad) return;
         float shakeAmp = std::abs(mCamera.shakeOffX) + std::abs(mCamera.shakeOffY);
         float punchAmp = std::abs(mCamera.punchOffX) + std::abs(mCamera.punchOffY);
         if (shakeAmp > 0.1f || punchAmp > 0.1f) {
             float lowFrac  = std::clamp(shakeAmp / 8.0f, 0.0f, 1.0f);
             float highFrac = std::clamp(punchAmp / 6.0f, 0.0f, 1.0f);
-            Uint16 lo  = (Uint16)(lowFrac  * 0xFFFF);
-            Uint16 hi  = (Uint16)(highFrac * 0xFFFF);
+            Uint16 lo = (Uint16)(lowFrac  * 0xFFFF);
+            Uint16 hi = (Uint16)(highFrac * 0xFFFF);
             lo = std::max(lo, hi);
-            SDL_RumbleGamepad(mCachedPad, lo, hi, 50);
+            SDL_RumbleGamepad(pad, lo, hi, 50);
         }
-    }
+    };
+    doRumble(mCachedPad);
+    doRumble(mCachedPad2);
 }
 
 void GameScene::Render(Window& window, float alpha) {
@@ -1924,6 +2111,7 @@ void GameScene::Render(Window& window, float alpha) {
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
+        mBloodParticles.Render(ren, mCamera.x, mCamera.y);
         HUDSystem(reg,
                   ren,
                   W,
@@ -1941,6 +2129,7 @@ void GameScene::Render(Window& window, float alpha) {
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
+        mBloodParticles.Render(ren, mCamera.x, mCamera.y);
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(ren, 0, 0, 0, 140);
         SDL_FRect dimOverlay = {0, 0, (float)W, (float)H};
@@ -1956,6 +2145,7 @@ void GameScene::Render(Window& window, float alpha) {
         RenderTurrets(ren, W, H);
         RenderShield(ren, W, H);
         RenderTurretPowerUp(ren, W, H);
+        mBloodParticles.Render(ren, mCamera.x, mCamera.y);
 
         // --- Debug hitbox overlay (F1) ---
         if (mDebugHitboxes) {
@@ -2360,6 +2550,105 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
 }
 
 // --- Private helpers ---
+
+// SpawnPlayer2 — creates the second player entity when two Xbox controllers are connected.
+// Reuses P1's already-loaded sprite sheets (no extra GPU uploads).
+// P2 gets a blue PlayerTint so they are visually distinct from P1.
+void GameScene::SpawnPlayer2() {
+    if (!mWindow) return;
+
+    // Find where P1 spawned so we can place P2 nearby (slightly to the right).
+    float spawnX = mLevel.player.x + 60.0f;
+    float spawnY = mLevel.player.y;
+    // If P1 entity exists in the registry, use their current position instead.
+    {
+        auto pv = reg.view<PlayerTag, Transform, Collider, PlayerIndex>();
+        pv.each([&](const Transform& t, const Collider& c, const PlayerIndex& pi) {
+            if (pi.index == 0) {
+                spawnX = t.x + c.w + 20.0f;
+                spawnY = t.y;
+            }
+        });
+    }
+
+    // Resolve collider dimensions using the same defaults as P1.
+    const float sx     = (float)mPlayerSpriteW / PLAYER_SPRITE_WIDTH;
+    const float sy     = (float)mPlayerSpriteH / PLAYER_SPRITE_HEIGHT;
+    int         insetX = (int)(PLAYER_BODY_INSET_X * sx);
+    int         insetT = (int)(PLAYER_BODY_INSET_TOP * sy);
+    int         insetB = (int)(PLAYER_BODY_INSET_BOTTOM * sy);
+    int         pColW  = mPlayerSpriteW - insetX * 2;
+    int         pColH  = mPlayerSpriteH - insetT - insetB;
+    int         pROffX = -insetX;
+    int         pROffY = -insetT;
+
+    auto p2 = reg.create();
+    reg.emplace<Transform>(p2, spawnX, spawnY);
+    reg.emplace<PrevTransform>(p2, spawnX, spawnY);
+    reg.emplace<Velocity>(p2);
+    {
+        AnimationState as;
+        as.currentFrame = 0;
+        as.totalFrames  = (int)idleFrames.size();
+        as.timer        = 0.0f;
+        as.fps          = 10.0f;
+        as.looping      = true;
+        as.currentAnim  = AnimationID::IDLE;
+        reg.emplace<AnimationState>(p2, as);
+    }
+    reg.emplace<Renderable>(p2, knightIdleSheet->GetTexture(), idleFrames, false,
+                             mPlayerSpriteW, mPlayerSpriteH);
+    reg.emplace<PlayerTag>(p2);
+    reg.emplace<PlayerIndex>(p2, 1);                       // P2 slot
+    reg.emplace<PlayerTint>(p2, Uint8(140), Uint8(180), Uint8(255)); // blue tint
+    reg.emplace<Health>(p2);
+    reg.emplace<Collider>(p2, pColW, pColH);
+    reg.emplace<RenderOffset>(p2, pROffX, pROffY);
+    {
+        PlayerBaseCollider base;
+        base.standW     = pColW;
+        base.standH     = pColH;
+        base.standRoffX = pROffX;
+        base.standRoffY = pROffY;
+        base.duckW      = pColW;
+        base.duckH      = pColH / 2;
+        base.duckRoffX  = pROffX;
+        base.duckRoffY  = -(mPlayerSpriteH - base.duckH);
+        reg.emplace<PlayerBaseCollider>(p2, base);
+    }
+    reg.emplace<InvincibilityTimer>(p2);
+    {
+        GravityState gs;
+        if (mLevel.gravityMode == GravityMode::OpenWorld) {
+            gs.active     = false;
+            gs.isGrounded = true;
+        }
+        reg.emplace<GravityState>(p2, gs);
+    }
+    if (mLevel.gravityMode == GravityMode::OpenWorld)
+        reg.emplace<OpenWorldTag>(p2);
+    reg.emplace<ClimbState>(p2);
+    reg.emplace<HazardState>(p2);
+    reg.emplace<AttackState>(p2);
+    reg.emplace<DashState>(p2);
+
+    // Share P1's animation frames; P2 is visually tinted blue via PlayerTint.
+    reg.emplace<AnimationSet>(
+        p2,
+        AnimationSet{
+            .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetTexture(),
+            .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetTexture(),
+            .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetTexture(),
+            .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetTexture(),
+            .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetTexture(),
+            .front      = frontFrames, .frontSheet = knightFallSheet->GetTexture(),
+            .slash      = slashFrames, .slashSheet = knightSlashSheet->GetTexture(),
+            .death      = deathFrames, .deathSheet = knightDeathSheet->GetTexture(),
+        });
+
+    std::print("SpawnPlayer2: P2 entity created at ({:.0f}, {:.0f})\n", spawnX, spawnY);
+}
+
 void GameScene::Spawn() {
     SDL_Renderer* ren = mWindow->GetRenderer();
 
@@ -2455,6 +2744,7 @@ void GameScene::Spawn() {
     reg.emplace<Renderable>(player, knightIdleSheet->GetTexture(), idleFrames, false,
                              mPlayerSpriteW, mPlayerSpriteH);
     reg.emplace<PlayerTag>(player);
+    reg.emplace<PlayerIndex>(player, 0);   // P1 — keyboard + gamepad 0
     reg.emplace<Health>(player);
     reg.emplace<Collider>(player, pColW, pColH);
     reg.emplace<RenderOffset>(player, pROffX, pROffY);
@@ -3139,6 +3429,7 @@ void GameScene::Spawn() {
 }
 
 void GameScene::Respawn() {
+    mBloodParticles.Clear();
     reg.clear();
     tileAnimFrameMap.clear();
     mSortedTileRenderList.clear();
@@ -3149,8 +3440,12 @@ void GameScene::Respawn() {
     mDeathAnimTimer    = 0.0f;
     levelComplete      = false;
     levelCompleteTimer = 2.0f;
-    goalsCollected    = 0;
+    goalsCollected     = 0;
     stompCount         = 0;
     mCamera            = Camera{};
+    // mMultiplayerActive is intentionally kept: if two pads were connected
+    // when we respawn, SpawnPlayer2() will be called again at the next Update
+    // tick once mCachedPad2 is re-detected.  Reset the flag so it re-triggers.
+    mMultiplayerActive = false;
     Spawn();
 }

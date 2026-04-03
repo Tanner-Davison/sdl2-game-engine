@@ -1,3 +1,5 @@
 {
+    "bloodEnabled": true,
+    "bloodIntensity": 10.0,
     "chosenProfile": "players/KING.json"
 }

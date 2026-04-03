@@ -126,6 +126,10 @@ inline void RenderSystem(entt::registry& reg, SDL_Renderer* renderer,
         } else if (hz && hz->active && (int)(hz->flashTimer * 8.0f) % 2 == 0) {
             SDL_SetTextureColorMod(r.sheet, 255, 80, 80);
             colorModded = true;
+        } else if (const auto* tint = reg.try_get<PlayerTint>(entity)) {
+            // Per-player color tint for visual distinction in multiplayer
+            SDL_SetTextureColorMod(r.sheet, tint->r, tint->g, tint->b);
+            colorModded = true;
         }
 
         SDL_FlipMode flip  = r.flipH ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;

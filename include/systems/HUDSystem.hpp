@@ -22,55 +22,82 @@ inline void HUDSystem(entt::registry& reg,
     static int prevStomp    = -1;
     static int prevGravSecs = -1;
 
-    auto view = reg.view<PlayerTag, Health, GravityState>();
-    view.each([&](const Health& h, const GravityState& g) {
-        constexpr int barW = 200;
-        constexpr int barH = 15;
-        const int     barX = windowW - barW - 20;
-        constexpr int barY = 20;
+    constexpr int barW = 200;
+    constexpr int barH = 15;
+    constexpr int barY = 20;
 
+    auto view = reg.view<PlayerTag, Health, GravityState>();
+    view.each([&](entt::entity ent, const Health& h, const GravityState& g) {
+        // Determine player index (0 = P1 right side, 1 = P2 left side)
+        const auto* pi  = reg.try_get<PlayerIndex>(ent);
+        int          idx = pi ? pi->index : 0;
+
+        // P1 bar: top-right.  P2 bar: top-left.
+        const int barX = (idx == 0) ? (windowW - barW - 20) : 20;
+
+        // Background
         SDL_SetRenderDrawColor(renderer, 50, 50, 50, 255);
         SDL_FRect bg = {(float)barX, (float)barY, (float)barW, (float)barH};
         SDL_RenderFillRect(renderer, &bg);
 
+        // Fill (green→red by health fraction)
         int   fillW = (int)(barW * (h.current / h.max));
         float pct   = h.current / h.max;
         Uint8 red   = (Uint8)(255 * (1.0f - pct));
         Uint8 green = (Uint8)(255 * pct);
-        SDL_SetRenderDrawColor(renderer, red, green, 0, 255);
+        // P2 gets a blue tint to match their sprite
+        if (idx == 1)
+            SDL_SetRenderDrawColor(renderer, (Uint8)(red * 0.6f), (Uint8)(green * 0.6f), 255, 255);
+        else
+            SDL_SetRenderDrawColor(renderer, red, green, 0, 255);
         SDL_FRect fg = {(float)barX, (float)barY, (float)fillW, (float)barH};
         SDL_RenderFillRect(renderer, &fg);
 
-        int curHealth = (int)h.current;
-        if (curHealth != prevHealth) {
-            std::string label = std::to_string(curHealth) + " / " +
+        // Player label above bar
+        {
+            std::string label = (idx == 0 ? "P1  " : "P2  ") +
+                                std::to_string((int)h.current) + " / " +
                                 std::to_string((int)h.max);
-            healthText->SetPosition(barX, barY - 20);
-            healthText->CreateSurface(label);
-            prevHealth = curHealth;
-        }
-        if (healthText) healthText->Render(renderer);
-
-        if (goalText && totalGoals > 0) {
-            if (goalsRemaining != prevGoal) {
-                goalText->SetPosition(barX, barY + barH + 10);
-                goalText->CreateSurface("Goals: " + std::to_string(totalGoals - goalsRemaining) +
-                                        " / " + std::to_string(totalGoals));
-                prevGoal = goalsRemaining;
+            if (idx == 0) {
+                // P1: use the cached healthText member (avoids surface re-creation)
+                int curHealth = (int)h.current;
+                if (curHealth != prevHealth) {
+                    healthText->SetPosition(barX, barY - 20);
+                    healthText->CreateSurface(label);
+                    prevHealth = curHealth;
+                }
+                if (healthText) healthText->Render(renderer);
+            } else {
+                // P2: render an inline label (blue tint) without needing a second member
+                SDL_Color p2Color{160, 200, 255, 255};
+                Text p2Label(label, p2Color, barX, barY - 20, 16);
+                p2Label.Render(renderer);
             }
-            goalText->Render(renderer);
         }
 
-        if (stompText) {
-            if (stompCount != prevStomp) {
-                stompText->SetPosition(barX, barY + barH + 30);
-                stompText->CreateSurface("Enemies Stomped: " + std::to_string(stompCount));
-                prevStomp = stompCount;
+        // Goals + stomp count only from P1 entity to avoid duplicate rendering
+        if (idx == 0) {
+            if (goalText && totalGoals > 0) {
+                if (goalsRemaining != prevGoal) {
+                    goalText->SetPosition(barX, barY + barH + 10);
+                    goalText->CreateSurface("Goals: " + std::to_string(totalGoals - goalsRemaining) +
+                                            " / " + std::to_string(totalGoals));
+                    prevGoal = goalsRemaining;
+                }
+                goalText->Render(renderer);
             }
-            stompText->Render(renderer);
+
+            if (stompText) {
+                if (stompCount != prevStomp) {
+                    stompText->SetPosition(barX, barY + barH + 30);
+                    stompText->CreateSurface("Enemies Stomped: " + std::to_string(stompCount));
+                    prevStomp = stompCount;
+                }
+                stompText->Render(renderer);
+            }
         }
 
-        if (g.punishmentTimer > 0.0f && gravityText) {
+        if (g.punishmentTimer > 0.0f && gravityText && idx == 0) {
             int secs = (int)std::ceil(g.punishmentTimer);
             if (secs != prevGravSecs) {
                 gravityText->SetPosition(windowW / 2 - 160, 20);
@@ -79,7 +106,7 @@ inline void HUDSystem(entt::registry& reg,
                 prevGravSecs = secs;
             }
             gravityText->Render(renderer);
-        } else {
+        } else if (idx == 0) {
             prevGravSecs = -1;
         }
     });

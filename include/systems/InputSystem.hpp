@@ -5,39 +5,61 @@
 #include <cmath>
 
 // Gamepad polling — called once per physics tick (not per-event).
-// Movement is handled by MovementSystem which reads the stick directly.
-inline SDL_Gamepad* GetFirstGamepad() {
-    int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
-    if (!ids || count == 0) { SDL_free(ids); return nullptr; }
-    SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[0]);
-    SDL_free(ids);
-    return pad;
-}
-
-inline void GamepadPollSystem(entt::registry& reg, SDL_Gamepad* cachedPad = nullptr) {
-    SDL_Gamepad* pad = cachedPad ? cachedPad : GetFirstGamepad();
-    if (!pad) return;
-
+// pad1 = gamepad for PlayerIndex 0 (P1).  pad2 = gamepad for PlayerIndex 1 (P2).
+// Both are optional; nullptr = that player uses keyboard only.
+inline void GamepadPollSystem(entt::registry& reg,
+                              SDL_Gamepad* pad1 = nullptr,
+                              SDL_Gamepad* pad2 = nullptr) {
     constexpr float DEAD_ZONE       = 0.25f;
     constexpr float CLIMB_DEAD_ZONE = 0.5f;
-
-    float rawY = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-
-    bool btnJump   = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_SOUTH);
-    bool btnCrouch = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
-    bool btnSprint = SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
 
     const bool* keys = SDL_GetKeyboardState(nullptr);
     bool kbW = keys[SDL_SCANCODE_W];
     bool kbS = keys[SDL_SCANCODE_S];
 
+    // Read P1 pad axes/buttons
+    float rawY1 = 0.0f;
+    bool btnJump1 = false, btnCrouch1 = false, btnSprint1 = false;
+    if (pad1) {
+        rawY1      = SDL_GetGamepadAxis(pad1, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        btnJump1   = SDL_GetGamepadButton(pad1, SDL_GAMEPAD_BUTTON_SOUTH)       != 0;
+        btnCrouch1 = SDL_GetGamepadButton(pad1, SDL_GAMEPAD_BUTTON_LEFT_STICK)  != 0;
+        btnSprint1 = SDL_GetGamepadButton(pad1, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) != 0;
+    }
+
+    // Read P2 pad axes/buttons
+    float rawY2 = 0.0f;
+    bool btnJump2 = false, btnCrouch2 = false, btnSprint2 = false;
+    if (pad2) {
+        rawY2      = SDL_GetGamepadAxis(pad2, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        btnJump2   = SDL_GetGamepadButton(pad2, SDL_GAMEPAD_BUTTON_SOUTH)       != 0;
+        btnCrouch2 = SDL_GetGamepadButton(pad2, SDL_GAMEPAD_BUTTON_LEFT_STICK)  != 0;
+        btnSprint2 = SDL_GetGamepadButton(pad2, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) != 0;
+    }
+
     auto view = reg.view<PlayerTag, GravityState, ClimbState>();
-    view.each([&](GravityState& g, ClimbState& climb) {
-        bool padUp   = rawY < -CLIMB_DEAD_ZONE;
-        bool padDown = rawY >  CLIMB_DEAD_ZONE;
-        climb.wPressed = kbW || padUp;
-        climb.sPressed = kbS || padDown;
+    view.each([&](entt::entity ent, GravityState& g, ClimbState& climb) {
+        const auto* pi  = reg.try_get<PlayerIndex>(ent);
+        int          idx = pi ? pi->index : 0;
+
+        bool padUp, padDown, btnJump, btnCrouch, btnSprint;
+        if (idx == 1) {
+            padUp     = rawY2 < -CLIMB_DEAD_ZONE;
+            padDown   = rawY2 >  CLIMB_DEAD_ZONE;
+            btnJump   = btnJump2;
+            btnCrouch = btnCrouch2;
+            btnSprint = btnSprint2;
+        } else {
+            padUp     = rawY1 < -CLIMB_DEAD_ZONE;
+            padDown   = rawY1 >  CLIMB_DEAD_ZONE;
+            btnJump   = btnJump1;
+            btnCrouch = btnCrouch1;
+            btnSprint = btnSprint1;
+        }
+
+        // P1 (idx == 0) merges keyboard and pad; P2 uses pad only.
+        climb.wPressed = (idx == 0) ? (kbW || padUp)   : padUp;
+        climb.sPressed = (idx == 0) ? (kbS || padDown)  : padDown;
 
         if (g.active)
             g.jumpHeld = g.jumpHeld || btnJump;
@@ -47,32 +69,61 @@ inline void GamepadPollSystem(entt::registry& reg, SDL_Gamepad* cachedPad = null
     });
 }
 
-// Gamepad event handler — discrete actions: attack, dash, ladder climb overrides.
-inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
+// Gamepad event handler — discrete actions: attack, dash, jump release.
+// pad1/pad2 are used to resolve which player triggered the event via joystick ID.
+inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e,
+                              SDL_Gamepad* pad1 = nullptr,
+                              SDL_Gamepad* pad2 = nullptr) {
     constexpr float TRIGGER_THRESHOLD = 0.3f;
     constexpr float STICK_DEAD_ZONE   = 0.25f;
 
+    // Determine which joystick ID fired the event
+    SDL_JoystickID eventId = 0;
+    if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION)
+        eventId = e.gaxis.which;
+    else if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN || e.type == SDL_EVENT_GAMEPAD_BUTTON_UP)
+        eventId = e.gbutton.which;
+
+    // Map to a player index by comparing against known pad IDs
+    int eventPlayerIdx = 0;
+    if (pad2 && eventId != 0) {
+        SDL_JoystickID pad2id = SDL_GetGamepadID(pad2);
+        if (eventId == pad2id)
+            eventPlayerIdx = 1;
+    }
+
+    // Helper: does this entity belong to the player who triggered the event?
+    auto isThisPlayer = [&](entt::entity ent) -> bool {
+        const auto* pi = reg.try_get<PlayerIndex>(ent);
+        return (pi ? pi->index : 0) == eventPlayerIdx;
+    };
+
+    // Right-trigger attack
     if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION &&
         e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
         float val = e.gaxis.value / 32767.0f;
         if (val > TRIGGER_THRESHOLD) {
             auto atk = reg.view<PlayerTag, AttackState>();
-            atk.each([](AttackState& a) {
+            atk.each([&](entt::entity ent, AttackState& a) {
+                if (!isThisPlayer(ent)) return;
                 if (!a.isAttacking) a.attackPressed = true;
             });
         }
     }
 
+    // West button (X/Square) dash
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_WEST) {
-        SDL_Gamepad* pad = GetFirstGamepad();
+        // Use the pad that matches this event to read stick position
+        SDL_Gamepad* thisPad = (eventPlayerIdx == 1 && pad2) ? pad2 : pad1;
         float stickX = 0.0f;
-        if (pad)
-            stickX = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        if (thisPad)
+            stickX = SDL_GetGamepadAxis(thisPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
 
         auto dashView = reg.view<PlayerTag, DashState, GravityState, ClimbState, Renderable>();
-        dashView.each([&](DashState& dash, const GravityState& g,
+        dashView.each([&](entt::entity ent, DashState& dash, const GravityState& g,
                           const ClimbState& climb, const Renderable& r) {
+            if (!isThisPlayer(ent)) return;
             if (dash.active || dash.cooldown > 0.0f) return;
             if (climb.climbing || climb.atTop) return;
             if (g.isCrouching) return;
@@ -88,31 +139,46 @@ inline void GamepadInputEvent(entt::registry& reg, SDL_Event& e) {
         });
     }
 
+    // South button release — cancel jump hold
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
         auto view = reg.view<PlayerTag, GravityState>();
-        view.each([](GravityState& g) { g.jumpHeld = false; });
+        view.each([&](entt::entity ent, GravityState& g) {
+            if (!isThisPlayer(ent)) return;
+            g.jumpHeld = false;
+        });
     }
 
+    // Left-stick click release — stop crouching
     if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
         e.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK) {
         auto view = reg.view<PlayerTag, GravityState>();
-        view.each([](GravityState& g) { g.isCrouching = false; });
+        view.each([&](entt::entity ent, GravityState& g) {
+            if (!isThisPlayer(ent)) return;
+            g.isCrouching = false;
+        });
     }
 }
 
+// Keyboard event handler — only drives PlayerIndex 0 (P1).
+// P2 is gamepad-only so these events are ignored for index-1 entities.
 inline void InputSystem(entt::registry& reg, SDL_Event& e) {
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_F) {
         auto atk = reg.view<PlayerTag, AttackState>();
-        atk.each([](AttackState& a) {
+        atk.each([&](entt::entity ent, AttackState& a) {
+            const auto* pi = reg.try_get<PlayerIndex>(ent);
+            if (pi && pi->index != 0) return;
             if (!a.isAttacking) a.attackPressed = true;
         });
     }
 
-    // --- Double-tap dash detection ---
+    // --- Double-tap dash detection (keyboard, P1 only) ---
     if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
         auto dashView = reg.view<PlayerTag, DashState, GravityState, ClimbState>();
-        dashView.each([&e](DashState& dash, const GravityState& g, const ClimbState& climb) {
+        dashView.each([&](entt::entity ent, DashState& dash,
+                          const GravityState& g, const ClimbState& climb) {
+            const auto* pi = reg.try_get<PlayerIndex>(ent);
+            if (pi && pi->index != 0) return;
             if (dash.active || dash.cooldown > 0.0f) return;
             if (climb.climbing || climb.atTop) return;
             if (g.isCrouching) return;
@@ -150,17 +216,21 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
     }
     if (e.type == SDL_EVENT_KEY_UP) {
         auto dashView = reg.view<PlayerTag, DashState>();
-        dashView.each([&e](DashState& dash) {
-            if (e.key.key == SDLK_A)
-                dash.releasedLeft = true;
-            if (e.key.key == SDLK_D)
-                dash.releasedRight = true;
+        dashView.each([&](entt::entity ent, DashState& dash) {
+            const auto* pi = reg.try_get<PlayerIndex>(ent);
+            if (pi && pi->index != 0) return;
+            if (e.key.key == SDLK_A) dash.releasedLeft  = true;
+            if (e.key.key == SDLK_D) dash.releasedRight = true;
         });
     }
 
     auto view = reg.view<PlayerTag, Velocity, Renderable, GravityState, ClimbState>();
-    view.each([&e](Velocity& v, Renderable& r, GravityState& g, ClimbState& climb) {
-        // On the top wall the sprite is rotated 180 so left/right facing is inverted
+    view.each([&](entt::entity ent, Velocity& v, Renderable& r,
+                  GravityState& g, ClimbState& climb) {
+        // Keyboard drives P1 (index 0) only
+        const auto* pi = reg.try_get<PlayerIndex>(ent);
+        if (pi && pi->index != 0) return;
+
         bool invertFlip = g.active && g.direction == GravityDir::UP;
         if (e.type == SDL_EVENT_KEY_DOWN) {
             switch (e.key.key) {
@@ -181,25 +251,23 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                 case SDLK_W: case SDLK_UP:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
-                            r.flipH = true;   // 90CW: face up the left wall
+                            r.flipH = true;
                         } else if (g.direction == GravityDir::RIGHT) {
-                            r.flipH = false;  // 90CCW: face up the right wall
+                            r.flipH = false;
                         }
                     }
                     break;
                 case SDLK_S: case SDLK_DOWN:
                     if (!g.isCrouching) {
                         if (g.direction == GravityDir::LEFT) {
-                            r.flipH = false;  // 90CW: face down the left wall
+                            r.flipH = false;
                         } else if (g.direction == GravityDir::RIGHT) {
-                            r.flipH = true;   // 90CCW: face down the right wall
+                            r.flipH = true;
                         }
                     }
                     break;
                 case SDLK_LCTRL:
                     g.isCrouching = true;
-                    // Don't zero velocity — let MovementSystem apply friction
-                    // so the character slides to a gradual stop.
                     break;
                 case SDLK_LSHIFT:
                     g.sprinting = true;
@@ -212,7 +280,6 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
             if (e.key.key == SDLK_LSHIFT) g.sprinting   = false;
         }
 
-        // Event-driven W/S for ladder: tap only moves for the frames the key is down.
         if (e.type == SDL_EVENT_KEY_DOWN) {
             if (e.key.key == SDLK_W || e.key.key == SDLK_UP)   climb.wPressed = true;
             if (e.key.key == SDLK_S || e.key.key == SDLK_DOWN) climb.sPressed = true;
@@ -223,8 +290,6 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
         }
 
         if (!g.active) {
-            // Only drive v.dy from input in free-float mode (wall-run gravity off).
-            // During ladder climbing LadderSystem owns all vertical movement.
             if (!climb.climbing && !climb.atTop) {
                 if (e.type == SDL_EVENT_KEY_DOWN) {
                     switch (e.key.key) {
@@ -234,11 +299,9 @@ inline void InputSystem(entt::registry& reg, SDL_Event& e) {
                 }
             }
         } else {
-            // Track spacebar held — actual jump fires each frame in MovementSystem
-            // after CollisionSystem has settled isGrounded.
             if (e.type == SDL_EVENT_KEY_DOWN && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
                 g.jumpHeld = true;
-            if (e.type == SDL_EVENT_KEY_UP && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
+            if (e.type == SDL_EVENT_KEY_UP   && (e.key.key == SDLK_SPACE || e.key.key == SDLK_UP))
                 g.jumpHeld = false;
         }
     });

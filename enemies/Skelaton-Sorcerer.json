@@ -51,7 +51,7 @@
         },
         {
             "folderPath": "game_assets/enemy_sprites/Skelaton-Sorcerer/Attack",
-            "fps": 0.0,
+            "fps": 23.0,
             "hitbox": {
                 "h": 104,
                 "w": 96,

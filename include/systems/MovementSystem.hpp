@@ -5,18 +5,29 @@
 #include <cmath>
 #include <entt/entt.hpp>
 
+// pad1 = gamepad for PlayerIndex 0 (P1), pad2 = gamepad for PlayerIndex 1 (P2).
 inline void MovementSystem(entt::registry& reg, float dt, int windowW, float levelW = 0.0f,
-                           SDL_Gamepad* cachedPad = nullptr,
-                           const SpatialGrid* tileGrid = nullptr) {
+                           SDL_Gamepad* pad1 = nullptr,
+                           const SpatialGrid* tileGrid = nullptr,
+                           SDL_Gamepad* pad2 = nullptr) {
     const bool* keys = SDL_GetKeyboardState(nullptr);
 
     constexpr float PAD_DEAD_ZONE = 0.25f;
-    float padAxisX = 0.0f, padAxisY = 0.0f;
-    if (cachedPad) {
-        float rx = SDL_GetGamepadAxis(cachedPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
-        float ry = SDL_GetGamepadAxis(cachedPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
-        if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX = rx;
-        if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY = ry;
+
+    // Read axes for each gamepad slot upfront
+    float padAxisX1 = 0.0f, padAxisY1 = 0.0f;
+    if (pad1) {
+        float rx = SDL_GetGamepadAxis(pad1, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        float ry = SDL_GetGamepadAxis(pad1, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX1 = rx;
+        if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY1 = ry;
+    }
+    float padAxisX2 = 0.0f, padAxisY2 = 0.0f;
+    if (pad2) {
+        float rx = SDL_GetGamepadAxis(pad2, SDL_GAMEPAD_AXIS_LEFTX) / 32767.0f;
+        float ry = SDL_GetGamepadAxis(pad2, SDL_GAMEPAD_AXIS_LEFTY) / 32767.0f;
+        if (std::abs(rx) > PAD_DEAD_ZONE) padAxisX2 = rx;
+        if (std::abs(ry) > PAD_DEAD_ZONE) padAxisY2 = ry;
     }
 
     {
@@ -38,7 +49,14 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
     }
 
     auto playerView = reg.view<Transform, Velocity, GravityState, PlayerTag, ClimbState, Renderable>();
-    playerView.each([&reg, dt, keys, padAxisX, padAxisY](entt::entity ent, Transform& t, Velocity& v, GravityState& g, const ClimbState& climb, Renderable& r) {
+    playerView.each([&reg, dt, keys, padAxisX1, padAxisY1, padAxisX2, padAxisY2](entt::entity ent, Transform& t, Velocity& v, GravityState& g, const ClimbState& climb, Renderable& r) {
+        // Route to the correct gamepad based on PlayerIndex component
+        const auto* pi   = reg.try_get<PlayerIndex>(ent);
+        int          idx = pi ? pi->index : 0;
+        float padAxisX   = (idx == 1) ? padAxisX2 : padAxisX1;
+        float padAxisY   = (idx == 1) ? padAxisY2 : padAxisY1;
+        // P2 is gamepad-only; P1 also reads keyboard
+        const bool* effectiveKeys = (idx == 0) ? keys : nullptr;
         // While dashing, skip normal horizontal input — dash tick above owns t.x.
         // Gravity still applies so the player follows arcs / stays grounded.
         if (auto* dash = reg.try_get<DashState>(ent); dash && dash->active) {
@@ -61,8 +79,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
 
         if (!g.active) {
             if (climb.climbing || climb.atTop) {
-                bool leftHeld  = keys[SDL_SCANCODE_A] || padAxisX < 0.0f;
-                bool rightHeld = keys[SDL_SCANCODE_D] || padAxisX > 0.0f;
+                bool leftHeld  = (effectiveKeys && effectiveKeys[SDL_SCANCODE_A]) || padAxisX < 0.0f;
+                bool rightHeld = (effectiveKeys && effectiveKeys[SDL_SCANCODE_D]) || padAxisX > 0.0f;
                 if (leftHeld && !rightHeld) {
                     v.dx = -CLIMB_STRAFE_SPEED;
                 } else if (rightHeld && !leftHeld) {
@@ -74,8 +92,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 t.x += v.dx * dt;
                 return;
             }
-            bool kbMoving = keys[SDL_SCANCODE_W] || keys[SDL_SCANCODE_S] ||
-                            keys[SDL_SCANCODE_A] || keys[SDL_SCANCODE_D];
+            bool kbMoving = effectiveKeys && (effectiveKeys[SDL_SCANCODE_W] || effectiveKeys[SDL_SCANCODE_S] ||
+                            effectiveKeys[SDL_SCANCODE_A] || effectiveKeys[SDL_SCANCODE_D]);
             bool padMoving = std::abs(padAxisX) > 0.0f || std::abs(padAxisY) > 0.0f;
             if (padMoving) {
                 v.dx = padAxisX * v.speed;
@@ -111,8 +129,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 case GravityDir::DOWN:
                 case GravityDir::UP: {
                     bool invertFlip = g.direction == GravityDir::UP;
-                    bool kbLeft  = keys[SDL_SCANCODE_A];
-                    bool kbRight = keys[SDL_SCANCODE_D];
+                    bool kbLeft  = effectiveKeys && effectiveKeys[SDL_SCANCODE_A];
+                    bool kbRight = effectiveKeys && effectiveKeys[SDL_SCANCODE_D];
                     if (kbLeft)  v.dx = -effSpeed;
                     if (kbRight) v.dx =  effSpeed;
                     if (std::abs(padAxisX) > 0.0f) {
@@ -129,8 +147,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
                 case GravityDir::LEFT:
                 case GravityDir::RIGHT: {
-                    bool kbUp   = keys[SDL_SCANCODE_W];
-                    bool kbDown = keys[SDL_SCANCODE_S];
+                    bool kbUp   = effectiveKeys && effectiveKeys[SDL_SCANCODE_W];
+                    bool kbDown = effectiveKeys && effectiveKeys[SDL_SCANCODE_S];
                     if (kbUp)   v.dy = -effSpeed;
                     if (kbDown) v.dy =  effSpeed;
                     if (std::abs(padAxisY) > 0.0f)
@@ -180,17 +198,37 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
     });
 
     auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<PropTag, HazardTag>);
-    float playerX = 0.0f, playerW = 0.0f;
-    float playerY = 0.0f, playerH = 0.0f;
+
+    // Collect all living player positions (multiplayer-aware).
+    // Enemies will chase the nearest player center-X.
+    struct PlayerPos { float x, y, w, h; };
+    std::vector<PlayerPos> allPlayers;
     {
-        auto pv = reg.view<PlayerTag, Transform, Collider>();
+        auto pv = reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>);
         pv.each([&](const Transform& pt, const Collider& pc) {
-            playerX = pt.x;
-            playerW = (float)pc.w;
-            playerY = pt.y;
-            playerH = (float)pc.h;
+            allPlayers.push_back({pt.x, pt.y, (float)pc.w, (float)pc.h});
         });
     }
+    // Fall back to P1 values for single-player compatibility
+    float playerX = allPlayers.empty() ? 0.0f : allPlayers[0].x;
+    float playerW = allPlayers.empty() ? 0.0f : allPlayers[0].w;
+    float playerY = allPlayers.empty() ? 0.0f : allPlayers[0].y;
+    float playerH = allPlayers.empty() ? 0.0f : allPlayers[0].h;
+
+    // Helper: find center-X/Y of the nearest player to a world point.
+    auto nearestPlayerCenter = [&](float fromX, float fromY) -> std::pair<float,float> {
+        float bestDist = 1e9f;
+        float bestCX = playerX + playerW * 0.5f;
+        float bestCY = playerY + playerH * 0.5f;
+        for (const auto& pp : allPlayers) {
+            float cx = pp.x + pp.w * 0.5f;
+            float cy = pp.y + pp.h * 0.5f;
+            float dx = cx - fromX, dy = cy - fromY;
+            float d  = dx * dx + dy * dy;
+            if (d < bestDist) { bestDist = d; bestCX = cx; bestCY = cy; }
+        }
+        return {bestCX, bestCY};
+    };
 
     auto ladderView = reg.view<LadderTag, Transform, Collider>();
 
@@ -213,8 +251,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         // Stepping off ladder: walk horizontally toward player until clear of
         // all ladder tiles, then release so gravity handles the landing.
         if (climbState && climbState->steppingOff && !reg.all_of<FloatTag>(ent)) {
-            float playerCX = playerX + playerW * 0.5f;
             float enemyCX  = t.x + c.w * 0.5f;
+            auto [playerCX, playerCY_step] = nearestPlayerCenter(enemyCX, t.y + c.h * 0.5f);
             float stepDir  = (playerCX > enemyCX) ? 1.0f : -1.0f;
             t.x += stepDir * v.speed * dt;
 
@@ -277,8 +315,8 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
 
                 if (canStep) {
-                    float playerCX = playerX + playerW * 0.5f;
-                    stepDir = (playerCX > climbState->ladderCX) ? 1.0f : -1.0f;
+                    auto [nearCX_up, nearCY_up] = nearestPlayerCenter(t.x + c.w * 0.5f, t.y + c.h * 0.5f);
+                    stepDir = (nearCX_up > climbState->ladderCX) ? 1.0f : -1.0f;
                     t.y = feetY - c.h;
                     t.x = (stepDir < 0.0f) ? ladL - c.w : ladR;
                     climbState->climbing    = false;
@@ -321,11 +359,11 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
 
                 // Only step off when descending if the player is at this level
-                float playerCY = playerY + playerH * 0.5f;
-                bool  playerAtLevel = std::abs(playerCY - feetY) < 80.0f;
+                auto [nearCX_desc, nearCY_desc] = nearestPlayerCenter(t.x + c.w * 0.5f, t.y + c.h * 0.5f);
+                bool  playerAtLevel = std::abs(nearCY_desc - feetY) < 80.0f;
 
                 if (canStep && playerAtLevel) {
-                    float playerCX = playerX + playerW * 0.5f;
+                    float playerCX = nearCX_desc;
                     float stepDir = (playerCX > climbState->ladderCX) ? 1.0f : -1.0f;
                     t.y = feetY - c.h;
                     t.x = (stepDir < 0.0f) ? ladL - c.w : ladR;
@@ -337,8 +375,10 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 }
             }
 
-            if (reg.all_of<FaceRightTag>(ent))
-                r.flipH = (playerX + playerW * 0.5f) < (t.x + c.w * 0.5f);
+            if (reg.all_of<FaceRightTag>(ent)) {
+                auto [nearCX_face, nearCY_face] = nearestPlayerCenter(t.x + c.w * 0.5f, t.y + c.h * 0.5f);
+                r.flipH = nearCX_face < (t.x + c.w * 0.5f);
+            }
             return;
         }
 
@@ -349,7 +389,7 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         if (!stunned) {
             constexpr float AGGRO_RANGE = 300.0f;
             float enemyCX  = t.x + c.w * 0.5f;
-            float playerCX = playerX + playerW * 0.5f;
+            auto [playerCX, playerCY_aggro] = nearestPlayerCenter(enemyCX, t.y + c.h * 0.5f);
             float dist     = std::abs(enemyCX - playerCX);
             if (dist < AGGRO_RANGE && dist > 4.0f) {
                 float desiredDir = (playerCX > enemyCX) ? 1.0f : -1.0f;
@@ -401,10 +441,11 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 float ladCX  = (ladMinX + ladMaxX) * 0.5f;
                 float ladW   = ladMaxX - ladMinX;
 
-                float playerCY = playerY + playerH * 0.5f;
                 float enemyCY  = t.y + c.h * 0.5f;
+                auto [nearCX_lad, nearCY_lad] = nearestPlayerCenter(enemyCX, enemyCY);
+                float playerCY = nearCY_lad;
                 float vertDist = playerCY - enemyCY;
-                float hDist    = std::abs(enemyCX - (playerX + playerW * 0.5f));
+                float hDist    = std::abs(enemyCX - nearCX_lad);
 
                 bool shouldClimbUp = hDist < LADDER_AGGRO
                     && vertDist < -40.0f
