@@ -29,7 +29,8 @@ class GameScene : public Scene {
 
     // fromEditor=true → pause menu offers "Back to Editor" instead of "Back to Title"
     explicit GameScene(const std::string& levelPath, bool fromEditor = false,
-                       const std::string& profilePath = "");
+                       const std::string& profilePath = "",
+                       const std::string& p2ProfilePath = "");
 
     void Load(Window& window) override;
     void Unload() override;
@@ -56,6 +57,7 @@ class GameScene : public Scene {
     Window*        mWindow            = nullptr;
     std::string    mLevelPath;
     std::string    mProfilePath;
+    std::string    mP2ProfilePath;     // P2's chosen profile (empty = reuse P1's sheets)
     int            mPlayerSpriteW = 0;
     int            mPlayerSpriteH = 0;
     std::array<float, PLAYER_ANIM_SLOT_COUNT> mSlotFps{};

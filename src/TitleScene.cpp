@@ -10,7 +10,7 @@
 std::unique_ptr<Scene> TitleScene::NextScene() {
     if (startGame) {
         startGame = false;
-        return std::make_unique<GameScene>(mChosenLevel, false, mChosenProfile);
+        return std::make_unique<GameScene>(mChosenLevel, false, mChosenProfile, mP2ChosenProfile);
     }
     if (openEditor) {
         openEditor   = false;
@@ -146,7 +146,8 @@ void TitleScene::stashCharCardCache() {
 void TitleScene::openCharPicker() {
     mCharPickerOpen      = true;
     mCharPickerScroll    = 0;
-    mCharPickerHighlight = mProfileIdx;
+    // For P2 pick, start at the first card (no pre-selection); for P1, start at current choice.
+    mCharPickerHighlight = mPendingP2Pick ? 0 : mProfileIdx;
     mCharPickerHoverCard   = -1;
     mCharPickerHoverClose  = false;
     mCharPickerHoverSelect = false;
@@ -192,7 +193,9 @@ void TitleScene::renderCharPicker(SDL_Renderer* ren) {
     fillRounded(ren, p, {18, 20, 34, 248}, 10.f);
     outlineRounded(ren, p, {80, 100, 200, 255}, 2.f, 10.f);
     fillRounded(ren, {p.x, p.y, p.w, 44}, {28, 32, 55, 255}, 10.f);
-    Text hdr("Choose Character", {220, 210, 255, 255}, p.x + 16, p.y + 10, 22);
+    std::string hdrStr = mPendingP2Pick ? "P2 \xe2\x80\x94 Choose Character" : "Choose Character";
+    SDL_Color   hdrCol = mPendingP2Pick ? SDL_Color{140, 200, 255, 255} : SDL_Color{220, 210, 255, 255};
+    Text hdr(hdrStr, hdrCol, p.x + 16, p.y + 10, 22);
     hdr.Render(ren);
 
     {

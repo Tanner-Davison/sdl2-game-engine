@@ -164,10 +164,12 @@ void GameScene::PreloadRawSurfaces(const Level& level) {
 // --- Construction ---
 GameScene::GameScene(const std::string& levelPath,
                      bool               fromEditor,
-                     const std::string& profilePath)
+                     const std::string& profilePath,
+                     const std::string& p2ProfilePath)
     : mLevelPath(levelPath)
     , mFromEditor(fromEditor)
-    , mProfilePath(profilePath) {}
+    , mProfilePath(profilePath)
+    , mP2ProfilePath(p2ProfilePath) {}
 
 // --- Scene interface ---
 void GameScene::Load(Window& window) {
@@ -906,41 +908,105 @@ void GameScene::Update(float dt) {
                 // Teleport: only entrances trigger; destinations are inert.
                 if (pu.type == PowerUpType::Teleport) {
                     if (reg.all_of<TeleportDestTag>(e)) continue;
-                    if (reg.all_of<TeleportCooldown>(playerEnt)) continue;
 
-                    int grp = pu.teleportGroup;
-                    bool teleported = false;
-                    auto destView = reg.view<TeleportDestTag, Transform>();
-                    destView.each([&](entt::entity de, const TeleportDestTag& dest,
-                                      const Transform& dt) {
-                        if (teleported || dest.group != grp) return;
-                        auto& pt = reg.get<Transform>(playerEnt);
-                        auto& pc = reg.get<Collider>(playerEnt);
-                        int dw = 0, dh = 0;
-                        if (auto* dc = reg.try_get<Collider>(de)) {
-                            dw = dc->w; dh = dc->h;
-                        } else if (auto* dr = reg.try_get<Renderable>(de)) {
-                            dw = dr->renderW; dh = dr->renderH;
+                    // Compute the entrance tile's bounding rect for the all-players check.
+                    const auto& entTr = reg.get<Transform>(e);
+                    SDL_Rect entranceRect = {(int)entTr.x, (int)entTr.y, 0, 0};
+                    {
+                        const auto* ec = reg.try_get<Collider>(e);
+                        const auto* er = reg.try_get<Renderable>(e);
+                        entranceRect.w = ec ? ec->w : (er ? er->renderW : 38);
+                        entranceRect.h = ec ? ec->h : (er ? er->renderH : 38);
+                        if (entranceRect.w <= 0) entranceRect.w = 38;
+                        if (entranceRect.h <= 0) entranceRect.h = 38;
+                    }
+
+                    if (mMultiplayerActive) {
+                        // Multiplayer: ALL living players must stand on the entrance
+                        // simultaneously before the teleporter fires.
+                        struct PPlayer { entt::entity ent; SDL_Rect rect; };
+                        std::vector<PPlayer> allP;
+                        reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>)
+                            .each([&](entt::entity pe, const Transform& pt,
+                                      const Collider& pc) {
+                                allP.push_back({pe, {(int)pt.x, (int)pt.y, pc.w, pc.h}});
+                            });
+                        bool allReady = !allP.empty();
+                        for (const auto& pp : allP) {
+                            bool on = (pp.rect.x < entranceRect.x + entranceRect.w &&
+                                       pp.rect.x + pp.rect.w > entranceRect.x &&
+                                       pp.rect.y < entranceRect.y + entranceRect.h &&
+                                       pp.rect.y + pp.rect.h > entranceRect.y);
+                            if (!on || reg.all_of<TeleportCooldown>(pp.ent)) {
+                                allReady = false; break;
+                            }
                         }
-                        if (dw <= 0) dw = 38;
-                        if (dh <= 0) dh = 38;
-                        // Center on destination tile; gravity handles landing.
-                        pt.x = dt.x + dw * 0.5f - pc.w * 0.5f;
-                        pt.y = dt.y + dh * 0.5f - pc.h * 0.5f;
-                        if (auto* prev = reg.try_get<PrevTransform>(playerEnt)) {
-                            prev->x = pt.x;
-                            prev->y = pt.y;
-                        }
-                        if (auto* g = reg.try_get<GravityState>(playerEnt)) {
-                            g->velocity   = 0.0f;
-                            g->isGrounded = false;
-                        }
-                        if (auto* v = reg.try_get<Velocity>(playerEnt))
-                            v->dy = 0.0f;
-                        teleported = true;
-                    });
-                    if (teleported)
-                        reg.emplace_or_replace<TeleportCooldown>(playerEnt, 0.3f);
+                        if (!allReady) continue;
+
+                        // Teleport every player to the destination, spacing them side-by-side.
+                        int grp = pu.teleportGroup;
+                        bool teleported = false;
+                        auto destView = reg.view<TeleportDestTag, Transform>();
+                        destView.each([&](entt::entity de, const TeleportDestTag& dest,
+                                          const Transform& dt) {
+                            if (teleported || dest.group != grp) return;
+                            int dw = 0, dh = 0;
+                            if (auto* dc = reg.try_get<Collider>(de))    { dw = dc->w; dh = dc->h; }
+                            else if (auto* dr = reg.try_get<Renderable>(de)) { dw = dr->renderW; dh = dr->renderH; }
+                            if (dw <= 0) dw = 38;
+                            if (dh <= 0) dh = 38;
+                            int idx = 0;
+                            for (auto& pp : allP) {
+                                auto& pt2 = reg.get<Transform>(pp.ent);
+                                auto& pc2 = reg.get<Collider>(pp.ent);
+                                // Place players side-by-side so they don't overlap.
+                                pt2.x = dt.x + dw * 0.5f - pc2.w * 0.5f + idx * (pc2.w + 6);
+                                pt2.y = dt.y + dh * 0.5f - pc2.h * 0.5f;
+                                if (auto* prev = reg.try_get<PrevTransform>(pp.ent)) {
+                                    prev->x = pt2.x; prev->y = pt2.y;
+                                }
+                                if (auto* g = reg.try_get<GravityState>(pp.ent)) {
+                                    g->velocity = 0.0f; g->isGrounded = false;
+                                }
+                                if (auto* v = reg.try_get<Velocity>(pp.ent))
+                                    v->dy = 0.0f;
+                                reg.emplace_or_replace<TeleportCooldown>(pp.ent, 0.3f);
+                                ++idx;
+                            }
+                            teleported = true;
+                        });
+                    } else {
+                        // Single-player: original one-player behavior.
+                        if (reg.all_of<TeleportCooldown>(playerEnt)) continue;
+                        int grp = pu.teleportGroup;
+                        bool teleported = false;
+                        auto destView = reg.view<TeleportDestTag, Transform>();
+                        destView.each([&](entt::entity de, const TeleportDestTag& dest,
+                                          const Transform& dt) {
+                            if (teleported || dest.group != grp) return;
+                            auto& pt = reg.get<Transform>(playerEnt);
+                            auto& pc = reg.get<Collider>(playerEnt);
+                            int dw = 0, dh = 0;
+                            if (auto* dc = reg.try_get<Collider>(de))    { dw = dc->w; dh = dc->h; }
+                            else if (auto* dr = reg.try_get<Renderable>(de)) { dw = dr->renderW; dh = dr->renderH; }
+                            if (dw <= 0) dw = 38;
+                            if (dh <= 0) dh = 38;
+                            // Center on destination tile; gravity handles landing.
+                            pt.x = dt.x + dw * 0.5f - pc.w * 0.5f;
+                            pt.y = dt.y + dh * 0.5f - pc.h * 0.5f;
+                            if (auto* prev = reg.try_get<PrevTransform>(playerEnt)) {
+                                prev->x = pt.x; prev->y = pt.y;
+                            }
+                            if (auto* g = reg.try_get<GravityState>(playerEnt)) {
+                                g->velocity = 0.0f; g->isGrounded = false;
+                            }
+                            if (auto* v = reg.try_get<Velocity>(playerEnt))
+                                v->dy = 0.0f;
+                            teleported = true;
+                        });
+                        if (teleported)
+                            reg.emplace_or_replace<TeleportCooldown>(playerEnt, 0.3f);
+                    }
                     continue;
                 }
 
@@ -1469,30 +1535,37 @@ void GameScene::Update(float dt) {
 
     // --- Shooter turrets ---
     if (!mPlayerDying && !gameOver) {
-        float playerCX = 0, playerCY = 0;
-        bool  havePlayer = false;
+        // Collect all living player centers so each turret can independently
+        // target whoever is closest (nearest-player strategy).
+        struct TurretTarget { float cx, cy; };
+        std::vector<TurretTarget> turretTargets;
         {
-            auto pv = reg.view<PlayerTag, Transform, Collider>();
+            auto pv = reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>);
             pv.each([&](const Transform& pt, const Collider& pc) {
-                playerCX   = pt.x + pc.w * 0.5f;
-                playerCY   = pt.y + pc.h * 0.5f;
-                havePlayer = true;
+                turretTargets.push_back({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f});
             });
         }
-        if (havePlayer) {
+        if (!turretTargets.empty()) {
             auto sv = reg.view<ShooterTag, ShooterState, Transform, Collider>();
             sv.each([&](entt::entity turretEnt, const ShooterTag& sh,
                         ShooterState& ss, const Transform& tt, const Collider& tc) {
                 ss.cooldownLeft -= dt;
                 float tcx = tt.x + tc.w * 0.5f;
                 float tcy = tt.y + tc.h * 0.5f;
-                float ddx = playerCX - tcx, ddy = playerCY - tcy;
-                float dist = std::sqrt(ddx * ddx + ddy * ddy);
-                if (dist > sh.range || ss.cooldownLeft > 0.f) return;
+
+                // Pick the nearest living player within range.
+                float nearestDist = sh.range + 1.f;
+                float targetCX = 0.f, targetCY = 0.f;
+                for (const auto& tgt : turretTargets) {
+                    float ddx = tgt.cx - tcx, ddy = tgt.cy - tcy;
+                    float d = std::sqrt(ddx * ddx + ddy * ddy);
+                    if (d < nearestDist) { nearestDist = d; targetCX = tgt.cx; targetCY = tgt.cy; }
+                }
+                if (nearestDist > sh.range || ss.cooldownLeft > 0.f) return;
 
                 ss.cooldownLeft = 1.f / sh.fireRate;
 
-                float aimX = playerCX - tcx, aimY = playerCY - tcy;
+                float aimX = targetCX - tcx, aimY = targetCY - tcy;
                 float aimLen = std::sqrt(aimX * aimX + aimY * aimY);
                 if (aimLen < 1.f) return;
                 float bdx = aimX / aimLen, bdy = aimY / aimLen;
@@ -2552,10 +2625,12 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
 // --- Private helpers ---
 
 // SpawnPlayer2 — creates the second player entity when two Xbox controllers are connected.
-// Reuses P1's already-loaded sprite sheets (no extra GPU uploads).
+// If mP2ProfilePath is set, loads P2's own sprite sheets from their profile.
+// Otherwise reuses P1's already-loaded sprite sheets (no extra GPU uploads).
 // P2 gets a blue PlayerTint so they are visually distinct from P1.
 void GameScene::SpawnPlayer2() {
     if (!mWindow) return;
+    SDL_Renderer* ren = mWindow->GetRenderer();
 
     // Find where P1 spawned so we can place P2 nearby (slightly to the right).
     float spawnX = mLevel.player.x + 60.0f;
@@ -2571,16 +2646,145 @@ void GameScene::SpawnPlayer2() {
         });
     }
 
-    // Resolve collider dimensions using the same defaults as P1.
-    const float sx     = (float)mPlayerSpriteW / PLAYER_SPRITE_WIDTH;
-    const float sy     = (float)mPlayerSpriteH / PLAYER_SPRITE_HEIGHT;
+    // --- Load P2's sprite sheets (own profile or fall back to P1's) ---
+    // These raw texture pointers will be stored in AnimationSet.
+    // Any new SpriteSheet objects are kept alive in mEnemySpriteSheets.
+    SDL_Texture*        p2IdleTex   = knightIdleSheet->GetTexture();
+    SDL_Texture*        p2WalkTex   = knightWalkSheet->GetTexture();
+    SDL_Texture*        p2JumpTex   = knightJumpSheet->GetTexture();
+    SDL_Texture*        p2HurtTex   = knightHurtSheet->GetTexture();
+    SDL_Texture*        p2SlideTex  = knightSlideSheet->GetTexture();
+    SDL_Texture*        p2FallTex   = knightFallSheet->GetTexture();
+    SDL_Texture*        p2SlashTex  = knightSlashSheet->GetTexture();
+    SDL_Texture*        p2DeathTex  = knightDeathSheet->GetTexture();
+    std::vector<SDL_Rect> p2IdleF   = idleFrames;
+    std::vector<SDL_Rect> p2WalkF   = walkFrames;
+    std::vector<SDL_Rect> p2JumpF   = jumpFrames;
+    std::vector<SDL_Rect> p2HurtF   = hurtFrames;
+    std::vector<SDL_Rect> p2DuckF   = duckFrames;
+    std::vector<SDL_Rect> p2FrontF  = frontFrames;
+    std::vector<SDL_Rect> p2SlashF  = slashFrames;
+    std::vector<SDL_Rect> p2DeathF  = deathFrames;
+    int p2SpriteW = mPlayerSpriteW;
+    int p2SpriteH = mPlayerSpriteH;
+
+    PlayerProfile p2Prof;
+    bool hasP2Profile = !mP2ProfilePath.empty() && LoadPlayerProfile(mP2ProfilePath, p2Prof);
+    if (hasP2Profile) {
+        p2SpriteW = (p2Prof.spriteW > 0) ? p2Prof.spriteW : PLAYER_SPRITE_WIDTH;
+        p2SpriteH = (p2Prof.spriteH > 0) ? p2Prof.spriteH : PLAYER_SPRITE_HEIGHT;
+
+        // Helper: load a slot for P2, store in mEnemySpriteSheets to keep texture alive.
+        auto loadP2Slot = [&](PlayerAnimSlot     slot,
+                               const std::string& fallbackFolder,
+                               const std::string& fallbackPrefix,
+                               int                fallbackCount) -> SpriteSheet* {
+            std::unique_ptr<SpriteSheet> sh;
+            if (p2Prof.HasSlot(slot)) {
+                const std::string& dir = p2Prof.Slot(slot).folderPath;
+                std::vector<fs::path> pngs;
+                std::error_code ec;
+                for (const auto& e : fs::directory_iterator(dir, ec))
+                    if (!ec && e.path().extension() == ".png")
+                        pngs.push_back(e.path());
+                if (!pngs.empty()) {
+                    std::sort(pngs.begin(), pngs.end());
+                    std::vector<std::string> pathStrs;
+                    pathStrs.reserve(pngs.size());
+                    for (const auto& p : pngs)
+                        pathStrs.push_back(p.string());
+                    sh = std::make_unique<SpriteSheet>(pathStrs, p2SpriteW, p2SpriteH);
+                }
+            }
+            if (!sh)
+                sh = std::make_unique<SpriteSheet>(
+                    "game_assets/frost_knight_png_sequences/" + fallbackFolder + "/",
+                    fallbackPrefix, fallbackCount, p2SpriteW, p2SpriteH, 3);
+            sh->CreateTexture(ren);
+            sh->FreeSurface();
+            SpriteSheet* raw = sh.get();
+            mEnemySpriteSheets.push_back(std::move(sh));
+            return raw;
+        };
+
+        auto p2GetFrames = [&](SpriteSheet* sheet, PlayerAnimSlot slot,
+                                const std::string& knightKey) -> std::vector<SDL_Rect> {
+            if (p2Prof.HasSlot(slot))
+                return sheet->GetAnimation("");
+            return sheet->GetAnimation(knightKey);
+        };
+
+        SpriteSheet* idleSh  = loadP2Slot(PlayerAnimSlot::Idle,   "Idle",         "0_Knight_Idle_",         18);
+        SpriteSheet* walkSh  = loadP2Slot(PlayerAnimSlot::Walk,   "Walking",      "0_Knight_Walking_",      24);
+        SpriteSheet* jumpSh  = loadP2Slot(PlayerAnimSlot::Jump,   "Jump Start",   "0_Knight_Jump Start_",   6);
+        SpriteSheet* hurtSh  = loadP2Slot(PlayerAnimSlot::Hurt,   "Hurt",         "0_Knight_Hurt_",         12);
+        SpriteSheet* slideSh = loadP2Slot(PlayerAnimSlot::Crouch, "Sliding",      "0_Knight_Sliding_",      6);
+        SpriteSheet* fallSh  = loadP2Slot(PlayerAnimSlot::Fall,   "Falling Down", "0_Knight_Falling Down_", 6);
+        SpriteSheet* slashSh = loadP2Slot(PlayerAnimSlot::Slash,  "Slashing",     "0_Knight_Slashing_",     12);
+        SpriteSheet* deathSh = loadP2Slot(PlayerAnimSlot::Death,  "Hurt",         "0_Knight_Hurt_",         12);
+
+        p2IdleTex  = idleSh->GetTexture();
+        p2WalkTex  = walkSh->GetTexture();
+        p2JumpTex  = jumpSh->GetTexture();
+        p2HurtTex  = hurtSh->GetTexture();
+        p2SlideTex = slideSh->GetTexture();
+        p2FallTex  = fallSh->GetTexture();
+        p2SlashTex = slashSh->GetTexture();
+        p2DeathTex = deathSh->GetTexture();
+
+        p2IdleF  = p2GetFrames(idleSh,  PlayerAnimSlot::Idle,   "0_Knight_Idle_");
+        p2WalkF  = p2GetFrames(walkSh,  PlayerAnimSlot::Walk,   "0_Knight_Walking_");
+        p2JumpF  = p2GetFrames(jumpSh,  PlayerAnimSlot::Jump,   "0_Knight_Jump Start_");
+        p2HurtF  = p2GetFrames(hurtSh,  PlayerAnimSlot::Hurt,   "0_Knight_Hurt_");
+        p2DuckF  = p2GetFrames(slideSh, PlayerAnimSlot::Crouch, "0_Knight_Sliding_");
+        p2FrontF = p2GetFrames(fallSh,  PlayerAnimSlot::Fall,   "0_Knight_Falling Down_");
+        p2SlashF = p2GetFrames(slashSh, PlayerAnimSlot::Slash,  "0_Knight_Slashing_");
+        p2DeathF = p2GetFrames(deathSh, PlayerAnimSlot::Death,  "0_Knight_Hurt_");
+
+        // Redirect unfilled slots to idle frames (same logic as P1 in Spawn())
+        if (!p2IdleF.empty()) {
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Walk)  && p2WalkF.empty())  p2WalkF  = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Jump)  && p2JumpF.empty())  p2JumpF  = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Hurt)  && p2HurtF.empty())  p2HurtF  = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Crouch)&& p2DuckF.empty())  p2DuckF  = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Fall)  && p2FrontF.empty()) p2FrontF = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Slash) && p2SlashF.empty()) p2SlashF = p2IdleF;
+            if (!p2Prof.HasSlot(PlayerAnimSlot::Death) && p2DeathF.empty()) p2DeathF = p2IdleF;
+        }
+
+        // Death sheet falls back to hurt sheet when death slot is absent but hurt is custom
+        if (!p2Prof.HasSlot(PlayerAnimSlot::Death) && p2Prof.HasSlot(PlayerAnimSlot::Hurt))
+            p2DeathTex = p2HurtTex;
+    }
+
+    // Resolve collider dimensions for P2.
+    const float sx     = (float)p2SpriteW / PLAYER_SPRITE_WIDTH;
+    const float sy     = (float)p2SpriteH / PLAYER_SPRITE_HEIGHT;
     int         insetX = (int)(PLAYER_BODY_INSET_X * sx);
     int         insetT = (int)(PLAYER_BODY_INSET_TOP * sy);
     int         insetB = (int)(PLAYER_BODY_INSET_BOTTOM * sy);
-    int         pColW  = mPlayerSpriteW - insetX * 2;
-    int         pColH  = mPlayerSpriteH - insetT - insetB;
-    int         pROffX = -insetX;
-    int         pROffY = -insetT;
+
+    // Use custom hitbox from P2's profile if available
+    int pColW, pColH, pROffX, pROffY;
+    if (hasP2Profile) {
+        const AnimHitbox& idleHB = p2Prof.Slot(PlayerAnimSlot::Idle).hitbox;
+        if (!idleHB.IsDefault()) {
+            pColW  = idleHB.w;
+            pColH  = idleHB.h;
+            pROffX = -idleHB.x;
+            pROffY = -idleHB.y;
+        } else {
+            pColW  = p2SpriteW - insetX * 2;
+            pColH  = p2SpriteH - insetT - insetB;
+            pROffX = -insetX;
+            pROffY = -insetT;
+        }
+    } else {
+        pColW  = p2SpriteW - insetX * 2;
+        pColH  = p2SpriteH - insetT - insetB;
+        pROffX = -insetX;
+        pROffY = -insetT;
+    }
 
     auto p2 = reg.create();
     reg.emplace<Transform>(p2, spawnX, spawnY);
@@ -2589,18 +2793,17 @@ void GameScene::SpawnPlayer2() {
     {
         AnimationState as;
         as.currentFrame = 0;
-        as.totalFrames  = (int)idleFrames.size();
+        as.totalFrames  = (int)p2IdleF.size();
         as.timer        = 0.0f;
         as.fps          = 10.0f;
         as.looping      = true;
         as.currentAnim  = AnimationID::IDLE;
         reg.emplace<AnimationState>(p2, as);
     }
-    reg.emplace<Renderable>(p2, knightIdleSheet->GetTexture(), idleFrames, false,
-                             mPlayerSpriteW, mPlayerSpriteH);
+    reg.emplace<Renderable>(p2, p2IdleTex, p2IdleF, false, p2SpriteW, p2SpriteH);
     reg.emplace<PlayerTag>(p2);
-    reg.emplace<PlayerIndex>(p2, 1);                       // P2 slot
-    reg.emplace<PlayerTint>(p2, Uint8(140), Uint8(180), Uint8(255)); // blue tint
+    reg.emplace<PlayerIndex>(p2, 1);                                      // P2 slot
+    reg.emplace<PlayerTint>(p2, Uint8(140), Uint8(180), Uint8(255));      // blue tint
     reg.emplace<Health>(p2);
     reg.emplace<Collider>(p2, pColW, pColH);
     reg.emplace<RenderOffset>(p2, pROffX, pROffY);
@@ -2610,10 +2813,36 @@ void GameScene::SpawnPlayer2() {
         base.standH     = pColH;
         base.standRoffX = pROffX;
         base.standRoffY = pROffY;
-        base.duckW      = pColW;
-        base.duckH      = pColH / 2;
-        base.duckRoffX  = pROffX;
-        base.duckRoffY  = -(mPlayerSpriteH - base.duckH);
+
+        if (hasP2Profile) {
+            const AnimHitbox& crouchHB = p2Prof.Slot(PlayerAnimSlot::Crouch).hitbox;
+            if (!crouchHB.IsDefault()) {
+                base.duckW     = crouchHB.w;
+                base.duckH     = crouchHB.h;
+                base.duckRoffX = -crouchHB.x;
+                base.duckRoffY = -crouchHB.y;
+            } else {
+                base.duckW     = pColW;
+                base.duckH     = pColH / 2;
+                base.duckRoffX = pROffX;
+                base.duckRoffY = -(p2SpriteH - base.duckH);
+            }
+            auto toAnimCol = [](const AnimHitbox& hb) -> AnimCollider {
+                if (hb.IsDefault()) return {};
+                return {hb.w, hb.h, -hb.x, -hb.y};
+            };
+            base.walk  = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Walk).hitbox);
+            base.jump  = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Jump).hitbox);
+            base.fall  = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Fall).hitbox);
+            base.slash = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Slash).hitbox);
+            base.hurt  = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Hurt).hitbox);
+            base.death = toAnimCol(p2Prof.Slot(PlayerAnimSlot::Death).hitbox);
+        } else {
+            base.duckW     = pColW;
+            base.duckH     = pColH / 2;
+            base.duckRoffX = pROffX;
+            base.duckRoffY = -(p2SpriteH - base.duckH);
+        }
         reg.emplace<PlayerBaseCollider>(p2, base);
     }
     reg.emplace<InvincibilityTimer>(p2);
@@ -2632,21 +2861,21 @@ void GameScene::SpawnPlayer2() {
     reg.emplace<AttackState>(p2);
     reg.emplace<DashState>(p2);
 
-    // Share P1's animation frames; P2 is visually tinted blue via PlayerTint.
     reg.emplace<AnimationSet>(
         p2,
         AnimationSet{
-            .idle       = idleFrames,  .idleSheet  = knightIdleSheet->GetTexture(),
-            .walk       = walkFrames,  .walkSheet  = knightWalkSheet->GetTexture(),
-            .jump       = jumpFrames,  .jumpSheet  = knightJumpSheet->GetTexture(),
-            .hurt       = hurtFrames,  .hurtSheet  = knightHurtSheet->GetTexture(),
-            .duck       = duckFrames,  .duckSheet  = knightSlideSheet->GetTexture(),
-            .front      = frontFrames, .frontSheet = knightFallSheet->GetTexture(),
-            .slash      = slashFrames, .slashSheet = knightSlashSheet->GetTexture(),
-            .death      = deathFrames, .deathSheet = knightDeathSheet->GetTexture(),
+            .idle       = p2IdleF,  .idleSheet  = p2IdleTex,
+            .walk       = p2WalkF,  .walkSheet  = p2WalkTex,
+            .jump       = p2JumpF,  .jumpSheet  = p2JumpTex,
+            .hurt       = p2HurtF,  .hurtSheet  = p2HurtTex,
+            .duck       = p2DuckF,  .duckSheet  = p2SlideTex,
+            .front      = p2FrontF, .frontSheet = p2FallTex,
+            .slash      = p2SlashF, .slashSheet = p2SlashTex,
+            .death      = p2DeathF, .deathSheet = p2DeathTex,
         });
 
-    std::print("SpawnPlayer2: P2 entity created at ({:.0f}, {:.0f})\n", spawnX, spawnY);
+    std::print("SpawnPlayer2: P2 entity created at ({:.0f}, {:.0f}) profile='{}'\n",
+               spawnX, spawnY, mP2ProfilePath.empty() ? "(default)" : mP2ProfilePath);
 }
 
 void GameScene::Spawn() {

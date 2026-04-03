@@ -244,7 +244,11 @@ class TitleScene : public Scene {
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_SOUTH && count > 0 && mBrowserPadRow < count) {
                     mChosenLevel = mLevelButtons[mBrowserPadRow].path;
-                    startGame = true; mLevelBrowserOpen = false; return true;
+                    mLevelBrowserOpen = false;
+                    { int padCount = 0; SDL_GetGamepads(&padCount);
+                      if (padCount >= 2) { mPendingP2Pick = true; mP2ChosenProfile.clear(); openCharPicker(); }
+                      else               { startGame = true; } }
+                    return true;
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_WEST && count > 0 && mBrowserPadRow < count) {
                     mLoadingEditor = true; mLoadingTimer = 0.0f; mLoadingIdx = mBrowserPadRow;
@@ -288,8 +292,12 @@ class TitleScene : public Scene {
                         return true;
                     }
                     if (hit(lb.rect, mx, my)) {
-                        mChosenLevel = lb.path; startGame = true;
-                        mLevelBrowserOpen = false; return true;
+                        mChosenLevel = lb.path;
+                        mLevelBrowserOpen = false;
+                        { int padCount = 0; SDL_GetGamepads(&padCount);
+                          if (padCount >= 2) { mPendingP2Pick = true; mP2ChosenProfile.clear(); openCharPicker(); }
+                          else               { startGame = true; } }
+                        return true;
                     }
                 }
             }
@@ -301,13 +309,13 @@ class TitleScene : public Scene {
         // Character picker intercepts all input when open
         if (mCharPickerOpen) {
             if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) {
-                mCharPickerOpen = false; return true;
+                mCharPickerOpen = false; mPendingP2Pick = false; return true;
             }
             if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
                 auto btn = e.gbutton.button;
                 int count = (int)mCharCards.size();
                 if (btn == SDL_GAMEPAD_BUTTON_EAST || btn == SDL_GAMEPAD_BUTTON_BACK) {
-                    mCharPickerOpen = false; return true;
+                    mCharPickerOpen = false; mPendingP2Pick = false; return true;
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT && count > 0) {
                     mCharPickerHighlight = (mCharPickerHighlight - 1 + count) % count;
@@ -322,12 +330,19 @@ class TitleScene : public Scene {
                     return true;
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
-                    mProfileIdx    = mCharPickerHighlight;
-                    mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
-                    rebuildProfileSelector();
-                    loadChosenPreviewTex();
-                    saveSettings();
-                    mCharPickerOpen = false;
+                    if (mPendingP2Pick) {
+                        mP2ChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                        mPendingP2Pick   = false;
+                        mCharPickerOpen  = false;
+                        startGame        = true;
+                    } else {
+                        mProfileIdx    = mCharPickerHighlight;
+                        mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                        rebuildProfileSelector();
+                        loadChosenPreviewTex();
+                        saveSettings();
+                        mCharPickerOpen = false;
+                    }
                     return true;
                 }
             }
@@ -353,14 +368,21 @@ class TitleScene : public Scene {
             }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
                 int mx = (int)e.button.x, my = (int)e.button.y;
-                if (hit(mCharPickerCloseRect, mx, my)) { mCharPickerOpen = false; return true; }
+                if (hit(mCharPickerCloseRect, mx, my)) { mCharPickerOpen = false; mPendingP2Pick = false; return true; }
                 if (hit(mCharPickerSelectRect, mx, my)) {
-                    mProfileIdx    = mCharPickerHighlight;
-                    mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
-                    rebuildProfileSelector();
-                    loadChosenPreviewTex();
-                    saveSettings();
-                    mCharPickerOpen = false;
+                    if (mPendingP2Pick) {
+                        mP2ChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                        mPendingP2Pick   = false;
+                        mCharPickerOpen  = false;
+                        startGame        = true;
+                    } else {
+                        mProfileIdx    = mCharPickerHighlight;
+                        mChosenProfile = (mCharPickerHighlight == 0) ? "" : mCharCards[mCharPickerHighlight].profilePath;
+                        rebuildProfileSelector();
+                        loadChosenPreviewTex();
+                        saveSettings();
+                        mCharPickerOpen = false;
+                    }
                     return true;
                 }
                 for (int i = 0; i < (int)mCharCards.size(); ++i) {
@@ -368,12 +390,19 @@ class TitleScene : public Scene {
                     cardRect.y -= mCharPickerScroll;
                     if (hit(cardRect, mx, my)) {
                         if (mCharPickerHighlight == i) {
-                            mProfileIdx    = i;
-                            mChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
-                            rebuildProfileSelector();
-                            loadChosenPreviewTex();
-                            saveSettings();
-                            mCharPickerOpen = false;
+                            if (mPendingP2Pick) {
+                                mP2ChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
+                                mPendingP2Pick   = false;
+                                mCharPickerOpen  = false;
+                                startGame        = true;
+                            } else {
+                                mProfileIdx    = i;
+                                mChosenProfile = (i == 0) ? "" : mCharCards[i].profilePath;
+                                rebuildProfileSelector();
+                                loadChosenPreviewTex();
+                                saveSettings();
+                                mCharPickerOpen = false;
+                            }
                         } else {
                             mCharPickerHighlight = i;
                             mCharCards[i].walkAnimFrame = 0;
@@ -1280,6 +1309,8 @@ class TitleScene : public Scene {
     int           mProfileSelectorBaseY = 0;
     std::string   mChosenLevel;
     std::string   mChosenProfile;
+    std::string   mP2ChosenProfile;              // P2's selected profile (empty = default frost knight)
+    bool          mPendingP2Pick      = false;   // true while waiting for P2 to pick a character
     std::string   mEditorPath;
     std::string   mEditorName;
     bool          mEditorForce         = false;
