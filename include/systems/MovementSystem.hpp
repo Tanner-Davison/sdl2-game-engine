@@ -82,9 +82,11 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 bool leftHeld  = (effectiveKeys && effectiveKeys[SDL_SCANCODE_A]) || padAxisX < 0.0f;
                 bool rightHeld = (effectiveKeys && effectiveKeys[SDL_SCANCODE_D]) || padAxisX > 0.0f;
                 if (leftHeld && !rightHeld) {
-                    v.dx = -CLIMB_STRAFE_SPEED;
+                    v.dx   = -CLIMB_STRAFE_SPEED;
+                    r.flipH = true;   // face left
                 } else if (rightHeld && !leftHeld) {
-                    v.dx =  CLIMB_STRAFE_SPEED;
+                    v.dx   =  CLIMB_STRAFE_SPEED;
+                    r.flipH = false;  // face right
                 } else {
                     v.dx -= v.dx * friction * dt;
                     if (std::abs(v.dx) < 0.5f) v.dx = 0.0f;

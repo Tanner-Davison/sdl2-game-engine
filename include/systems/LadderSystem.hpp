@@ -61,11 +61,13 @@ inline void LadderSystem(entt::registry& reg, float dt) {
 
             pt.y = topRestY;
 
-            if (spaceHeld) {
+            // Jump: keyboard space OR gamepad A (g.jumpHeld set by GamepadPollSystem).
+            if (spaceHeld || g.jumpHeld) {
                 climb.atTop  = false;
                 g.active     = true;
                 g.velocity   = -JUMP_FORCE;
                 g.isGrounded = false;
+                g.jumpHeld   = false; // consume so the jump system doesn't double-fire
                 return;
             }
             if (sHeld) {

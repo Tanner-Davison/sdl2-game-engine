@@ -20,6 +20,14 @@ class HitboxTool final : public EditorTool {
         mHoverHdl = Handle::None;
     }
 
+    // Gamepad support: let the scene set which tile and handle are focused.
+    void SetGamepadFocus(int tileIdx, Handle handle) {
+        mTileIdx  = tileIdx;
+        mHoverHdl = handle;
+    }
+    int    GetTileIdx()      const { return mTileIdx; }
+    Handle GetHoverHandle()  const { return mHoverHdl; }
+
     ToolResult OnMouseDown(EditorToolContext& ctx, int mx, int my,
                            Uint8 button, SDL_Keymod /*mods*/) override {
         if (button != SDL_BUTTON_LEFT) return ToolResult::Ignored;

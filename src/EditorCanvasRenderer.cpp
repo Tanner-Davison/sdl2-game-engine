@@ -763,10 +763,17 @@ void EditorCanvasRenderer::RenderGhost(SDL_Surface* screen, int canvasW, int too
     const auto* selItem = palette.SelectedItem();
     if (!selItem || selItem->isFolder) return;
 
-    float fmx, fmy;
-    SDL_GetMouseState(&fmx, &fmy);
-    int mx = (int)fmx, my = (int)fmy;
-    if (my < toolbarH || mx >= canvasW) return;
+    int mx, my;
+    if (padCursorOverrideX >= 0.f) {
+        // Gamepad virtual cursor — always within the canvas so skip bounds check.
+        mx = (int)padCursorOverrideX;
+        my = (int)padCursorOverrideY;
+    } else {
+        float fmx, fmy;
+        SDL_GetMouseState(&fmx, &fmy);
+        mx = (int)fmx; my = (int)fmy;
+        if (my < toolbarH || mx >= canvasW) return;
+    }
 
     // Query tile dimensions from TileTool if available
     int tileW = grid, tileH = grid, ghostRot = 0;

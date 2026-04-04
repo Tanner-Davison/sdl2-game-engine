@@ -121,8 +121,6 @@ class GameScene : public Scene {
     std::unique_ptr<Image>     background;
     std::vector<std::unique_ptr<Image>> mParallaxImages;
     std::vector<float>                  mParallaxFactors;
-    std::unique_ptr<Text>      locationText;
-    std::unique_ptr<Text>      actionText;
     std::unique_ptr<Text>      gameOverText;
     std::unique_ptr<Text>      retryBtnText;
     std::unique_ptr<Text>      retryKeyText;

@@ -262,6 +262,697 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
     if (e.type == SDL_EVENT_QUIT)
         return false;
 
+    // Hot-plug: open newly connected gamepads immediately.
+    if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
+        SDL_OpenGamepad(e.gdevice.which);
+        return true;
+    }
+
+    // --- Gamepad: SELECT button toggles toolbar focus (works for all tools) ---
+    if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        auto gbtn = e.gbutton.button;
+
+        // SELECT (Back) — open / close the toolbar overlay.
+        // On open: pre-select the button matching the currently active tool.
+        if (gbtn == SDL_GAMEPAD_BUTTON_BACK) {
+            if (mPadToolbarActive) {
+                mPadToolbarActive = false;
+                SetStatus("Returned to tool");
+            } else {
+                mPadToolbarActive    = true;
+                mPadToolbarNavTimer  = 0.f;
+                mPadToolbarNavRepeat = false;
+
+                auto  visible    = VisibleToolbarButtons();
+                TBBtn activeBtn  = ToolIdToBtn(mActiveToolId);
+                int   startIdx   = 0;
+                for (int i = 0; i < (int)visible.size(); ++i) {
+                    if (visible[i] == activeBtn) { startIdx = i; break; }
+                }
+                mPadToolbarBtnIdx = startIdx;
+                SetStatus("Toolbar  |  LS/\xe2\x86\x90\xe2\x86\x92=navigate  D-pad \xe2\x86\x93=groups/palette  A=select  B=close");
+            }
+            return true;
+        }
+
+        // While toolbar overlay is active, route A/B/D-pad here.
+        // Sentinel layout:
+        //   0 … visible.size()-1   → tool buttons (tool row)
+        //   visible.size()         → group-collapse pills (LEFT/RIGHT picks Place/Mod/Actions)
+        //   visible.size() + 1     → palette collapse tab
+        if (mPadToolbarActive) {
+            auto visible       = VisibleToolbarButtons();
+            bool onTool        = (mPadToolbarBtnIdx < (int)visible.size());
+            bool onGrpPills    = (mPadToolbarBtnIdx == (int)visible.size());
+            bool onPalCollapse = (mPadToolbarBtnIdx == (int)visible.size() + 1);
+
+            if (gbtn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                // A — activate focused item.
+                if (onPalCollapse) {
+                    mPalette.ToggleCollapsed();
+                    SetStatus(mPalette.IsCollapsed() ? "Palette hidden  (press again to show)"
+                                                     : "Palette shown");
+                    mPadToolbarActive = false;
+                } else if (onGrpPills) {
+                    // Toggle the focused group's collapse pill.
+                    auto grp = static_cast<TBGrp>(mPadToolbarGrpIdx);
+                    mToolbar.ToggleGroup(grp);
+                    const char* grpName = (grp == TBGrp::Place)    ? "Place"
+                                        : (grp == TBGrp::Modifier)  ? "Modifier"
+                                                                     : "Actions";
+                    SetStatus(mToolbar.IsCollapsed(grp)
+                        ? std::string(grpName) + " group hidden"
+                        : std::string(grpName) + " group shown");
+                    // Stay in overlay on the group row so user can toggle more groups.
+                } else if (onTool && mPadToolbarBtnIdx >= 0 &&
+                           mPadToolbarBtnIdx < (int)visible.size()) {
+                    CloseAnimPicker();
+                    ActivateToolbarButton(visible[mPadToolbarBtnIdx]);
+                    mPadToolbarActive = false;
+                }
+                return true;
+            }
+            if (gbtn == SDL_GAMEPAD_BUTTON_EAST) {
+                // B — close overlay without activating.
+                mPadToolbarActive = false;
+                SetStatus("Toolbar closed");
+                return true;
+            }
+            // D-pad down: tool row → group pills → palette tab (stops at bottom).
+            if (gbtn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+                if (onTool) {
+                    // Pre-select the pill for the group the current tool belongs to.
+                    if (!visible.empty() && mPadToolbarBtnIdx < (int)visible.size()) {
+                        TBGrp g = EditorToolbar::GroupOf(visible[mPadToolbarBtnIdx]);
+                        mPadToolbarGrpIdx = static_cast<int>(g);
+                    }
+                    mPadToolbarBtnIdx = (int)visible.size();        // → group pills
+                } else if (onGrpPills) {
+                    mPadToolbarBtnIdx = (int)visible.size() + 1;    // → palette collapse
+                }
+                // already at bottom — do nothing
+                return true;
+            }
+            // D-pad up: palette tab → group pills → tool row.
+            if (gbtn == SDL_GAMEPAD_BUTTON_DPAD_UP) {
+                if (onPalCollapse)
+                    mPadToolbarBtnIdx = (int)visible.size();        // → group pills
+                else if (onGrpPills)
+                    mPadToolbarBtnIdx = std::max(0, (int)visible.size() - 1); // → last tool
+                // already at top — do nothing
+                return true;
+            }
+            // D-pad left/right — navigate tool row OR cycle group pills.
+            if (gbtn == SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
+                gbtn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+                int dir = (gbtn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? 1 : -1;
+                if (onTool && !visible.empty()) {
+                    mPadToolbarBtnIdx = std::clamp(
+                        mPadToolbarBtnIdx + dir, 0, (int)visible.size() - 1);
+                } else if (onGrpPills) {
+                    constexpr int kGrpCount = EditorToolbar::kGroupCount;
+                    mPadToolbarGrpIdx = (mPadToolbarGrpIdx + dir + kGrpCount) % kGrpCount;
+                }
+                return true;
+            }
+            return true; // consume all other buttons while overlay is open
+        }
+    }
+
+    // --- PowerUp tool gamepad cursor ---
+    if (mActiveToolId == ToolId::PowerUp && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto btn = e.gbutton.button;
+
+            if (mPopups.powerUpOpen) {
+                // ---- PICKER MODE: A selects, B cancels, D-pad navigates ----
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    ApplyPowerUpPickerEntry(mPadPuPickerIdx);
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                    mPopups.ClosePowerUpPicker();
+                    SetStatus("PowerUp: cancelled");
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP ||
+                    btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+                    int dir   = (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1 : -1;
+                    int total = (int)(GetPowerUpRegistry().size() + 1); // +1 for None
+                    mPadPuPickerIdx = std::clamp(mPadPuPickerIdx + dir, 0, total - 1);
+                    return true;
+                }
+                return true; // consume everything while picker is open
+            }
+
+            // ---- CURSOR MODE: A = click tile to open picker ----
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+                if (ti >= 0) {
+                    // Mirror the mouse-click logic for the PowerUp tool.
+                    mPopups.powerUpOpen    = false;
+                    mPopups.powerUpTileIdx = -1;
+
+                    if (mTeleportLinking) {
+                        auto& t = mLevel.tiles[ti];
+                        t.powerUp = PowerUpData{"teleport", 0.0f, 3.0f, 25.0f,
+                                                mTeleportLinkGroup, true, ""};
+                        t.prop       = true;
+                        mTeleportLinking = false;
+                        SetStatus("Tile " + std::to_string(ti) +
+                                  " -> teleport DESTINATION (group " +
+                                  std::to_string(mTeleportLinkGroup) + ")");
+                    } else if (mLevel.tiles[ti].HasPowerUp() &&
+                               mLevel.tiles[ti].powerUp->type == "teleport" &&
+                               !mLevel.tiles[ti].powerUp->teleportDest) {
+                        mTeleportLinking   = true;
+                        mTeleportLinkGroup = mLevel.tiles[ti].powerUp->teleportGroup;
+                        SetStatus("Teleport group " + std::to_string(mTeleportLinkGroup) +
+                                  ": A on another tile to set DESTINATION");
+                    } else {
+                        // Open power-up picker popup at tile position.
+                        auto [wsx, wsy] = WorldToScreen(mLevel.tiles[ti].x,
+                                                        mLevel.tiles[ti].y);
+                        int winW = mWindow ? mWindow->GetWidth() : 800;
+                        int winH = mWindow ? mWindow->GetHeight() : 600;
+                        mPopups.OpenPowerUpPicker(
+                            ti, wsx, wsy + (int)(mLevel.tiles[ti].h * mCamera.Zoom()),
+                            winW, winH, TOOLBAR_H);
+                        mPadPuPickerIdx      = 0;
+                        mPadPuPickerNavTimer  = 0.f;
+                        mPadPuPickerNavRepeat = false;
+                        SetStatus("Tile " + std::to_string(ti) +
+                                  ": choose power-up  LS/D-pad=navigate  A=select  B=cancel");
+                    }
+                } else {
+                    SetStatus("PowerUp: move cursor over a tile and press A to assign");
+                }
+                return true;
+            }
+        }
+    }
+
+    // --- Prop tool gamepad ---
+    if (mActiveToolId == ToolId::Prop && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto  btn = e.gbutton.button;
+            auto* pt  = dynamic_cast<PropTool*>(mTool.get());
+
+            if (pt && pt->popupOpen) {
+                // ---- POPUP OPEN: navigate Front/Back, A = apply, B = close ----
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    // A: apply focused option
+                    if (pt->popupIdx >= 0 && pt->popupIdx < (int)mLevel.tiles.size()) {
+                        mLevel.tiles[pt->popupIdx].propBehind = !mPadPropFocusFront;
+                        SetStatus("Tile " + std::to_string(pt->popupIdx) +
+                                  " prop -> " + (mPadPropFocusFront ? "FRONT" : "BACK"));
+                    }
+                    pt->popupOpen = false;
+                    pt->popupIdx  = -1;
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                    // B: close without changing
+                    pt->popupOpen = false;
+                    pt->popupIdx  = -1;
+                    SetStatus("Prop: layer unchanged");
+                    return true;
+                }
+                // Any D-pad direction toggles Front ↔ Back focus
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT  ||
+                    btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT ||
+                    btn == SDL_GAMEPAD_BUTTON_DPAD_UP    ||
+                    btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+                    mPadPropFocusFront = !mPadPropFocusFront;
+                    SetStatus(std::string("Prop focus: ") +
+                              (mPadPropFocusFront ? "FRONT  A=apply  B=cancel"
+                                                  : "BACK   A=apply  B=cancel"));
+                    return true;
+                }
+                return true; // consume all other buttons while popup is open
+            }
+
+            // ---- CURSOR MODE: A = toggle prop flag, then open popup ----
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+                if (ti >= 0) {
+                    auto ctx = MakeToolCtx();
+                    mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                       SDL_BUTTON_LEFT, SDL_GetModState());
+                    // If tile is now a prop, immediately open the Front/Back popup.
+                    if (pt && mLevel.tiles[ti].prop) {
+                        int pw = 180, ph = 72;
+                        int px = std::clamp((int)mPadCursorX - pw / 2, 4,
+                                            CanvasW() - pw - 4);
+                        int pyp = std::clamp((int)mPadCursorY - ph - 8,
+                                             TOOLBAR_H + 4,
+                                             mWindow->GetHeight() - ph - 4);
+                        pt->popupIdx  = ti;
+                        pt->popupOpen = true;
+                        pt->popupRect = {px, pyp, pw, ph};
+                        // Mirror the current state so focus matches existing value.
+                        mPadPropFocusFront = !mLevel.tiles[ti].propBehind;
+                        mPadPropNavTimer   = 0.f;
+                        SetStatus("Tile " + std::to_string(ti) +
+                                  ": choose prop layer  D-pad=toggle  A=apply  B=close");
+                    }
+                } else {
+                    SetStatus("Prop: move cursor over a tile and press A");
+                }
+                return true;
+            }
+        }
+    }
+
+    // --- Ladder tool gamepad ---
+    if (mActiveToolId == ToolId::Ladder && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            if (ti >= 0) {
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, SDL_GetModState());
+            } else {
+                SetStatus("Ladder: move cursor over a tile and press A");
+            }
+            return true;
+        }
+    }
+
+    // --- Action tool gamepad ---
+    if (mActiveToolId == ToolId::Action && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto btn = e.gbutton.button;
+
+            // A — apply / select
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                if (mPopups.animPickerTile >= 0) {
+                    // Picker is open: apply the highlighted entry.
+                    int n = (int)mPopups.animPickerEntries.size();
+                    if (n > 0) {
+                        int idx = std::clamp(mPadActionPickerIdx, 0, n - 1);
+                        const auto& entry = mPopups.animPickerEntries[idx];
+                        if (mPopups.animPickerTile < (int)mLevel.tiles.size() &&
+                            mLevel.tiles[mPopups.animPickerTile].HasAction()) {
+                            mLevel.tiles[mPopups.animPickerTile].action->destroyAnimPath =
+                                entry.path;
+                            if (!entry.path.empty())
+                                GetDestroyAnimThumb(entry.path);
+                            SetStatus("Tile " + std::to_string(mPopups.animPickerTile) +
+                                      ": death anim -> " +
+                                      (entry.path.empty() ? "None" : entry.name));
+                        }
+                    }
+                    CloseAnimPicker();
+                } else {
+                    // Cursor mode: toggle/open action on hovered tile.
+                    int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+                    if (ti >= 0) {
+                        if (mLevel.tiles[ti].HasAction()) {
+                            // Already an action tile — open anim picker.
+                            OpenAnimPicker(ti);
+                            // Pre-select the entry that matches the current anim.
+                            const std::string& cur = mLevel.tiles[ti].action->destroyAnimPath;
+                            mPadActionPickerIdx = 0; // default to None
+                            for (int i = 0; i < (int)mPopups.animPickerEntries.size(); ++i) {
+                                if (mPopups.animPickerEntries[i].path == cur) {
+                                    mPadActionPickerIdx = i;
+                                    break;
+                                }
+                            }
+                            mPadActionPickerTimer  = 0.f;
+                            mPadActionPickerRepeat = false;
+                            SetStatus("Tile " + std::to_string(ti) +
+                                      ": choose death anim  LS/D-pad=navigate  A=apply  B=close");
+                        } else {
+                            // Make it an action tile.
+                            mLevel.tiles[ti].action = ActionData{};
+                            mLevel.tiles[ti].prop   = false;
+                            mLevel.tiles[ti].ladder = false;
+                            mLevel.tiles[ti].slope.reset();
+                            SetStatus("Tile " + std::to_string(ti) +
+                                      " -> action  (press A again to assign death anim)");
+                        }
+                    } else {
+                        SetStatus("Action: move cursor over a tile and press A");
+                    }
+                }
+                return true;
+            }
+
+            // B — close picker without applying
+            if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                if (mPopups.animPickerTile >= 0) {
+                    CloseAnimPicker();
+                    SetStatus("Action: death anim unchanged");
+                    return true;
+                }
+            }
+
+            // D-pad up/down — single-step nav in picker
+            if (mPopups.animPickerTile >= 0) {
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP || btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) {
+                    int dir = (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? 1 : -1;
+                    int n   = (int)mPopups.animPickerEntries.size();
+                    if (n > 0) {
+                        mPadActionPickerIdx = std::clamp(mPadActionPickerIdx + dir, 0, n - 1);
+                        SetStatus("Death anim: " +
+                                  mPopups.animPickerEntries[mPadActionPickerIdx].name);
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+
+    // --- Slope tool gamepad ---
+    if (mActiveToolId == ToolId::Slope && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            // A: cycle slope type on the tile under the cursor.
+            int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            if (ti >= 0) {
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, SDL_GetModState());
+            } else {
+                SetStatus("Slope: move cursor over a tile and press A to cycle slope type");
+            }
+            return true;
+        }
+    }
+
+    // --- Hitbox tool gamepad ---
+    if (mActiveToolId == ToolId::Hitbox && mTool && mEditorPad && !mPadToolbarActive) {
+        // Ordered list of handles matching mPadHbHandleIdx 0-7.
+        static constexpr HitboxTool::Handle kHbHandles[] = {
+            HitboxTool::Handle::TopLeft,  HitboxTool::Handle::Top,
+            HitboxTool::Handle::TopRight, HitboxTool::Handle::Left,
+            HitboxTool::Handle::Right,    HitboxTool::Handle::BotLeft,
+            HitboxTool::Handle::Bottom,   HitboxTool::Handle::BotRight
+        };
+        static const char* kHbNames[] = {
+            "Top-Left","Top","Top-Right","Left","Right","Bot-Left","Bottom","Bot-Right"
+        };
+
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            const auto btn = e.gbutton.button;
+
+            // A — mode-advance: cursor→node-select, node-select→node-edit, node-edit→node-select
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                if (mPadHbMode == 0) {
+                    // Select tile under cursor.
+                    int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+                    if (ti >= 0) {
+                        auto& t = mLevel.tiles[ti];
+                        if (!t.HasHitbox())
+                            t.hitbox = HitboxData{0, 0, t.w, t.h};
+                        mPadHbMode       = 1;
+                        mPadHbHandleIdx  = 0;
+                        mPadHbNavTimer   = 0.f;
+                        mPadHbNavRepeat  = false;
+                        auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+                        if (hbt) hbt->SetGamepadFocus(ti, kHbHandles[0]);
+                        SetStatus(std::string("Hitbox: tile ") + std::to_string(ti) +
+                                  "  LS/D-pad=navigate nodes  A=edit node  B=back to cursor");
+                    } else {
+                        SetStatus("Hitbox: move cursor over a tile and press A");
+                    }
+                } else if (mPadHbMode == 1) {
+                    // Enter node-edit mode.
+                    mPadHbMode       = 2;
+                    mPadHbEditAccumX = 0.f;
+                    mPadHbEditAccumY = 0.f;
+                    SetStatus(std::string("Hitbox editing [") + kHbNames[mPadHbHandleIdx] +
+                              "]  LS=adjust  A/B=done");
+                } else {
+                    // Return to node-select.
+                    mPadHbMode = 1;
+                    SetStatus(std::string("Hitbox: handle ") + kHbNames[mPadHbHandleIdx] +
+                              "  LS/D-pad=navigate  A=edit  B=back to cursor");
+                }
+                return true;
+            }
+
+            // B — mode-retreat: node-edit→node-select, node-select→cursor
+            if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                if (mPadHbMode == 2) {
+                    mPadHbMode = 1;
+                    SetStatus(std::string("Hitbox: handle ") + kHbNames[mPadHbHandleIdx] +
+                              "  LS/D-pad=navigate  A=edit  B=back to cursor");
+                } else if (mPadHbMode == 1) {
+                    mPadHbMode = 0;
+                    auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+                    if (hbt) hbt->SetGamepadFocus(-1, HitboxTool::Handle::None);
+                    SetStatus("Hitbox: LS=move  A=select tile  SELECT=tools");
+                }
+                return true;
+            }
+
+            // D-pad: 2D grid navigation in node-select mode.
+            // Grid layout (col→, row↓):
+            //   TopLeft(0)  Top(1)   TopRight(2)
+            //   Left(3)     [empty]  Right(4)
+            //   BotLeft(5)  Bottom(6) BotRight(7)
+            // kNav[handle][0=up, 1=down, 2=left, 3=right], -1 = no neighbour
+            if (mPadHbMode == 1 &&
+                (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT  || btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT ||
+                 btn == SDL_GAMEPAD_BUTTON_DPAD_UP    || btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN)) {
+                static constexpr int kNav[8][4] = {
+                    // up  down  left  right
+                    {  -1,   3,   -1,   1 },  // 0 TopLeft
+                    {  -1,   6,    0,   2 },  // 1 Top
+                    {  -1,   4,    1,  -1 },  // 2 TopRight
+                    {   0,   5,   -1,   4 },  // 3 Left
+                    {   2,   7,    3,  -1 },  // 4 Right
+                    {   3,  -1,   -1,   6 },  // 5 BotLeft
+                    {   1,  -1,    5,   7 },  // 6 Bottom
+                    {   4,  -1,    6,  -1 },  // 7 BotRight
+                };
+                int col = (btn == SDL_GAMEPAD_BUTTON_DPAD_UP)    ? 0 :
+                          (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN)   ? 1 :
+                          (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT)   ? 2 : 3;
+                int next = kNav[mPadHbHandleIdx][col];
+                if (next >= 0) {
+                    mPadHbHandleIdx = next;
+                    auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+                    if (hbt) hbt->SetGamepadFocus(hbt->GetTileIdx(), kHbHandles[mPadHbHandleIdx]);
+                    SetStatus(std::string("Hitbox: handle ") + kHbNames[mPadHbHandleIdx] +
+                              "  A=edit  B=back to cursor");
+                }
+                return true;
+            }
+        }
+    }
+
+    // --- Float (AntiGrav) tool gamepad ---
+    if (mActiveToolId == ToolId::AntiGrav && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            int ei = HitEnemy((int)mPadCursorX, (int)mPadCursorY);
+            if (ti >= 0 || ei >= 0) {
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, SDL_GetModState());
+            } else {
+                SetStatus("Float: move cursor over a tile or enemy and press A");
+            }
+            return true;
+        }
+    }
+
+    // --- Shield tool gamepad ---
+    if (mActiveToolId == ToolId::Shield && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            int ti = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            if (ti >= 0) {
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, SDL_GetModState());
+            } else {
+                SetStatus("Shield: move cursor over a tile and press A");
+            }
+            return true;
+        }
+    }
+
+    // --- Erase tool gamepad ---
+    if (mActiveToolId == ToolId::Erase && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            // A down: erase whatever is at the cursor right now, then start drag.
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                               SDL_BUTTON_LEFT, SDL_GetModState());
+            mPadEraseAHeld = true;
+            return true;
+        }
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            mPadEraseAHeld = false;
+            SetStatus("Erase: LS=move  A=erase  hold A + LS=drag erase");
+            return true;
+        }
+    }
+
+    // --- Select tool gamepad ---
+    if (mActiveToolId == ToolId::Select && mTool && mEditorPad && !mPadToolbarActive) {
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto btn = e.gbutton.button;
+
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                // A down — synthesize a left mouse-down at the cursor position.
+                // SelectTool decides: start rubber-band box OR begin drag of selection.
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, 0);
+                mPadSelAHeld = true;
+                return true;
+            }
+
+            if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                // B — delete selected objects if any, otherwise clear.
+                auto ctx = MakeToolCtx();
+                mTool->OnKeyDown(ctx, SDLK_DELETE, 0);
+                return true;
+            }
+        }
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) {
+            // A up — commit the rubber-band or finish the drag.
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseUp(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                             SDL_BUTTON_LEFT, 0);
+            mPadSelAHeld = false;
+            return true;
+        }
+    }
+
+    // --- Tile-tool gamepad two-mode state machine ---
+    if (mActiveToolId == ToolId::Tile && mTool && !mPadToolbarActive) {
+
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            auto btn = e.gbutton.button;
+
+            // ---- PALETTE MODE ----
+            if (mPadPaletteActive) {
+                // A → open folder OR confirm tile and switch to placement mode
+                if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                    auto& items = mPalette.Items();
+                    if (mPadPaletteIdx >= 0 && mPadPaletteIdx < (int)items.size()) {
+                        const auto& item = items[mPadPaletteIdx];
+                        if (item.isFolder) {
+                            // Navigate into / out of the folder, stay in palette mode.
+                            std::string folderPath = item.path;
+                            std::string folderName = fs::path(folderPath).filename().string();
+                            LoadTileView(folderPath);
+                            mPadPaletteIdx   = 0;
+                            mPadNavTimer     = 0.f;
+                            mPadNavRepeating = false;
+                            mPalette.SetSelectedTile(0);
+                            SetStatus("Opened: " + folderName);
+                            return true;
+                        }
+                    }
+                    // It's a tile — confirm and enter placement mode.
+                    mPadPaletteActive = false;
+                    mPadNavTimer      = 0.f;
+                    mPadNavRepeating  = false;
+                    const auto* sel = mPalette.SelectedItem();
+                    SetStatus(sel ? ("Tile: " + sel->label
+                                     + "  |  LS=move  A=place  B/D-pad=pick tile")
+                                  : "No tile selected");
+                    return true;
+                }
+                // LB / RB → cycle rotation (preview before confirming)
+                if (btn == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ||
+                    btn == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+                    if (auto* tt = dynamic_cast<TileTool*>(mTool.get())) {
+                        int step = (btn == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ? 90 : -90;
+                        tt->ghostRotation = ((tt->ghostRotation + step) % 360 + 360) % 360;
+                        SetStatus("Rotation: " + std::to_string(tt->ghostRotation)
+                                  + "\xc2\xb0");
+                    }
+                    return true;
+                }
+                return true; // consume all other buttons while palette is open
+            }
+
+            // ---- PLACEMENT MODE ----
+
+            // B → back to palette
+            if (btn == SDL_GAMEPAD_BUTTON_EAST) {
+                if (mPadAHeld) {
+                    auto ctx = MakeToolCtx();
+                    mTool->OnMouseUp(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                     SDL_BUTTON_LEFT, SDL_GetModState());
+                    mPadAHeld = false;
+                }
+                mPadPaletteActive = true;
+                SetStatus("Tile picker  |  LS=navigate  A=select");
+                return true;
+            }
+
+            // D-pad any direction → back to palette
+            if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP   ||
+                btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN  ||
+                btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT  ||
+                btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT) {
+                if (mPadAHeld) {
+                    auto ctx = MakeToolCtx();
+                    mTool->OnMouseUp(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                     SDL_BUTTON_LEFT, SDL_GetModState());
+                    mPadAHeld = false;
+                }
+                mPadPaletteActive = true;
+                SetStatus("Tile picker  |  LS=navigate  A=select");
+                return true;
+            }
+
+            // A → place tile at virtual cursor
+            if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
+                if (auto* tt = dynamic_cast<TileTool*>(mTool.get())) {
+                    const auto* selItem = mPalette.SelectedItem();
+                    tt->placementInfo   = selItem ? TilePlacementInfo{true,
+                                                                      selItem->isFolder,
+                                                                      selItem->path,
+                                                                      selItem->label}
+                                                  : TilePlacementInfo{};
+                }
+                auto ctx = MakeToolCtx();
+                mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                                   SDL_BUTTON_LEFT, SDL_GetModState());
+                mPadAHeld = true;
+                return true;
+            }
+
+            // LB / RB → cycle rotation in placement mode too
+            if (btn == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER ||
+                btn == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) {
+                if (auto* tt = dynamic_cast<TileTool*>(mTool.get())) {
+                    int step = (btn == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ? 90 : -90;
+                    tt->ghostRotation = ((tt->ghostRotation + step) % 360 + 360) % 360;
+                    SetStatus("Rotation: " + std::to_string(tt->ghostRotation)
+                              + "\xc2\xb0");
+                }
+                return true;
+            }
+        }
+
+        // A released → end drag
+        if (e.type == SDL_EVENT_GAMEPAD_BUTTON_UP &&
+            e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH && mPadAHeld) {
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseUp(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                             SDL_BUTTON_LEFT, SDL_GetModState());
+            mPadAHeld = false;
+            return true;
+        }
+    }
+
     if (mMusicConfirmActive) {
         if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
             int mx = (int)e.button.x, my = (int)e.button.y;
@@ -1027,177 +1718,8 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
             auto click = mToolbar.HandleClick(mx, my);
             if (click.kind == EditorToolbar::ClickResult::Kind::Button) {
                 CloseAnimPicker();
-                switch (click.button) {
-                    case TBBtn::Goal:
-                        SwitchTool(ToolId::Goal);
-                        lblTool->CreateSurface("Goal");
-                        return true;
-                    case TBBtn::Enemy:
-                        SwitchTool(ToolId::Enemy);
-                        lblTool->CreateSurface("Enemy");
-                        return true;
-                    case TBBtn::Tile:
-                        SwitchTool(ToolId::Tile);
-                        lblTool->CreateSurface("Tile");
-                        return true;
-                    case TBBtn::Erase:
-                        SwitchTool(ToolId::Erase);
-                        lblTool->CreateSurface("Erase");
-                        return true;
-                    case TBBtn::PlayerStart:
-                        SwitchTool(ToolId::PlayerStart);
-                        lblTool->CreateSurface("Player");
-                        return true;
-                    case TBBtn::Select:
-                        SwitchTool(ToolId::Select);
-                        lblTool->CreateSurface("Select");
-                        return true;
-                    case TBBtn::MoveCam:
-                        SwitchTool(ToolId::MoveCam);
-                        lblTool->CreateSurface("Pan");
-                        return true;
-                    case TBBtn::Prop:
-                        SwitchTool(ToolId::Prop);
-                        lblTool->CreateSurface("Prop");
-                        return true;
-                    case TBBtn::Ladder:
-                        SwitchTool(ToolId::Ladder);
-                        lblTool->CreateSurface("Ladder");
-                        return true;
-                    case TBBtn::Action:
-                        SwitchTool(ToolId::Action);
-                        lblTool->CreateSurface("Action");
-                        return true;
-                    case TBBtn::Slope:
-                        SwitchTool(ToolId::Slope);
-                        lblTool->CreateSurface("Slope");
-                        return true;
-                    case TBBtn::Resize:
-                        SwitchTool(ToolId::Resize);
-                        lblTool->CreateSurface("Resize");
-                        return true;
-                    case TBBtn::Hitbox:
-                        SwitchTool(ToolId::Hitbox);
-                        lblTool->CreateSurface("Hitbox");
-                        return true;
-                    case TBBtn::Hazard:
-                        SwitchTool(ToolId::Hazard);
-                        lblTool->CreateSurface("Hazard");
-                        return true;
-                    case TBBtn::AntiGrav:
-                        SwitchTool(ToolId::AntiGrav);
-                        lblTool->CreateSurface("Float");
-                        return true;
-                    case TBBtn::PowerUp:
-                        SwitchTool(ToolId::PowerUp);
-                        mPopups.powerUpOpen     = false;
-                        mPopups.powerUpTileIdx  = -1;
-                        mPopups.powerUpRegistry = &GetPowerUpRegistry();
-                        lblTool->CreateSurface("PowerUp");
-                        SetStatus("PowerUp: click tile to assign  |  RClick=cycle turret side  |  Scroll=fire rate");
-                        return true;
-                    case TBBtn::Shield:
-                        SwitchTool(ToolId::Shield);
-                        lblTool->CreateSurface("Shield");
-                        SetStatus("Shield: LClick tile to toggle shield pickup (slash to collect)");
-                        return true;
-                    case TBBtn::MovingPlat: {
-                        SwitchTool(ToolId::MovingPlat);
-                        lblTool->CreateSurface("MovingPlat");
-                        int maxUsed = 0;
-                        for (const auto& ts : mLevel.tiles)
-                            if (ts.HasMoving() && ts.moving->groupId > maxUsed)
-                                maxUsed = ts.moving->groupId;
-                        mMovPlatNextGroupId    = maxUsed + 1;
-                        mMovPlatCurGroupId     = mMovPlatNextGroupId++;
-                        mPopups.movPlatGroupId = mMovPlatCurGroupId;
-                        mMovPlatIndices.clear();
-                        for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
-                            if (!mLevel.tiles[i].HasMoving())
-                                continue;
-                            const auto& mp         = *mLevel.tiles[i].moving;
-                            mPopups.movPlatHoriz   = mp.horiz;
-                            mMovPlatRange          = mp.range;
-                            mPopups.movPlatSpeed   = mp.speed;
-                            mPopups.movPlatLoop    = mp.loop;
-                            mPopups.movPlatTrigger = mp.trigger;
-                            break;
-                        }
-                        mPopups.movPlatOpen       = true;
-                        mPopups.movPlatSpeedInput = false;
-                        mPopups.movPlatSpeedStr = std::to_string((int)mPopups.movPlatSpeed);
-                        SetStatus(
-                            "MovingPlat: click tiles to add. RClick=axis/range. New group "
-                            "ID=" +
-                            std::to_string(mMovPlatCurGroupId));
-                        return true;
-                    }
-                    case TBBtn::Save: {
-                        fs::create_directories("levels");
-                        std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name      = mLevelName;
-                        SaveLevel(mLevel, path);
-                        SetStatus("Saved: " + path);
-                        return true;
-                    }
-                    case TBBtn::Load: {
-                        std::string path = "levels/" + mLevelName + ".json";
-                        if (LoadLevel(path, mLevel)) {
-                            SetStatus("Loaded: " + path);
-                            if (!mLevel.background.empty())
-                                background = std::make_unique<Image>(
-                                    mLevel.background, FitModeFromString(mLevel.bgFitMode));
-                            RebuildParallaxImages();
-                            LoadBgPalette();
-                            mCamera.SetPosition(0.0f, 0.0f);
-                        } else
-                            SetStatus("No file: " + path);
-                        return true;
-                    }
-                    case TBBtn::Clear:
-                        mLevel.enemies.clear();
-                        mLevel.tiles.clear();
-                        SetStatus("Cleared");
-                        return true;
-                    case TBBtn::Play: {
-                        fs::create_directories("levels");
-                        std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name      = mLevelName;
-                        SaveLevel(mLevel, path);
-                        mLaunchGame = true;
-                        return true;
-                    }
-                    case TBBtn::Back: {
-                        fs::create_directories("levels");
-                        std::string path = "levels/" + mLevelName + ".json";
-                        mLevel.name      = mLevelName;
-                        SaveLevel(mLevel, path);
-                        mGoBack = true;
-                        return true;
-                    }
-                    case TBBtn::Gravity: {
-                        if (mLevel.gravityMode == GravityMode::Platformer)
-                            mLevel.gravityMode = GravityMode::WallRun;
-                        else if (mLevel.gravityMode == GravityMode::WallRun)
-                            mLevel.gravityMode = GravityMode::OpenWorld;
-                        else
-                            mLevel.gravityMode = GravityMode::Platformer;
-                        std::string gLbl =
-                            (mLevel.gravityMode == GravityMode::WallRun)     ? "Wall Run"
-                            : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Open World"
-                                                                             : "Platform";
-                        std::string gStatus =
-                            (mLevel.gravityMode == GravityMode::WallRun) ? "Mode: Wall Run"
-                            : (mLevel.gravityMode == GravityMode::OpenWorld)
-                                ? "Mode: Open World (top-down)"
-                                : "Mode: Platformer";
-                        mToolbar.SetGravityLabel(gLbl);
-                        SetStatus(gStatus);
-                        return true;
-                    }
-                    default:
-                        break;
-                } // switch
+                ActivateToolbarButton(click.button);
+                return true;
             } // if Button
         } // if toolbar
 
@@ -1626,7 +2148,753 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 }
 
 // --- Update ---
-void LevelEditorScene::Update(float /*dt*/) {
+void LevelEditorScene::Update(float dt) {
+    // Refresh the cached gamepad (picks up hot-plugged pads each frame).
+    {
+        int count = 0;
+        SDL_JoystickID* ids = SDL_GetGamepads(&count);
+        mEditorPad = (ids && count > 0) ? SDL_GetGamepadFromID(ids[0]) : nullptr;
+        if (ids) SDL_free(ids);
+    }
+
+    // ----------------------------------------------------------------
+    //  Toolbar focus — LS X navigates buttons on the tool row.
+    //  Sentinels: visible.size()   = palette collapse tab
+    //             visible.size()+1 = toolbar collapse tab
+    //  D-pad up/down cycles between all three rows (HandleEvent).
+    // ----------------------------------------------------------------
+    if (mEditorPad && mPadToolbarActive) {
+        constexpr float TB_DEAD        = 0.18f;
+        constexpr float TB_FIRST_DELAY = 0.28f;
+        constexpr float TB_REPEAT_RATE = 0.09f;
+
+        float lxT = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float lyT = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lxT) < TB_DEAD) lxT = 0.f;
+        if (std::abs(lyT) < TB_DEAD) lyT = 0.f;
+
+        auto visible = VisibleToolbarButtons();
+        bool onTool  = (mPadToolbarBtnIdx < (int)visible.size());
+
+        // LS X: key-repeat left/right navigation — only on the tool button row.
+        // (D-pad up/down handles sentinel transitions in HandleEvent.)
+        if (onTool) {
+            if (lxT == 0.f) {
+                mPadToolbarNavTimer  = 0.f;
+                mPadToolbarNavRepeat = false;
+            } else {
+                mPadToolbarNavTimer -= dt;
+                if (mPadToolbarNavTimer <= 0.f) {
+                    if (!visible.empty()) {
+                        int dir = (lxT > 0.f) ? 1 : -1;
+                        mPadToolbarBtnIdx = std::clamp(
+                            mPadToolbarBtnIdx + dir, 0, (int)visible.size() - 1);
+                    }
+                    mPadToolbarNavTimer  = mPadToolbarNavRepeat ? TB_REPEAT_RATE : TB_FIRST_DELAY;
+                    mPadToolbarNavRepeat = true;
+                }
+            }
+        }
+        (void)lyT; // reserved — D-pad up/down handles sentinel transitions
+        return; // toolbar has focus — don't run tile-tool logic
+    }
+
+    // ----------------------------------------------------------------
+    //  PowerUp tool — cursor pan + picker nav + right-stick fire rate
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::PowerUp && mEditorPad && !mPadToolbarActive) {
+        constexpr float PU_DEAD    = 0.18f;
+        constexpr float PU_PAN_SPD = 380.f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PU_DEAD) lx = 0.f;
+        if (std::abs(ly) < PU_DEAD) ly = 0.f;
+
+        // Cursor is always pinned to canvas centre.
+        int puH = mWindow ? mWindow->GetHeight() : 600;
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + puH) * 0.5f;
+
+        if (mPopups.powerUpOpen) {
+            // ---- PICKER MODE: left-stick Y navigates the list ----
+            if (std::abs(ly) < PU_DEAD) {
+                mPadPuPickerNavTimer  = 0.f;
+                mPadPuPickerNavRepeat = false;
+            } else {
+                constexpr float FIRST_DELAY = 0.28f;
+                constexpr float REPEAT_RATE = 0.09f;
+                mPadPuPickerNavTimer -= dt;
+                if (mPadPuPickerNavTimer <= 0.f) {
+                    int dir   = (ly > 0.f) ? 1 : -1;
+                    int total = (int)(GetPowerUpRegistry().size() + 1);
+                    mPadPuPickerIdx = std::clamp(mPadPuPickerIdx + dir, 0, total - 1);
+                    mPadPuPickerNavTimer  = mPadPuPickerNavRepeat ? REPEAT_RATE : FIRST_DELAY;
+                    mPadPuPickerNavRepeat = true;
+                }
+            }
+        } else {
+            // ---- CURSOR MODE: left stick pans camera ----
+            if (lx != 0.f || ly != 0.f) {
+                float z    = mCamera.Zoom();
+                float newX = std::max(0.f, mCamera.X() + lx * PU_PAN_SPD * dt / z);
+                float newY = std::max(0.f, mCamera.Y() + ly * PU_PAN_SPD * dt / z);
+                mCamera.SetPosition(newX, newY);
+            }
+
+            // Right stick — up/left decreases fire rate, down/right increases.
+            constexpr float RATE_SPD  = 8.0f;   // shots/sec per sec at full deflection
+            constexpr float RATE_DEAD = 0.08f;
+            float rx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+            float ry = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+            if (std::abs(rx) < RATE_DEAD) rx = 0.f;
+            if (std::abs(ry) < RATE_DEAD) ry = 0.f;
+            float rateInput = (rx + ry) * 0.5f; // down-right = positive = faster
+
+            int hovTi = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            if (rateInput != 0.f && hovTi >= 0) {
+                if (mLevel.tiles[hovTi].HasShooter()) {
+                    auto& sd  = *mLevel.tiles[hovTi].shooter;
+                    sd.fireRate = std::clamp(sd.fireRate + rateInput * RATE_SPD * dt,
+                                             0.5f, 20.0f);
+                    char buf[64];
+                    std::snprintf(buf, sizeof(buf),
+                                  "Turret fire rate: %.1f shots/sec", sd.fireRate);
+                    SetStatus(buf);
+                } else if (mLevel.tiles[hovTi].HasPowerUp()) {
+                    auto& pu = *mLevel.tiles[hovTi].powerUp;
+                    if (pu.type == "turret") {
+                        pu.fireRate = std::clamp(pu.fireRate + rateInput * RATE_SPD * dt,
+                                                  0.5f, 20.0f);
+                        char buf[64];
+                        std::snprintf(buf, sizeof(buf),
+                                      "Turret PU fire rate: %.1f shots/sec", pu.fireRate);
+                        SetStatus(buf);
+                    } else if (pu.type == "healthboost") {
+                        // Health boost uses discrete 25% steps — accumulate.
+                        mPadPuRateAccum += rateInput * RATE_SPD * dt;
+                        int steps = (int)mPadPuRateAccum;
+                        if (steps != 0) {
+                            mPadPuRateAccum -= (float)steps;
+                            pu.healthPct = std::clamp(
+                                pu.healthPct + steps * 25.0f, 25.0f, 200.0f);
+                            SetStatus("Health Boost: +" +
+                                      std::to_string((int)pu.healthPct) + "% max HP");
+                        }
+                    }
+                }
+            } else if (rateInput == 0.f) {
+                mPadPuRateAccum = 0.f;
+            }
+        }
+        return; // PowerUp tool handled — don't fall through to tile logic
+    }
+
+    // ----------------------------------------------------------------
+    //  Prop / Ladder tools — shared cursor pan block
+    // ----------------------------------------------------------------
+    if ((mActiveToolId == ToolId::Prop || mActiveToolId == ToolId::Ladder) &&
+        mTool && mEditorPad && !mPadToolbarActive) {
+
+        constexpr float PL_DEAD    = 0.18f;
+        constexpr float PL_PAN_SPD = 380.f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PL_DEAD) lx = 0.f;
+        if (std::abs(ly) < PL_DEAD) ly = 0.f;
+
+        int plH = mWindow ? mWindow->GetHeight() : 600;
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + plH) * 0.5f;
+
+        // Prop: while popup is open, left stick X toggles Front/Back focus (debounced).
+        if (mActiveToolId == ToolId::Prop) {
+            auto* pt = dynamic_cast<PropTool*>(mTool.get());
+            if (pt && pt->popupOpen) {
+                constexpr float TOGGLE_DELAY = 0.35f;
+                mPadPropNavTimer -= dt;
+                if (std::abs(lx) > PL_DEAD && mPadPropNavTimer <= 0.f) {
+                    mPadPropFocusFront = (lx < 0.f); // left = Front, right = Back
+                    mPadPropNavTimer   = TOGGLE_DELAY;
+                    SetStatus(std::string("Prop focus: ") +
+                              (mPadPropFocusFront ? "FRONT" : "BACK") +
+                              "  A=apply  B=cancel");
+                } else if (std::abs(lx) <= PL_DEAD) {
+                    mPadPropNavTimer = 0.f; // reset when stick released
+                }
+                return; // don't pan camera while popup is open
+            }
+        }
+
+        // Camera pan
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PL_PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PL_PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Pan (MoveCam) tool — left stick pans, right stick zooms
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::MoveCam && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD    = 0.12f;
+        constexpr float ZOOM_DEAD   = 0.12f;
+        constexpr float PAN_SPD     = 420.f;  // world units / sec at full deflection
+        // ZOOM_RATE: zoom-wheel equivalents per second at full deflection.
+        // ApplyZoom multiplies by ZOOM_STEP (0.1), so 10.0 → 1.0 zoom unit/sec.
+        constexpr float ZOOM_RATE   = 10.0f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+
+        float ry = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+        if (std::abs(ry) < ZOOM_DEAD) ry = 0.f;
+
+        // Left stick: pan
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+
+        // Right stick Y: zoom (up = zoom in, down = zoom out), anchored to canvas centre.
+        if (ry != 0.f) {
+            int panH   = mWindow ? mWindow->GetHeight() : 600;
+            int anchorX = CanvasW() / 2;
+            int anchorY = (TOOLBAR_H + panH) / 2;
+            // Negative ry (stick up) = positive wheelY = zoom in.
+            float wheelEq = -ry * ZOOM_RATE * dt;
+            if (mCamera.ApplyZoom(wheelEq, anchorX, anchorY))
+                SetStatus("Zoom: " + std::to_string(mCamera.ZoomPercent()) + "%");
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Action tool — crosshair pinned to centre; A applies/opens picker;
+    //  right stick Y adjusts hitsRequired on hovered action tile.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Action && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD  = 0.12f;
+        constexpr float PAN_SPD   = 400.f;
+        constexpr float HITS_DEAD = 0.15f;
+        constexpr float HITS_SPD  = 4.0f;  // hits per second at full deflection
+
+        int acH = mWindow ? mWindow->GetHeight() : 600;
+
+        // Cursor pinned to canvas centre.
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + acH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+
+        // Left stick: key-repeat nav through picker entries when picker is open;
+        // otherwise pan the camera.
+        if (mPopups.animPickerTile >= 0) {
+            // ---- PICKER MODE: left-stick Y navigates entries ----
+            constexpr float FIRST_DELAY = 0.28f;
+            constexpr float REPEAT_RATE = 0.09f;
+            int dir = 0;
+            if      (ly >  PAN_DEAD) dir =  1;
+            else if (ly < -PAN_DEAD) dir = -1;
+
+            if (dir == 0) {
+                mPadActionPickerTimer  = 0.f;
+                mPadActionPickerRepeat = false;
+            } else {
+                mPadActionPickerTimer -= dt;
+                if (mPadActionPickerTimer <= 0.f) {
+                    int n = (int)mPopups.animPickerEntries.size();
+                    if (n > 0) {
+                        mPadActionPickerIdx = std::clamp(mPadActionPickerIdx + dir, 0, n - 1);
+                        SetStatus("Death anim: " +
+                                  mPopups.animPickerEntries[mPadActionPickerIdx].name);
+                    }
+                    mPadActionPickerTimer  = mPadActionPickerRepeat ? REPEAT_RATE : FIRST_DELAY;
+                    mPadActionPickerRepeat = true;
+                }
+            }
+        } else {
+            // ---- CURSOR MODE: pan camera ----
+            if (lx != 0.f || ly != 0.f) {
+                float z    = mCamera.Zoom();
+                float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+                float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+                mCamera.SetPosition(newX, newY);
+            }
+
+            // Right stick Y: adjust hitsRequired on hovered action tile.
+            float ry = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+            if (std::abs(ry) < HITS_DEAD) ry = 0.f;
+            if (ry != 0.f) {
+                int hovTi = HitTile((int)mPadCursorX, (int)mPadCursorY);
+                if (hovTi >= 0 && mLevel.tiles[hovTi].HasAction()) {
+                    // Positive ry = stick down = fewer hits; negative ry = up = more.
+                    mPadActionHitsAccum -= ry * HITS_SPD * dt;
+                    int steps = (int)mPadActionHitsAccum;
+                    if (steps != 0) {
+                        mPadActionHitsAccum -= (float)steps;
+                        int& hits = mLevel.tiles[hovTi].action->hitsRequired;
+                        hits = std::clamp(hits + steps, 1, 99);
+                        SetStatus("Action tile hits: " + std::to_string(hits));
+                    }
+                } else {
+                    mPadActionHitsAccum = 0.f; // reset when not over an action tile
+                }
+            }
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Slope tool — crosshair pinned to centre; LS pans camera;
+    //  A (via HandleEvent) cycles slope type; RS Y adjusts heightFrac.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Slope && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD   = 0.12f;
+        constexpr float PAN_SPD    = 400.f;
+        constexpr float SLOPE_DEAD = 0.15f;
+        constexpr float SLOPE_SPD  = 5.0f;  // steps/sec at full deflection (1 step = 0.05)
+
+        int slH = mWindow ? mWindow->GetHeight() : 600;
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + slH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+
+        // RS Y: adjust heightFrac on the hovered slope tile.
+        // Negative ry (stick up) = increase height; positive (stick down) = decrease.
+        float ry = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+        if (std::abs(ry) < SLOPE_DEAD) ry = 0.f;
+        if (ry != 0.f) {
+            int hovTi = HitTile((int)mPadCursorX, (int)mPadCursorY);
+            if (hovTi >= 0 && mLevel.tiles[hovTi].HasSlope()) {
+                mPadSlopeHeightAccum -= ry * SLOPE_SPD * dt;
+                int steps = static_cast<int>(mPadSlopeHeightAccum);
+                if (steps != 0) {
+                    mPadSlopeHeightAccum -= static_cast<float>(steps);
+                    float& frac = mLevel.tiles[hovTi].slope->heightFrac;
+                    frac = std::clamp(frac + steps * 0.05f, 0.05f, 1.0f);
+                    frac = std::round(frac * 20.0f) / 20.0f;
+                    SetStatus("Slope height: " + std::to_string((int)(frac * 100)) +
+                              "%  (RS up/down to adjust)");
+                }
+            } else {
+                mPadSlopeHeightAccum = 0.f;
+            }
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Hitbox tool — three-mode state machine:
+    //    Mode 0 (cursor)      : LS pans camera, A selects tile.
+    //    Mode 1 (node-select) : LS X key-repeat cycles handles, A edits.
+    //    Mode 2 (node-edit)   : LS adjusts selected handle in world space.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Hitbox && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD    = 0.12f;
+        constexpr float PAN_SPD     = 400.f;
+        constexpr float NAV_DEAD    = 0.40f;
+        constexpr float FIRST_DELAY = 0.28f;
+        constexpr float REPEAT_RATE = 0.09f;
+        constexpr float EDIT_SPD    = 35.f;   // world units/sec at full deflection
+
+        static constexpr HitboxTool::Handle kHbHandles[] = {
+            HitboxTool::Handle::TopLeft,  HitboxTool::Handle::Top,
+            HitboxTool::Handle::TopRight, HitboxTool::Handle::Left,
+            HitboxTool::Handle::Right,    HitboxTool::Handle::BotLeft,
+            HitboxTool::Handle::Bottom,   HitboxTool::Handle::BotRight
+        };
+        static const char* kHbNames[] = {
+            "Top-Left","Top","Top-Right","Left","Right","Bot-Left","Bottom","Bot-Right"
+        };
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+
+        if (mPadHbMode == 0) {
+            // Cursor pinned to canvas centre; LS pans camera.
+            int hbWinH = mWindow ? mWindow->GetHeight() : 600;
+            mPadCursorX = CanvasW() * 0.5f;
+            mPadCursorY = (TOOLBAR_H + hbWinH) * 0.5f;
+            if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+            if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+            if (lx != 0.f || ly != 0.f) {
+                float z    = mCamera.Zoom();
+                float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+                float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+                mCamera.SetPosition(newX, newY);
+            }
+        } else if (mPadHbMode == 1) {
+            // LS: 2D grid navigation with key-repeat.
+            // kNav[handle][0=up, 1=down, 2=left, 3=right], -1 = no neighbour
+            static constexpr int kNav[8][4] = {
+                {  -1,   3,   -1,   1 },  // 0 TopLeft
+                {  -1,   6,    0,   2 },  // 1 Top
+                {  -1,   4,    1,  -1 },  // 2 TopRight
+                {   0,   5,   -1,   4 },  // 3 Left
+                {   2,   7,    3,  -1 },  // 4 Right
+                {   3,  -1,   -1,   6 },  // 5 BotLeft
+                {   1,  -1,    5,   7 },  // 6 Bottom
+                {   4,  -1,    6,  -1 },  // 7 BotRight
+            };
+            // Pick dominant axis, then map to up/down/left/right column index.
+            int navDir = -1;
+            float ax = std::abs(lx), ay = std::abs(ly);
+            if (ay > NAV_DEAD && ay >= ax)      navDir = (ly < 0) ? 0 : 1;  // up / down
+            else if (ax > NAV_DEAD && ax > ay)  navDir = (lx < 0) ? 2 : 3;  // left / right
+
+            if (navDir < 0) {
+                mPadHbNavTimer  = 0.f;
+                mPadHbNavRepeat = false;
+            } else {
+                mPadHbNavTimer -= dt;
+                if (mPadHbNavTimer <= 0.f) {
+                    int next = kNav[mPadHbHandleIdx][navDir];
+                    if (next >= 0) {
+                        mPadHbHandleIdx = next;
+                        auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+                        if (hbt) hbt->SetGamepadFocus(hbt->GetTileIdx(), kHbHandles[mPadHbHandleIdx]);
+                        SetStatus(std::string("Hitbox: handle ") + kHbNames[mPadHbHandleIdx] +
+                                  "  A=edit  B=back to cursor");
+                    }
+                    mPadHbNavTimer  = mPadHbNavRepeat ? REPEAT_RATE : FIRST_DELAY;
+                    mPadHbNavRepeat = true;
+                }
+            }
+        } else {
+            // Mode 2 — LS adjusts the focused handle's edges in world units.
+            if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+            if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+            if (lx != 0.f || ly != 0.f) {
+                mPadHbEditAccumX += lx * EDIT_SPD * dt;
+                mPadHbEditAccumY += ly * EDIT_SPD * dt;
+                int dx = static_cast<int>(mPadHbEditAccumX);
+                int dy = static_cast<int>(mPadHbEditAccumY);
+                if (dx != 0 || dy != 0) {
+                    mPadHbEditAccumX -= static_cast<float>(dx);
+                    mPadHbEditAccumY -= static_cast<float>(dy);
+                    auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+                    int ti = hbt ? hbt->GetTileIdx() : -1;
+                    if (ti >= 0 && ti < (int)mLevel.tiles.size() &&
+                        mLevel.tiles[ti].HasHitbox()) {
+                        auto& t = mLevel.tiles[ti];
+                        constexpr int MIN_SIDE = 4;
+                        switch (kHbHandles[mPadHbHandleIdx]) {
+                            case HitboxTool::Handle::Left:
+                                t.hitbox->offX = std::max(0, t.hitbox->offX + dx);
+                                t.hitbox->w    = std::max(MIN_SIDE, t.hitbox->w - dx);
+                                break;
+                            case HitboxTool::Handle::Right:
+                                t.hitbox->w = std::clamp(t.hitbox->w + dx,
+                                                         MIN_SIDE, t.w - t.hitbox->offX);
+                                break;
+                            case HitboxTool::Handle::Top:
+                                t.hitbox->offY = std::max(0, t.hitbox->offY + dy);
+                                t.hitbox->h    = std::max(MIN_SIDE, t.hitbox->h - dy);
+                                break;
+                            case HitboxTool::Handle::Bottom:
+                                t.hitbox->h = std::clamp(t.hitbox->h + dy,
+                                                         MIN_SIDE, t.h - t.hitbox->offY);
+                                break;
+                            case HitboxTool::Handle::TopLeft:
+                                t.hitbox->offX = std::max(0, t.hitbox->offX + dx);
+                                t.hitbox->w    = std::max(MIN_SIDE, t.hitbox->w - dx);
+                                t.hitbox->offY = std::max(0, t.hitbox->offY + dy);
+                                t.hitbox->h    = std::max(MIN_SIDE, t.hitbox->h - dy);
+                                break;
+                            case HitboxTool::Handle::TopRight:
+                                t.hitbox->w    = std::max(MIN_SIDE, t.hitbox->w + dx);
+                                t.hitbox->offY = std::max(0, t.hitbox->offY + dy);
+                                t.hitbox->h    = std::max(MIN_SIDE, t.hitbox->h - dy);
+                                break;
+                            case HitboxTool::Handle::BotLeft:
+                                t.hitbox->offX = std::max(0, t.hitbox->offX + dx);
+                                t.hitbox->w    = std::max(MIN_SIDE, t.hitbox->w - dx);
+                                t.hitbox->h    = std::max(MIN_SIDE, t.hitbox->h + dy);
+                                break;
+                            case HitboxTool::Handle::BotRight:
+                                t.hitbox->w = std::max(MIN_SIDE, t.hitbox->w + dx);
+                                t.hitbox->h = std::max(MIN_SIDE, t.hitbox->h + dy);
+                                break;
+                            default: break;
+                        }
+                        // Clamp offsets so they stay within the tile.
+                        t.hitbox->offX = std::max(0, std::min(t.hitbox->offX, t.w - MIN_SIDE));
+                        t.hitbox->offY = std::max(0, std::min(t.hitbox->offY, t.h - MIN_SIDE));
+                        SetStatus("Hitbox: off(" + std::to_string(t.hitbox->offX) + "," +
+                                  std::to_string(t.hitbox->offY) + ") size(" +
+                                  std::to_string(t.hitbox->w) + "x" +
+                                  std::to_string(t.hitbox->h) + ")");
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Float (AntiGrav) tool — green crosshair pinned to centre;
+    //  LS pans camera; A toggles anti-gravity on hovered tile/enemy.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::AntiGrav && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD = 0.12f;
+        constexpr float PAN_SPD  = 400.f;
+
+        int agH = mWindow ? mWindow->GetHeight() : 600;
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + agH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    //  Shield tool — purple crosshair pinned to centre;
+    //  LS pans camera; A toggles shield pickup on hovered tile.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Shield && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD = 0.12f;
+        constexpr float PAN_SPD  = 400.f;
+
+        int shH = mWindow ? mWindow->GetHeight() : 600;
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + shH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+        return;
+    }
+
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    //  Select tool — white crosshair pinned to centre; LS pans camera.
+    //  Hold A = rubber-band box OR drag selection (SelectTool decides).
+    //  B = delete selected entities.
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Select && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD = 0.12f;
+        constexpr float PAN_SPD  = 400.f;
+
+        int selH = mWindow ? mWindow->GetHeight() : 600;
+
+        // Cursor always pinned to canvas centre.
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + selH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+
+        // LS always pans the camera (cursor world position shifts, driving the
+        // rubber-band corner or drag offset automatically via OnMouseMove below).
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+
+        // Drive the SelectTool's move logic every frame while A is held
+        // (both rubber-band extension and entity drag work this way).
+        if (mPadSelAHeld) {
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseMove(ctx, (int)mPadCursorX, (int)mPadCursorY);
+        }
+        return;
+    }
+
+    //  Erase tool — crosshair pinned to centre; A erases; hold A + LS
+    //  drags continuously (camera pans under the fixed cursor).
+    // ----------------------------------------------------------------
+    if (mActiveToolId == ToolId::Erase && mTool && mEditorPad && !mPadToolbarActive) {
+        constexpr float PAN_DEAD = 0.12f;
+        constexpr float PAN_SPD  = 400.f;
+
+        int erH = mWindow ? mWindow->GetHeight() : 600;
+
+        // Cursor always pinned to canvas centre.
+        mPadCursorX = CanvasW() * 0.5f;
+        mPadCursorY = (TOOLBAR_H + erH) * 0.5f;
+
+        float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+        float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+        if (std::abs(lx) < PAN_DEAD) lx = 0.f;
+        if (std::abs(ly) < PAN_DEAD) ly = 0.f;
+
+        // Left stick always pans the camera.
+        if (lx != 0.f || ly != 0.f) {
+            float z    = mCamera.Zoom();
+            float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+            float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+            mCamera.SetPosition(newX, newY);
+        }
+
+        // While A is held and the stick is moving, erase whatever is now
+        // under the (world-scrolled) cursor each frame.
+        if (mPadEraseAHeld && (lx != 0.f || ly != 0.f)) {
+            auto ctx = MakeToolCtx();
+            mTool->OnMouseDown(ctx, (int)mPadCursorX, (int)mPadCursorY,
+                               SDL_BUTTON_LEFT, SDL_GetModState());
+        }
+        return;
+    }
+
+    // Only drive the gamepad tile-tool logic when the tile tool is active.
+    if (mActiveToolId != ToolId::Tile || !mTool || !mEditorPad)
+        return;
+
+    constexpr float DEAD    = 0.18f;
+    constexpr float PAN_SPD = 380.f;   // world units/sec for right-stick camera pan
+
+    int W = mWindow->GetWidth();
+    int H = mWindow->GetHeight();
+
+    float lx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+    float ly = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+    if (std::abs(lx) < DEAD) lx = 0.f;
+    if (std::abs(ly) < DEAD) ly = 0.f;
+
+    // ================================================================
+    //  PALETTE MODE — left stick navigates the tile list
+    // ================================================================
+    if (mPadPaletteActive) {
+        // Cardinal-only: pick the dominant axis; diagonals never fire both.
+        float ax = std::abs(lx), ay = std::abs(ly);
+        int dirX = 0, dirY = 0;
+        if (ax > DEAD || ay > DEAD) {
+            if (ay >= ax) dirY = (ly > 0.f ? 1 : -1);
+            else          dirX = (lx > 0.f ? 1 : -1);
+        }
+        bool anyNav = (dirX != 0 || dirY != 0);
+
+        if (!anyNav) {
+            mPadNavTimer     = 0.f;
+            mPadNavRepeating = false;
+        } else {
+            constexpr float FIRST_DELAY = 0.28f;
+            constexpr float REPEAT_RATE = 0.09f;
+            mPadNavTimer -= dt;
+            if (mPadNavTimer <= 0.f) {
+                int maxIdx = std::max(0, (int)mPalette.Items().size() - 1);
+                int delta  = dirY * PAL_COLS + dirX;
+                int newIdx = std::clamp(mPadPaletteIdx + delta, 0, maxIdx);
+                mPadPaletteIdx = newIdx;
+                mPalette.SetSelectedTile(newIdx);
+                mPadNavTimer     = mPadNavRepeating ? REPEAT_RATE : FIRST_DELAY;
+                mPadNavRepeating = true;
+            }
+        }
+
+        // Keep highlighted item scrolled into view.
+        {
+            constexpr int PAD   = 4, LBL_H = 14;
+            const int cellW     = (PALETTE_W - PAD * (PAL_COLS + 1)) / PAL_COLS;
+            const int itemH     = cellW + LBL_H + PAD;
+            const int palYStart = TOOLBAR_H + TAB_H + 44;
+            const int visRows   = std::max(1, (H - palYStart) / itemH);
+            const int targetRow = mPadPaletteIdx / PAL_COLS;
+            const int curScroll = mPalette.TileScroll();
+            if (targetRow < curScroll)
+                mPalette.SetTileScroll(targetRow);
+            else if (targetRow >= curScroll + visRows)
+                mPalette.SetTileScroll(targetRow - visRows + 1);
+        }
+        return; // palette has focus — don't move cursor
+    }
+
+    // ================================================================
+    //  PLACEMENT MODE — left stick moves the tile ghost cursor;
+    //                   right stick pans the camera.
+    //                   Camera auto-follows the cursor to keep it centred.
+    // ================================================================
+    // Ghost is always pinned to canvas centre — the camera pans under it.
+    // This means what the user sees as "moving the tile" is actually the
+    // world scrolling; the ghost never drifts to an edge.
+    mPadCursorX = CanvasW() * 0.5f;
+    mPadCursorY = (TOOLBAR_H + H) * 0.5f;
+
+    // Left stick pans the camera (world moves under the centred ghost).
+    if (lx != 0.f || ly != 0.f) {
+        float z    = mCamera.Zoom();
+        float newX = std::max(0.f, mCamera.X() + lx * PAN_SPD * dt / z);
+        float newY = std::max(0.f, mCamera.Y() + ly * PAN_SPD * dt / z);
+        mCamera.SetPosition(newX, newY);
+    }
+
+    // Right stick — down/right increases tile size, up/left decreases.
+    // Both axes contribute so any direction in the down-right quadrant grows.
+    constexpr float SIZE_SPD   = 14.0f; // grid steps/sec at full deflection
+    constexpr float SIZE_DEAD  = 0.08f; // lower dead zone so light touches register
+    float rx = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+    float ry = SDL_GetGamepadAxis(mEditorPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+    if (std::abs(rx) < SIZE_DEAD) rx = 0.f;
+    if (std::abs(ry) < SIZE_DEAD) ry = 0.f;
+    float sizeInput = (rx + ry) * 0.5f; // average; diagonal ≈ same rate as pure axis
+    if (sizeInput != 0.f) {
+        mPadSizeAccum += sizeInput * SIZE_SPD * dt;
+        int steps = (int)mPadSizeAccum;
+        if (steps != 0) {
+            mPadSizeAccum -= steps;
+            auto ctx = MakeToolCtx();
+            mTool->OnScroll(ctx, (float)-steps,  // negate: down = grow (positive scroll)
+                            (int)mPadCursorX, (int)mPadCursorY, SDL_GetModState());
+        }
+    } else {
+        mPadSizeAccum = 0.f; // reset when stick released
+    }
+
+    // A held — continuous drag-placement as the cursor moves.
+    if (mPadAHeld) {
+        if (auto* tt = dynamic_cast<TileTool*>(mTool.get())) {
+            const auto* selItem = mPalette.SelectedItem();
+            tt->placementInfo   = selItem ? TilePlacementInfo{true,
+                                                               selItem->isFolder,
+                                                               selItem->path,
+                                                               selItem->label}
+                                          : TilePlacementInfo{};
+        }
+        auto ctx = MakeToolCtx();
+        mTool->OnMouseMove(ctx, (int)mPadCursorX, (int)mPadCursorY);
+    }
 }
 
 // --- Render ---
@@ -1664,6 +2932,16 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
     plxFactors.reserve(mLevel.parallaxLayers.size());
     for (const auto& pl : mLevel.parallaxLayers)
         plxFactors.push_back(pl.scrollFactor);
+
+    // Placement mode: ghost follows the virtual stick cursor.
+    // Palette mode:   ghost follows the mouse as normal (override disabled).
+    if (mActiveToolId == ToolId::Tile && mEditorPad && !mPadPaletteActive) {
+        mCanvasRenderer.padCursorOverrideX = mPadCursorX;
+        mCanvasRenderer.padCursorOverrideY = mPadCursorY;
+    } else {
+        mCanvasRenderer.padCursorOverrideX = -1.f;
+        mCanvasRenderer.padCursorOverrideY = -1.f;
+    }
 
     mCanvasRenderer.Render(window,
                            screen,
@@ -1833,6 +3111,676 @@ void LevelEditorScene::Render(Window& window, float /*alpha*/) {
         SDL_RenderTexture(ren, tex, nullptr, nullptr);
         SDL_DestroyTexture(tex);
     }
+
+    // --- Gamepad PowerUp tool overlay ---
+    if (mActiveToolId == ToolId::PowerUp && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // --- Orange crosshair at cursor ---
+        constexpr int CS = 12; // arm length
+        SDL_SetRenderDrawColor(ren, 255, 120, 40, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 255, 180, 80, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // --- Highlight tile under cursor ---
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+
+                // Warm fill + outline
+                SDL_SetRenderDrawColor(ren, 255, 130, 50, 55);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 255, 165, 60, 240);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2, tsh + 2};
+                SDL_RenderRect(ren, &outR);
+            }
+        }
+
+        // --- Power-up picker: highlight focused entry ---
+        if (mPopups.powerUpOpen) {
+            const auto& reg     = GetPowerUpRegistry();
+            const int   PAD     = 8;
+            const int   ROW_H   = 28;
+            const int   TITLE_H = 32;
+            int         py      = mPopups.powerUpRect.y + TITLE_H;
+            int         total   = (int)reg.size() + 1; // +1 for None
+            int         idx     = std::min(mPadPuPickerIdx, total - 1);
+
+            SDL_Rect row;
+            if (idx < (int)reg.size()) {
+                row = {mPopups.powerUpRect.x + PAD,
+                       py + idx * (ROW_H + 2),
+                       mPopups.powerUpRect.w - PAD * 2, ROW_H};
+            } else {
+                row = {mPopups.powerUpRect.x + PAD,
+                       py + (int)reg.size() * (ROW_H + 2),
+                       mPopups.powerUpRect.w - PAD * 2, ROW_H};
+            }
+
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 55);
+            SDL_FRect selFill = {(float)row.x, (float)row.y,
+                                 (float)row.w, (float)row.h};
+            SDL_RenderFillRect(ren, &selFill);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 230);
+            SDL_RenderRect(ren, &selFill);
+        }
+
+        // --- Hint bar ---
+        const char* hint = mPopups.powerUpOpen
+            ? "LS/D-pad=navigate  A=select  B=cancel"
+            : "LS=move  A=assign power-up  RS=fire rate  SELECT=tools";
+        Text puHint(hint, {255, 160, 60, 215}, 6, H - 18, 11);
+        puHint.Render(ren);
+    }
+
+    // --- Gamepad Prop tool overlay ---
+    if (mActiveToolId == ToolId::Prop && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Cyan crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 80, 180, 255, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 140, 220, 255, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // Tile hover highlight (cyan)
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                SDL_SetRenderDrawColor(ren, 80, 180, 255, 45);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 100, 200, 255, 240);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &outR);
+            }
+        }
+
+        // Prop popup: highlight focused Front or Back button
+        auto* pt = dynamic_cast<PropTool*>(mTool.get());
+        if (pt && pt->popupOpen) {
+            const SDL_Rect& focusR = mPadPropFocusFront ? pt->frontRect : pt->backRect;
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 60);
+            SDL_FRect selFill = {(float)focusR.x, (float)focusR.y,
+                                 (float)focusR.w, (float)focusR.h};
+            SDL_RenderFillRect(ren, &selFill);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 230);
+            SDL_RenderRect(ren, &selFill);
+        }
+
+        // Hint bar
+        const char* hint = (pt && pt->popupOpen)
+            ? "LS/D-pad=Front\xe2\x86\x94" "Back  A=apply  B=cancel"
+            : "LS=move  A=toggle prop  SELECT=tools";
+        Text propHint(hint, {100, 200, 255, 215}, 6, H - 18, 11);
+        propHint.Render(ren);
+    }
+
+    // --- Gamepad Ladder tool overlay ---
+    if (mActiveToolId == ToolId::Ladder && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Green crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 60, 220, 100, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 120, 255, 140, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // Tile hover highlight (green)
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                SDL_SetRenderDrawColor(ren, 60, 220, 100, 45);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 80, 240, 120, 240);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &outR);
+            }
+        }
+
+        // Hint bar
+        Text ladderHint("LS=move  A=toggle ladder  SELECT=tools",
+                        {100, 255, 140, 215}, 6, H - 18, 11);
+        ladderHint.Render(ren);
+    }
+
+    // --- Gamepad Action tool overlay ---
+    if (mActiveToolId == ToolId::Action && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Orange crosshair (distinct from PowerUp's lighter orange)
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 255, 130, 0, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 255, 200, 60, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // Tile hover highlight (orange)
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht  = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+
+                // Action tiles get a stronger tint; plain tiles get a subtle preview.
+                bool hasAction = ht.HasAction();
+                SDL_SetRenderDrawColor(ren, 255, 130, 0, hasAction ? 60 : 30);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 255, 170, 40, 240);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &outR);
+
+                // Show hits badge on action tiles
+                if (hasAction) {
+                    std::string hitsStr = "x" + std::to_string(ht.action->hitsRequired);
+                    Text hitsLbl(hitsStr, {255, 210, 80, 240},
+                                 (int)tsx + 2, (int)tsy + 2, 10);
+                    hitsLbl.Render(ren);
+                }
+            }
+        }
+
+        // Anim picker gamepad highlight — gold outline on focused entry
+        if (mPopups.animPickerTile >= 0) {
+            int n = (int)mPopups.animPickerEntries.size();
+            if (n > 0) {
+                constexpr int THUMB   = 48, PAD = 8, COL_W = THUMB + PAD * 2, COLS = 4;
+                constexpr int TITLE_H = 28, ROW_H = THUMB + 10;
+                int idx = std::clamp(mPadActionPickerIdx, 0, n - 1);
+                int col = idx % COLS;
+                int row = idx / COLS;
+                int px  = mPopups.animPickerRect.x;
+                int py  = mPopups.animPickerRect.y + TITLE_H;
+                int ex  = px + PAD + col * COL_W;
+                int ey  = py + PAD + row * (ROW_H + PAD);
+
+                SDL_SetRenderDrawColor(ren, 255, 220, 50, 255);
+                SDL_FRect sel1 = {(float)(ex - 2), (float)(ey - 2),
+                                  (float)(COL_W - PAD + 4), (float)(ROW_H + 4)};
+                SDL_RenderRect(ren, &sel1);
+                SDL_SetRenderDrawColor(ren, 255, 180, 0, 140);
+                SDL_FRect sel2 = {(float)(ex - 4), (float)(ey - 4),
+                                  (float)(COL_W - PAD + 8), (float)(ROW_H + 8)};
+                SDL_RenderRect(ren, &sel2);
+            }
+        }
+
+        // Hint bar — changes based on picker state
+        const char* actionHint = (mPopups.animPickerTile >= 0)
+            ? "LS=navigate  A=apply anim  B=cancel"
+            : "LS=move  A=toggle action / pick anim  RS up=more hits  RS down=fewer  SELECT=tools";
+        Text acHint(actionHint, {255, 160, 40, 215}, 6, H - 18, 11);
+        acHint.Render(ren);
+    }
+
+    // --- Gamepad Slope tool overlay ---
+    if (mActiveToolId == ToolId::Slope && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Yellow crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 230, 210, 0, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 255, 240, 60, 255);
+        SDL_FRect slDot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &slDot);
+
+        // Tile hover highlight
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht  = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                bool hasSlope = ht.HasSlope();
+                SDL_SetRenderDrawColor(ren, 230, 210, 0, hasSlope ? 55 : 25);
+                SDL_FRect slFill = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &slFill);
+                SDL_SetRenderDrawColor(ren, 255, 240, 60, 220);
+                SDL_FRect slOut = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &slOut);
+
+                // Height % badge on slope tiles
+                if (hasSlope) {
+                    std::string pctStr = std::to_string((int)(ht.slope->heightFrac * 100)) + "%";
+                    Text slPct(pctStr, {255, 240, 60, 240}, (int)tsx + 2, (int)tsy + 2, 10);
+                    slPct.Render(ren);
+                }
+            }
+        }
+
+        // Hint bar
+        Text slHint("LS=move  A=cycle slope type  RS up=more height  RS down=less  SELECT=tools",
+                    {230, 210, 60, 215}, 6, H - 18, 11);
+        slHint.Render(ren);
+    }
+
+    // --- Gamepad Hitbox tool overlay ---
+    if (mActiveToolId == ToolId::Hitbox && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        static const char* kHbNames[] = {
+            "Top-Left","Top","Top-Right","Left","Right","Bot-Left","Bottom","Bot-Right"
+        };
+
+        if (mPadHbMode == 0) {
+            // Cursor mode: cyan crosshair + hover highlight.
+            int cx = (int)mPadCursorX;
+            int cy = (int)mPadCursorY;
+            constexpr int CS = 12;
+            SDL_SetRenderDrawColor(ren, 60, 190, 255, 230);
+            SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+            SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+            SDL_SetRenderDrawColor(ren, 160, 230, 255, 255);
+            SDL_FRect hbDot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+            SDL_RenderFillRect(ren, &hbDot);
+
+            if (cy >= TOOLBAR_H && cx < CanvasW()) {
+                int hovTi = HitTile(cx, cy);
+                if (hovTi >= 0) {
+                    const auto& ht  = mLevel.tiles[hovTi];
+                    auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                    float tsw = ht.w * mCamera.Zoom();
+                    float tsh = ht.h * mCamera.Zoom();
+                    SDL_SetRenderDrawColor(ren, 60, 190, 255, 35);
+                    SDL_FRect hbFill = {(float)tsx, (float)tsy, tsw, tsh};
+                    SDL_RenderFillRect(ren, &hbFill);
+                    SDL_SetRenderDrawColor(ren, 80, 200, 255, 200);
+                    SDL_FRect hbOut = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                    SDL_RenderRect(ren, &hbOut);
+                }
+            }
+            Text hbHint0("LS=move  A=select tile  SELECT=tools",
+                         {80, 200, 255, 215}, 6, H - 18, 11);
+            hbHint0.Render(ren);
+        } else {
+            // Modes 1 & 2: show a subtle tint over the focused tile.
+            auto* hbt = dynamic_cast<HitboxTool*>(mTool.get());
+            int ti = hbt ? hbt->GetTileIdx() : -1;
+            if (ti >= 0 && ti < (int)mLevel.tiles.size()) {
+                const auto& t   = mLevel.tiles[ti];
+                auto [tsx, tsy] = WorldToScreen(t.x, t.y);
+                float tsw = t.w * mCamera.Zoom();
+                float tsh = t.h * mCamera.Zoom();
+                // Mode 1: blue tint; mode 2: gold tint (editing)
+                if (mPadHbMode == 1) {
+                    SDL_SetRenderDrawColor(ren, 60, 190, 255, 20);
+                } else {
+                    SDL_SetRenderDrawColor(ren, 255, 215, 50, 25);
+                }
+                SDL_FRect hbTile = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &hbTile);
+            }
+
+            if (mPadHbMode == 1) {
+                std::string hbStr1 = std::string("Hitbox: [") + kHbNames[mPadHbHandleIdx] +
+                    "]  LS/D-pad=navigate nodes  A=edit node  B=back to cursor  SELECT=tools";
+                Text hbHint1(hbStr1, {80, 200, 255, 215}, 6, H - 18, 11);
+                hbHint1.Render(ren);
+            } else {
+                std::string hbStr2 = std::string("Editing [") + kHbNames[mPadHbHandleIdx] +
+                    "]  LS=adjust  A/B=done  SELECT=tools";
+                Text hbHint2(hbStr2, {255, 220, 60, 215}, 6, H - 18, 11);
+                hbHint2.Render(ren);
+            }
+        }
+    }
+
+    // --- Gamepad Float (AntiGrav) tool overlay ---
+    if (mActiveToolId == ToolId::AntiGrav && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Green crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 60, 210, 100, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 120, 255, 160, 255);
+        SDL_FRect agDot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &agDot);
+
+        // Tile / enemy hover highlight
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht  = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                bool hasAg = ht.antiGravity;
+                SDL_SetRenderDrawColor(ren, 60, 210, 100, hasAg ? 60 : 25);
+                SDL_FRect agFill = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &agFill);
+                SDL_SetRenderDrawColor(ren, 80, 240, 120, 220);
+                SDL_FRect agOut = {(float)(tsx-1), (float)(tsy-1), tsw+2.f, tsh+2.f};
+                SDL_RenderRect(ren, &agOut);
+                if (hasAg) {
+                    Text agLbl("float", {120, 255, 160, 240}, (int)tsx+2, (int)tsy+2, 10);
+                    agLbl.Render(ren);
+                }
+            }
+        }
+
+        Text agHint("LS=move  A=toggle anti-gravity  SELECT=tools",
+                    {80, 220, 120, 215}, 6, H - 18, 11);
+        agHint.Render(ren);
+    }
+
+    // --- Gamepad Shield tool overlay ---
+    if (mActiveToolId == ToolId::Shield && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Purple crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 190, 80, 255, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 220, 140, 255, 255);
+        SDL_FRect shDot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &shDot);
+
+        // Tile hover highlight
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht  = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                bool hasShield = ht.HasShield();
+                SDL_SetRenderDrawColor(ren, 190, 80, 255, hasShield ? 60 : 25);
+                SDL_FRect shFill = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &shFill);
+                SDL_SetRenderDrawColor(ren, 210, 100, 255, 220);
+                SDL_FRect shOut = {(float)(tsx-1), (float)(tsy-1), tsw+2.f, tsh+2.f};
+                SDL_RenderRect(ren, &shOut);
+                if (hasShield) {
+                    Text shLbl("shield", {220, 140, 255, 240}, (int)tsx+2, (int)tsy+2, 10);
+                    shLbl.Render(ren);
+                }
+            }
+        }
+
+        Text shHint("LS=move  A=toggle shield pickup  SELECT=tools",
+                    {200, 100, 255, 215}, 6, H - 18, 11);
+        shHint.Render(ren);
+    }
+
+    // --- Gamepad Select tool overlay ---
+    if (mActiveToolId == ToolId::Select && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        auto* sel = dynamic_cast<SelectTool*>(mTool.get());
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // White crosshair (distinctive from erase red / float green / shield purple)
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 180, 220, 255, 200);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 220, 240, 255, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // When nothing is selected and A is not held: show hover highlight on
+        // the tile/enemy under the cursor so the user can see what they'll grab.
+        bool hasSelection = sel && (!sel->selIndices.empty() || !sel->selEnemyIndices.empty());
+        if (!mPadSelAHeld && !hasSelection && cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                SDL_SetRenderDrawColor(ren, 100, 200, 255, 40);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 150, 220, 255, 200);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &outR);
+            }
+        }
+
+        // Hint bar — changes based on state
+        const char* selHint =
+            (mPadSelAHeld && sel && sel->selDragging)
+                ? "Release A=drop  B=delete  LS=drag"
+            : (mPadSelAHeld && sel && sel->selBoxing)
+                ? "Release A=commit selection  LS=extend box"
+            : hasSelection
+                ? "Hold A=drag  B=delete  LS=pan  SELECT=tools"
+                : "Hold A=rubber-band select  LS=pan  SELECT=tools";
+        Text selHintTxt(selHint, {180, 220, 255, 210}, 6, H - 18, 11);
+        selHintTxt.Render(ren);
+    }
+
+    // --- Gamepad Erase tool overlay ---
+    if (mActiveToolId == ToolId::Erase && mTool && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        int cx = (int)mPadCursorX;
+        int cy = (int)mPadCursorY;
+
+        // Red crosshair
+        constexpr int CS = 12;
+        SDL_SetRenderDrawColor(ren, 220, 50, 50, 230);
+        SDL_RenderLine(ren, cx - CS, cy, cx + CS, cy);
+        SDL_RenderLine(ren, cx, cy - CS, cx, cy + CS);
+        SDL_SetRenderDrawColor(ren, 255, 80, 80, 255);
+        SDL_FRect dot = {(float)(cx - 2), (float)(cy - 2), 5.f, 5.f};
+        SDL_RenderFillRect(ren, &dot);
+
+        // Tile hover highlight (red)
+        if (cy >= TOOLBAR_H && cx < CanvasW()) {
+            int hovTi = HitTile(cx, cy);
+            if (hovTi >= 0) {
+                const auto& ht = mLevel.tiles[hovTi];
+                auto [tsx, tsy] = WorldToScreen(ht.x, ht.y);
+                float tsw = ht.w * mCamera.Zoom();
+                float tsh = ht.h * mCamera.Zoom();
+                SDL_SetRenderDrawColor(ren, 220, 50, 50, 55);
+                SDL_FRect fillR = {(float)tsx, (float)tsy, tsw, tsh};
+                SDL_RenderFillRect(ren, &fillR);
+                SDL_SetRenderDrawColor(ren, 255, 80, 80, 240);
+                SDL_FRect outR = {(float)(tsx - 1), (float)(tsy - 1), tsw + 2.f, tsh + 2.f};
+                SDL_RenderRect(ren, &outR);
+            }
+        }
+
+        // Hint bar — changes text while A is held
+        const char* eraseHint = mPadEraseAHeld
+            ? "Erasing\xe2\x80\xa6 release A to stop  LS=drag erase"
+            : "LS=move  A=erase  hold A+LS=drag  SELECT=tools";
+        Text erHintLbl(eraseHint, {255, 100, 100, 215}, 6, H - 18, 11);
+        erHintLbl.Render(ren);
+    }
+
+    // --- Gamepad Pan tool overlay ---
+    if (mActiveToolId == ToolId::MoveCam && mEditorPad && !mPadToolbarActive) {
+        Text panHint("LS=pan camera  RS=zoom in/out  SELECT=tools",
+                     {180, 180, 255, 200}, 6, H - 18, 11);
+        panHint.Render(ren);
+    }
+
+    // --- Gamepad toolbar overlay (SELECT mode, any tool) ---
+    if (mEditorPad && mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+        auto visible       = VisibleToolbarButtons();
+        bool onTool        = (mPadToolbarBtnIdx < (int)visible.size());
+        bool onGrpPills    = (mPadToolbarBtnIdx == (int)visible.size());
+        bool onPalCollapse = (mPadToolbarBtnIdx == (int)visible.size() + 1);
+
+        // ----- Tool button highlight (gold double-outline) -----
+        if (onTool && mPadToolbarBtnIdx >= 0 &&
+            mPadToolbarBtnIdx < (int)visible.size()) {
+            SDL_Rect r = mToolbar.Rect(visible[mPadToolbarBtnIdx]);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 255);
+            SDL_FRect ro1 = {(float)(r.x - 2), (float)(r.y - 2),
+                             (float)(r.w + 4),  (float)(r.h + 4)};
+            SDL_RenderRect(ren, &ro1);
+            SDL_SetRenderDrawColor(ren, 255, 180, 0, 140);
+            SDL_FRect ro2 = {(float)(r.x - 4), (float)(r.y - 4),
+                             (float)(r.w + 8),  (float)(r.h + 8)};
+            SDL_RenderRect(ren, &ro2);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 30);
+            SDL_FRect fill = {(float)r.x, (float)r.y, (float)r.w, (float)r.h};
+            SDL_RenderFillRect(ren, &fill);
+        }
+
+        // ----- Group-collapse pills highlight -----
+        // Highlight the focused group's existing pill with the gold outline.
+        if (onGrpPills) {
+            auto grp = static_cast<TBGrp>(mPadToolbarGrpIdx);
+            SDL_Rect pr = mToolbar.PillRect(grp);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 255);
+            SDL_FRect pr1 = {(float)(pr.x - 2), (float)(pr.y - 2),
+                             (float)(pr.w + 4),  (float)(pr.h + 4)};
+            SDL_RenderRect(ren, &pr1);
+            SDL_SetRenderDrawColor(ren, 255, 180, 0, 140);
+            SDL_FRect pr2 = {(float)(pr.x - 4), (float)(pr.y - 4),
+                             (float)(pr.w + 8),  (float)(pr.h + 8)};
+            SDL_RenderRect(ren, &pr2);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 40);
+            SDL_FRect prFill = {(float)pr.x, (float)pr.y, (float)pr.w, (float)pr.h};
+            SDL_RenderFillRect(ren, &prFill);
+
+            // Show the toggle label to the right of the pill.
+            bool collapsed = mToolbar.IsCollapsed(grp);
+            const char* pillLbl = collapsed ? "Show" : "Hide";
+            Text pillText(pillLbl, {255, 240, 100, 230}, pr.x + pr.w + 5, pr.y + 3, 10);
+            pillText.Render(ren);
+        }
+
+        // ----- Palette collapse tab highlight -----
+        if (onPalCollapse) {
+            SDL_Rect colR = {cw, TOOLBAR_H, PALETTE_TAB_W, 28};
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 255);
+            SDL_FRect co1 = {(float)(colR.x - 2), (float)(colR.y - 2),
+                             (float)(colR.w + 4),  (float)(colR.h + 4)};
+            SDL_RenderRect(ren, &co1);
+            SDL_SetRenderDrawColor(ren, 255, 180, 0, 140);
+            SDL_FRect co2 = {(float)(colR.x - 4), (float)(colR.y - 4),
+                             (float)(colR.w + 8),  (float)(colR.h + 8)};
+            SDL_RenderRect(ren, &co2);
+            SDL_SetRenderDrawColor(ren, 255, 220, 50, 50);
+            SDL_FRect coFill = {(float)colR.x, (float)colR.y,
+                                (float)colR.w,  (float)colR.h};
+            SDL_RenderFillRect(ren, &coFill);
+            // Label always to the LEFT of the tab (fixes off-screen bug when collapsed).
+            const char* colLbl = mPalette.IsCollapsed() ? "Show palette" : "Hide palette";
+            constexpr int LBL_W = 88;
+            int labelX = std::max(4, colR.x - LBL_W - 6);
+            Text colText(colLbl, {255, 240, 100, 230}, labelX, colR.y + 7, 10);
+            colText.Render(ren);
+        }
+
+        // ----- Hint bar at bottom — changes based on focused row -----
+        const char* tbHintStr =
+            onPalCollapse ? "A=toggle palette  D-pad \xe2\x86\x91=groups  B=close"
+          : onGrpPills    ? "A=toggle group  \xe2\x86\x90\xe2\x86\x92=Place/Mod/Actions  D-pad \xe2\x86\x91=tools  D-pad \xe2\x86\x93=palette  B=close"
+                          : "SELECT/B=close  LS/\xe2\x86\x90\xe2\x86\x92=navigate  D-pad \xe2\x86\x93=groups  A=activate";
+        Text tbHint(tbHintStr, {255, 220, 80, 220}, 6, H - 18, 11);
+        tbHint.Render(ren);
+    }
+
+    // --- Gamepad overlay ---
+    if (mActiveToolId == ToolId::Tile && mEditorPad && !mPadToolbarActive) {
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+
+        if (mPadPaletteActive) {
+            // ---- PALETTE MODE: gold outline around focused cell ----
+            constexpr int PAD = 4, LBL_H = 14;
+            const int cellW   = (PALETTE_W - PAD * (PAL_COLS + 1)) / PAL_COLS;
+            const int cellH   = cellW + LBL_H;
+            const int itemH   = cellH + PAD;
+            const int palY    = TOOLBAR_H + TAB_H + 44;
+            const int startI  = mPalette.TileScroll() * PAL_COLS;
+            const int visIdx  = mPadPaletteIdx - startI;
+
+            if (visIdx >= 0) {
+                int col = visIdx % PAL_COLS;
+                int row = visIdx / PAL_COLS;
+                int ix  = cw + PAD + col * (cellW + PAD);
+                int iy  = palY + PAD + row * itemH;
+
+                SDL_SetRenderDrawColor(ren, 255, 220, 50, 255);
+                SDL_FRect r1 = {(float)(ix-2), (float)(iy-2),
+                                (float)(cellW+4), (float)(cellH+4)};
+                SDL_RenderRect(ren, &r1);
+                SDL_SetRenderDrawColor(ren, 255, 180, 0, 140);
+                SDL_FRect r2 = {(float)(ix-4), (float)(iy-4),
+                                (float)(cellW+8), (float)(cellH+8)};
+                SDL_RenderRect(ren, &r2);
+            }
+
+            Text hintTxt("LS=Navigate  A=Select tile  LB/RB=Rotate",
+                         {255, 220, 80, 200}, 6, H - 18, 11);
+            hintTxt.Render(ren);
+
+        } else {
+            // ---- PLACEMENT MODE: hint only (ghost drawn in canvas renderer) ----
+            std::string hint = mPadAHeld
+                ? "Placing...  release A to stop"
+                : "LS=Move tile  A=Place  B or D-pad=Pick new tile  LB/RB=Rotate";
+            SDL_Color hc = mPadAHeld ? SDL_Color{80,255,100,220}
+                                     : SDL_Color{180,200,255,200};
+            Text hintTxt(hint, hc, 6, H - 18, 11);
+            hintTxt.Render(ren);
+        }
+    }
+
     window.Update();
 }
 
@@ -1849,6 +3797,230 @@ std::unique_ptr<Scene> LevelEditorScene::NextScene() {
     }
     return nullptr;
 }
+// --- ApplyPowerUpPickerEntry ---
+// Select entry idx from the power-up registry (reg.size() = "None").
+// Mirrors EditorPopups::HandlePowerUpPickerEvent but driven by gamepad index.
+void LevelEditorScene::ApplyPowerUpPickerEntry(int entryIdx) {
+    if (!mPopups.powerUpOpen || mPopups.powerUpTileIdx < 0 ||
+        mPopups.powerUpTileIdx >= (int)mLevel.tiles.size())
+        return;
+
+    const auto& reg = GetPowerUpRegistry();
+    auto&       t   = mLevel.tiles[mPopups.powerUpTileIdx];
+    int         ti  = mPopups.powerUpTileIdx;
+
+    if (entryIdx < (int)reg.size()) {
+        if (reg[entryIdx].id == "shooter") {
+            if (t.HasShooter()) {
+                t.shooter.reset();
+                SetStatus("Tile " + std::to_string(ti) + " -> shooter removed");
+            } else {
+                t.shooter = ShooterData{};
+                SetStatus("Tile " + std::to_string(ti) +
+                          " -> shooter  (RClick=cycle side  RS=fire rate)");
+            }
+        } else {
+            t.powerUp = PowerUpData{reg[entryIdx].id, reg[entryIdx].defaultDuration};
+            SetStatus("Tile " + std::to_string(ti) +
+                      " -> PowerUp: " + reg[entryIdx].label);
+        }
+    } else {
+        // "None" — remove both
+        t.powerUp.reset();
+        t.shooter.reset();
+        SetStatus("Tile " + std::to_string(ti) + " -> PowerUp/Shooter removed");
+    }
+
+    // After closing the popup, check whether a teleport entrance was just set
+    // and enter linking mode (identical logic to the mouse path in HandleEvent).
+    if (t.HasPowerUp() && t.powerUp->type == "teleport" && !t.powerUp->teleportDest) {
+        int grp = mTeleportNextGroupId++;
+        t.powerUp->teleportGroup = grp;
+        mTeleportLinking   = true;
+        mTeleportLinkGroup = grp;
+        SetStatus("Teleport entrance (group " + std::to_string(grp) +
+                  "). A on next tile to set DESTINATION.");
+    }
+
+    mPopups.ClosePowerUpPicker();
+}
+
+// --- ActivateToolbarButton ---
+// Single dispatch point shared by mouse-click handler and gamepad SELECT flow.
+void LevelEditorScene::ActivateToolbarButton(TBBtn btn) {
+    switch (btn) {
+        case TBBtn::Goal:
+            SwitchTool(ToolId::Goal);
+            lblTool->CreateSurface("Goal");
+            break;
+        case TBBtn::Enemy:
+            SwitchTool(ToolId::Enemy);
+            lblTool->CreateSurface("Enemy");
+            break;
+        case TBBtn::Tile:
+            SwitchTool(ToolId::Tile);
+            lblTool->CreateSurface("Tile");
+            mPalette.SetActiveTab(EditorPalette::Tab::Tiles);
+            break;
+        case TBBtn::Erase:
+            SwitchTool(ToolId::Erase);
+            lblTool->CreateSurface("Erase");
+            break;
+        case TBBtn::PlayerStart:
+            SwitchTool(ToolId::PlayerStart);
+            lblTool->CreateSurface("Player");
+            break;
+        case TBBtn::Select:
+            SwitchTool(ToolId::Select);
+            lblTool->CreateSurface("Select");
+            break;
+        case TBBtn::MoveCam:
+            SwitchTool(ToolId::MoveCam);
+            lblTool->CreateSurface("Pan");
+            break;
+        case TBBtn::Prop:
+            SwitchTool(ToolId::Prop);
+            lblTool->CreateSurface("Prop");
+            break;
+        case TBBtn::Ladder:
+            SwitchTool(ToolId::Ladder);
+            lblTool->CreateSurface("Ladder");
+            break;
+        case TBBtn::Action:
+            SwitchTool(ToolId::Action);
+            lblTool->CreateSurface("Action");
+            CloseAnimPicker();
+            break;
+        case TBBtn::Slope:
+            SwitchTool(ToolId::Slope);
+            lblTool->CreateSurface("Slope");
+            break;
+        case TBBtn::Resize:
+            SwitchTool(ToolId::Resize);
+            lblTool->CreateSurface("Resize");
+            break;
+        case TBBtn::Hitbox:
+            SwitchTool(ToolId::Hitbox);
+            lblTool->CreateSurface("Hitbox");
+            break;
+        case TBBtn::Hazard:
+            SwitchTool(ToolId::Hazard);
+            lblTool->CreateSurface("Hazard");
+            break;
+        case TBBtn::AntiGrav:
+            SwitchTool(ToolId::AntiGrav);
+            lblTool->CreateSurface("Float");
+            break;
+        case TBBtn::PowerUp:
+            SwitchTool(ToolId::PowerUp);
+            mPopups.powerUpOpen     = false;
+            mPopups.powerUpTileIdx  = -1;
+            mPopups.powerUpRegistry = &GetPowerUpRegistry();
+            lblTool->CreateSurface("PowerUp");
+            SetStatus("PowerUp: click tile to assign  |  RClick=cycle turret side  |  Scroll=fire rate");
+            break;
+        case TBBtn::Shield:
+            SwitchTool(ToolId::Shield);
+            lblTool->CreateSurface("Shield");
+            SetStatus("Shield: LClick tile to toggle shield pickup (slash to collect)");
+            break;
+        case TBBtn::MovingPlat: {
+            SwitchTool(ToolId::MovingPlat);
+            lblTool->CreateSurface("MovingPlat");
+            int maxUsed = 0;
+            for (const auto& ts : mLevel.tiles)
+                if (ts.HasMoving() && ts.moving->groupId > maxUsed)
+                    maxUsed = ts.moving->groupId;
+            mMovPlatNextGroupId    = maxUsed + 1;
+            mMovPlatCurGroupId     = mMovPlatNextGroupId++;
+            mPopups.movPlatGroupId = mMovPlatCurGroupId;
+            mMovPlatIndices.clear();
+            for (int i = 0; i < (int)mLevel.tiles.size(); i++) {
+                if (!mLevel.tiles[i].HasMoving())
+                    continue;
+                const auto& mpi        = *mLevel.tiles[i].moving;
+                mPopups.movPlatHoriz   = mpi.horiz;
+                mMovPlatRange          = mpi.range;
+                mPopups.movPlatSpeed   = mpi.speed;
+                mPopups.movPlatLoop    = mpi.loop;
+                mPopups.movPlatTrigger = mpi.trigger;
+                break;
+            }
+            mPopups.movPlatOpen       = true;
+            mPopups.movPlatSpeedInput = false;
+            mPopups.movPlatSpeedStr   = std::to_string((int)mPopups.movPlatSpeed);
+            SetStatus("MovingPlat: click tiles to add. RClick=axis/range. New group ID=" +
+                      std::to_string(mMovPlatCurGroupId));
+            break;
+        }
+        case TBBtn::Save: {
+            fs::create_directories("levels");
+            std::string path = "levels/" + mLevelName + ".json";
+            mLevel.name      = mLevelName;
+            SaveLevel(mLevel, path);
+            SetStatus("Saved: " + path);
+            break;
+        }
+        case TBBtn::Load: {
+            std::string path = "levels/" + mLevelName + ".json";
+            if (LoadLevel(path, mLevel)) {
+                SetStatus("Loaded: " + path);
+                if (!mLevel.background.empty())
+                    background = std::make_unique<Image>(
+                        mLevel.background, FitModeFromString(mLevel.bgFitMode));
+                RebuildParallaxImages();
+                LoadBgPalette();
+                mCamera.SetPosition(0.0f, 0.0f);
+            } else {
+                SetStatus("No file: " + path);
+            }
+            break;
+        }
+        case TBBtn::Clear:
+            mLevel.enemies.clear();
+            mLevel.tiles.clear();
+            SetStatus("Cleared");
+            break;
+        case TBBtn::Play: {
+            fs::create_directories("levels");
+            std::string path = "levels/" + mLevelName + ".json";
+            mLevel.name      = mLevelName;
+            SaveLevel(mLevel, path);
+            mLaunchGame = true;
+            break;
+        }
+        case TBBtn::Back: {
+            fs::create_directories("levels");
+            std::string path = "levels/" + mLevelName + ".json";
+            mLevel.name      = mLevelName;
+            SaveLevel(mLevel, path);
+            mGoBack = true;
+            break;
+        }
+        case TBBtn::Gravity: {
+            if (mLevel.gravityMode == GravityMode::Platformer)
+                mLevel.gravityMode = GravityMode::WallRun;
+            else if (mLevel.gravityMode == GravityMode::WallRun)
+                mLevel.gravityMode = GravityMode::OpenWorld;
+            else
+                mLevel.gravityMode = GravityMode::Platformer;
+            std::string gLbl =
+                (mLevel.gravityMode == GravityMode::WallRun)     ? "Wall Run"
+                : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Open World"
+                                                                 : "Platform";
+            std::string gStatus =
+                (mLevel.gravityMode == GravityMode::WallRun)     ? "Mode: Wall Run"
+                : (mLevel.gravityMode == GravityMode::OpenWorld) ? "Mode: Open World (top-down)"
+                                                                 : "Mode: Platformer";
+            mToolbar.SetGravityLabel(gLbl);
+            SetStatus(gStatus);
+            break;
+        }
+        default:
+            break;
+    }
+}
+
 // --- Tile tool accessors ---
 int LevelEditorScene::GetTileW() const {
     if (mActiveToolId == ToolId::Tile && mTool)

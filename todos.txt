@@ -3,18 +3,18 @@ TODO:
 Technical Foundation
 ----------------------
 Asset pipeline (raw path loading → packed/indexed assets)
-Audio system (SDL_mixer or miniaudio — sound effects + music)
-Level editor fully migrated to GPU rendering
+Audio system (SDL_mixer or miniaudio — sound effects + music) ✅
+Level editor fully migrated to GPU rendering ✅
 Unit tests for physics/collision systems
-Windows native build working
+Windows native build working  ✅
 
 Game Systems
 -----------------------
 Sequential level system (level playlist → auto-advance on complete)
 More power-ups
 More game goals / win conditions
-Enemy creator (like player creator but for enemies — sprite slots, hitbox, speed, behavior)
-Save/load system (player progress, level completion state)
+Enemy creator (like player creator but for enemies — sprite slots, hitbox, speed, behavior) ✅
+Save/load system (player progress, level completion state) ✅
 A proper main menu with settings (resolution, volume, keybinds)
 Pause menu polish (already started, but flesh it out)
 Death/respawn animations and screen transitions between levels
@@ -22,9 +22,9 @@ A scoring/leaderboard system per level
 
 Engine Polish
 ------------------------
-Camera shake system (hit feedback, explosions)
-Particle system (coins, death, landing dust)
-Tiled background parallax layers (you have scrolling bg, extend it to multi-layer)
+Camera shake system (hit feedback, explosions) ✅
+Particle system (coins, death, landing dust) (BLOOD ✅)
+Tiled background parallax layers (you have scrolling bg, extend it to multi-layer) ✅ 
 Object pooling for frequently spawned entities (coins, particles)
 
 Editor Polish
@@ -32,7 +32,7 @@ Editor Polish
 Undo/redo stack (currently only one-step undo)
 Copy/paste tiles
 Level thumbnail preview in the browser
-Grid snapping options (half-grid, free placement) mb
+Grid snapping options (half-grid, free placement)
 animated tiles cpu prescaling to  full gpu native sizing without gaining size
 
 
@@ -41,6 +41,7 @@ Shipping / Business
 A shipped demo level or short game to prove the engine out
 README and basic documentation for the engine
 A trailer or GIF showcasing the editor + gameplay
+STEAM READY With Assets for BADGES and Achievements with Trading Cards for $$
 Itch.io page
 
 

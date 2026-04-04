@@ -102,7 +102,7 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
         }
 
         if (mps.loop) {
-            // Ping-pong: travel to originX+range, reverse, repeat.
+            // Ping-pong: travel to origin+range, reverse, repeat.
             mps.phase += mps.speed * mps.loopDir * dt;
             if (mps.phase >= mps.range) {
                 mps.phase   = mps.range;
@@ -111,10 +111,17 @@ inline void MovingPlatformTick(entt::registry& reg, float dt) {
                 mps.phase   = 0.0f;
                 mps.loopDir = 1;
             }
-            float newX = mps.originX + mps.phase;
-            mps.vx = newX - t.x;
-            mps.vy = 0.0f;
-            t.x    = newX;
+            if (mps.horiz) {
+                float newX = mps.originX + mps.phase;
+                mps.vx = newX - t.x;
+                mps.vy = 0.0f;
+                t.x    = newX;
+            } else {
+                float newY = mps.originY + mps.phase;
+                mps.vx = 0.0f;
+                mps.vy = newY - t.y;
+                t.y    = newY;
+            }
         } else {
             float omega  = (mps.range > 0.0f) ? (mps.speed / mps.range) : 1.0f;
             float offset = mps.range * std::sin(mps.phase);

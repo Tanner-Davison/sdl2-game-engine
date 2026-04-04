@@ -56,6 +56,11 @@ class EditorCanvasRenderer {
 
     [[nodiscard]] SDL_Rect MovPlatPopupRect() const { return mMovPlatPopupRect; }
 
+    // When >= 0, RenderGhost uses these instead of SDL_GetMouseState.
+    // Set by LevelEditorScene before calling Render() when a gamepad cursor is active.
+    float padCursorOverrideX = -1.f;
+    float padCursorOverrideY = -1.f;
+
   private:
     static void DrawRect(SDL_Surface* s, SDL_Rect r, SDL_Color c);
     static void DrawRectAlpha(SDL_Surface* s, SDL_Rect r, SDL_Color c);

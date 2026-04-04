@@ -142,6 +142,13 @@ class TitleScene : public Scene {
     bool HandleEvent(SDL_Event& e) override {
         if (e.type == SDL_EVENT_QUIT) return false;
 
+        // Hot-plug: open the gamepad as soon as it's detected so its button
+        // and axis events start arriving immediately — no restart needed.
+        if (e.type == SDL_EVENT_GAMEPAD_ADDED) {
+            SDL_OpenGamepad(e.gdevice.which);
+            return true;
+        }
+
         if (mNamingActive) {
             if (e.type == SDL_EVENT_TEXT_INPUT) {
                 for (char c : std::string(e.text.text))
@@ -897,6 +904,41 @@ class TitleScene : public Scene {
                 Text esub("Click + New Level to create one", {80, 90, 120, 255}, esx, esy, 12);
                 esub.Render(ren);
             }
+        }
+
+        // --- Controller count indicator (bottom-left) ---
+        {
+            int padCount = 0;
+            SDL_JoystickID* padIds = SDL_GetGamepads(&padCount);
+            if (padIds) SDL_free(padIds);
+            padCount = std::max(padCount, 0);
+
+            int W = window.GetWidth(), H = window.GetHeight();
+
+            // Dot colour: green if at least one pad connected, dim grey otherwise
+            SDL_Color dotCol = (padCount > 0)
+                ? SDL_Color{80, 220, 100, 255}
+                : SDL_Color{90, 90, 100, 180};
+
+            // Build label: "⬤ 0 controllers" / "⬤ 1 controller" / "⬤ 2 controllers"
+            std::string padLabel = std::to_string(padCount)
+                + (padCount == 1 ? " controller" : " controllers")
+                + " connected";
+
+            constexpr int DOT_SIZE = 8;
+            constexpr int MARGIN   = 10;
+            constexpr int FONT_SZ  = 12;
+            int textY = H - MARGIN - FONT_SZ - 2;
+            int dotY  = textY + (FONT_SZ - DOT_SIZE) / 2;
+
+            // Dot
+            SDL_SetRenderDrawColor(ren, dotCol.r, dotCol.g, dotCol.b, dotCol.a);
+            SDL_FRect dotR = {(float)(MARGIN), (float)dotY, (float)DOT_SIZE, (float)DOT_SIZE};
+            SDL_RenderFillRect(ren, &dotR);
+
+            // Label
+            Text padTxt(padLabel, {160, 170, 190, 220}, MARGIN + DOT_SIZE + 5, textY, FONT_SZ);
+            padTxt.Render(ren);
         }
 
         window.Update();

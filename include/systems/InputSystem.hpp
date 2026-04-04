@@ -61,7 +61,9 @@ inline void GamepadPollSystem(entt::registry& reg,
         climb.wPressed = (idx == 0) ? (kbW || padUp)   : padUp;
         climb.sPressed = (idx == 0) ? (kbS || padDown)  : padDown;
 
-        if (g.active)
+        // Also allow jump input when atTop: g.active is false there but
+        // LadderSystem reads g.jumpHeld to let the player jump off the ladder.
+        if (g.active || climb.atTop)
             g.jumpHeld = g.jumpHeld || btnJump;
 
         g.isCrouching = g.isCrouching || btnCrouch;

@@ -131,9 +131,17 @@ inline void PlayerStateSystem(entt::registry& reg) {
             fps     = resolveFps(set.duckFps, 12.0f);
             id      = AnimationID::DUCK;
         } else if (climb && (climb->climbing || climb->atTop)) {
-            frames  = &set.idle;
-            fps     = resolveFps(set.idleFps, 12.0f);
-            id      = AnimationID::IDLE;
+            // At the ladder top: show walk animation (and flip) when moving sideways.
+            // While on the rungs themselves, always idle.
+            if (climb->atTop && canWalk && std::abs(v.dx) > 1.0f) {
+                frames  = &set.walk;
+                fps     = resolveFps(set.walkFps, 24.0f);
+                id      = AnimationID::WALK;
+            } else {
+                frames  = &set.idle;
+                fps     = resolveFps(set.idleFps, 12.0f);
+                id      = AnimationID::IDLE;
+            }
         } else if (canHurt && onHazard
                    && !(reg.try_get<AttackState>(entity) && reg.get<AttackState>(entity).isAttacking)) {
             frames  = &set.hurt;
@@ -169,9 +177,13 @@ inline void PlayerStateSystem(entt::registry& reg) {
             }
         } else if (!openWorld && g.active && !g.isGrounded) {
             bool rising = g.velocity < 0.0f;
+            // Once we've committed to the fall animation, stay there until landing.
+            // Without this guard the JUMP anim finishing while still rising causes a
+            // JUMP↔FRONT oscillation every frame (visible as a flicker at the apex).
+            bool alreadyFalling = (anim.currentAnim == AnimationID::FRONT);
             bool jumpAnimDone = (anim.currentAnim == AnimationID::JUMP
                                  && anim.currentFrame >= anim.totalFrames - 1);
-            bool wantFall = !rising || jumpAnimDone;
+            bool wantFall = !rising || jumpAnimDone || alreadyFalling;
 
             if (wantFall && !set.front.empty()) {
                 frames  = &set.front;

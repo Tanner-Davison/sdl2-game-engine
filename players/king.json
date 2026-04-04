@@ -57,7 +57,7 @@
             "fps": 10.0,
             "hitbox": {
                 "h": 103,
-                "w": 62,
+                "w": 63,
                 "x": 60,
                 "y": 41
             },
@@ -76,7 +76,7 @@
             "folderPath": "game_assets/char_sprites/king/Fall",
             "fps": 10.0,
             "hitbox": {
-                "h": 103,
+                "h": 106,
                 "w": 63,
                 "x": 60,
                 "y": 40

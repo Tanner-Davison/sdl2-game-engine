@@ -103,6 +103,16 @@ class LevelEditorScene : public Scene {
         }
         // For complex inline tools (Action, PowerUp, MovingPlat), mTool is null.
         // The orchestrator sets lblTool manually in those cases.
+
+        // Reset gamepad repeat state when switching tools.
+        mPadNavTimer     = 0.f;
+        mPadNavRepeating = false;
+        // Reset hitbox mode so the new tool starts in cursor mode.
+        mPadHbMode       = 0;
+        mPadHbNavTimer   = 0.f;
+        mPadHbNavRepeat  = false;
+        // Reset select A-held state.
+        mPadSelAHeld     = false;
     }
 
     static TBBtn ToolIdToBtn(ToolId id) {
@@ -303,4 +313,95 @@ class LevelEditorScene : public Scene {
     bool mTeleportLinking      = false;
     int  mTeleportLinkGroup    = 0;
     int  mTeleportNextGroupId  = 1;
+
+    // Activate a toolbar button by id — shared by mouse click and gamepad A press.
+    void ActivateToolbarButton(TBBtn btn);
+
+    // Apply power-up picker selection by entry index (for gamepad A press).
+    // entryIdx maps to GetPowerUpRegistry(); reg.size() = "None" option.
+    void ApplyPowerUpPickerEntry(int entryIdx);
+
+    // Returns the ordered list of toolbar buttons that are currently on-screen
+    // (i.e. their group is not collapsed).
+    [[nodiscard]] std::vector<TBBtn> VisibleToolbarButtons() const {
+        std::vector<TBBtn> out;
+        for (const auto& meta : EditorToolbar::AllButtons()) {
+            if (mToolbar.Rect(meta.id).x >= 0)
+                out.push_back(meta.id);
+        }
+        return out;
+    }
+
+    // --- Gamepad two-mode state machine (tile tool) ---
+    //
+    //  PALETTE MODE  (mPadPaletteActive == true)
+    //    Left stick  → navigate palette tiles (cardinal, key-repeat)
+    //    A           → confirm tile, enter PLACEMENT MODE
+    //
+    //  PLACEMENT MODE (mPadPaletteActive == false)
+    //    Left stick  → move virtual cursor / tile ghost around canvas
+    //    Right stick → pan camera
+    //    A           → place tile (hold = drag-fill)
+    //    B or D-pad  → return to PALETTE MODE
+    //
+    SDL_Gamepad* mEditorPad        = nullptr;
+    bool         mPadPaletteActive = true;  // start in palette mode
+    int          mPadPaletteIdx    = 0;
+
+    // Key-repeat state for palette navigation.
+    float mPadNavTimer      = 0.f;
+    bool  mPadNavRepeating  = false;
+
+    // Virtual cursor for placement mode (pinned to canvas centre).
+    float mPadCursorX    = 400.f;
+    float mPadCursorY    = 300.f;
+    bool  mPadAHeld      = false;
+    float mPadSizeAccum  = 0.f;   // right-stick size accumulator
+
+    // --- Gamepad toolbar focus (SELECT button) ---
+    // Sentinel layout for mPadToolbarBtnIdx:
+    //   0 … visible.size()-1  → tool buttons
+    //   visible.size()        → group-collapse pills row  (LEFT/RIGHT picks Place/Mod/Actions)
+    //   visible.size() + 1   → palette collapse tab
+    bool  mPadToolbarActive      = false;
+    int   mPadToolbarBtnIdx      = 0;
+    int   mPadToolbarGrpIdx      = 0;   // 0=Place 1=Modifier 2=Actions — focused pill
+    float mPadToolbarNavTimer    = 0.f;
+    bool  mPadToolbarNavRepeat   = false;
+
+    // --- Gamepad PowerUp tool state ---
+    // Cursor position is shared via mPadCursorX / mPadCursorY (only one
+    // tool active at a time, so these are safe to reuse).
+    float mPadPuRateAccum       = 0.f;   // right-stick fire-rate accumulator
+    int   mPadPuPickerIdx       = 0;     // highlighted row in the picker popup
+    float mPadPuPickerNavTimer  = 0.f;
+    bool  mPadPuPickerNavRepeat = false;
+
+    // --- Gamepad Prop tool state ---
+    bool  mPadPropFocusFront = true;  // which popup button is highlighted (Front vs Back)
+    float mPadPropNavTimer   = 0.f;   // debounce for stick-driven Front/Back toggle
+
+    // --- Gamepad Select tool state ---
+    bool mPadSelAHeld = false;        // true while A is held (rubber-band OR drag-move)
+
+    // --- Gamepad Erase tool state ---
+    bool mPadEraseAHeld = false;      // true while A is held for continuous drag-erase
+
+    // --- Gamepad Action tool state ---
+    int   mPadActionPickerIdx    = 0;    // highlighted entry in the anim picker
+    float mPadActionPickerTimer  = 0.f;  // key-repeat timer for picker D-pad nav
+    bool  mPadActionPickerRepeat = false;
+    float mPadActionHitsAccum    = 0.f;  // accumulator for right-stick hit count adjust
+
+    // --- Gamepad Slope tool state ---
+    float mPadSlopeHeightAccum   = 0.f;  // RS Y accumulator for heightFrac steps
+
+    // --- Gamepad Hitbox tool state ---
+    // Three modes: 0=cursor  1=node-select  2=node-edit
+    int   mPadHbMode       = 0;
+    int   mPadHbHandleIdx  = 0;    // 0-7 linear index (TopLeft…BotRight)
+    float mPadHbNavTimer   = 0.f;
+    bool  mPadHbNavRepeat  = false;
+    float mPadHbEditAccumX = 0.f;
+    float mPadHbEditAccumY = 0.f;
 };
