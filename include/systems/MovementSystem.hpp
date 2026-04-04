@@ -253,6 +253,18 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         if (climbState && climbState->steppingOff && !reg.all_of<FloatTag>(ent)) {
             float enemyCX  = t.x + c.w * 0.5f;
             auto [playerCX, playerCY_step] = nearestPlayerCenter(enemyCX, t.y + c.h * 0.5f);
+
+            // Cancel step-off if player has left aggro range.
+            {
+                float sdx = playerCX - enemyCX;
+                float sdy = playerCY_step - (t.y + c.h * 0.5f);
+                if (std::sqrt(sdx * sdx + sdy * sdy) >= 300.0f) {
+                    climbState->steppingOff = false;
+                    // Fall through to normal movement below.
+                    goto skipClimbPaths;
+                }
+            }
+
             float stepDir  = (playerCX > enemyCX) ? 1.0f : -1.0f;
             t.x += stepDir * v.speed * dt;
 
@@ -275,8 +287,23 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 r.flipH = stepDir > 0.0f;
             return;
         }
+        skipClimbPaths:;
 
         if (climbState && climbState->climbing && !reg.all_of<FloatTag>(ent)) {
+            // Cancel an in-progress climb if the player leaves aggro range.
+            {
+                float ecx = t.x + c.w * 0.5f;
+                float ecy = t.y + c.h * 0.5f;
+                auto [abortCX, abortCY] = nearestPlayerCenter(ecx, ecy);
+                float adx = abortCX - ecx;
+                float ady = abortCY - ecy;
+                if (std::sqrt(adx * adx + ady * ady) >= 300.0f) {
+                    climbState->climbing    = false;
+                    climbState->steppingOff = false;
+                    // Let gravity take over naturally; fall through to movement below.
+                    goto skipActiveClimb;
+                }
+            }
             constexpr float ENEMY_CLIMB_SPEED = 120.0f;
             v.dx = 0.0f;
             t.x = climbState->ladderCX - c.w * 0.5f;
@@ -381,10 +408,42 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             }
             return;
         }
+        skipActiveClimb:;
 
         auto* react = reg.try_get<EnemyReaction>(ent);
         if (react && react->turnCooldown > 0.0f)
             react->turnCooldown -= dt;
+
+        // Probe 2 px ahead (in direction `dir`) for a solid wall tile.
+        // Used to detect wall-pressing so the enemy switches to patrol mode.
+        auto wallAhead = [&](float dir) -> bool {
+            float probeX = (dir > 0.0f) ? (t.x + c.w) : (t.x - 2.0f);
+            float probeY = t.y + 4.0f;
+            float probeW = 2.0f;
+            float probeH = (float)c.h - 8.0f;
+            if (probeH <= 0.0f) probeH = 1.0f;
+            bool hit = false;
+            if (tileGrid) {
+                tileGrid->Query(probeX, probeY, probeW, probeH, [&](entt::entity te) {
+                    if (hit) return;
+                    if (!reg.valid(te) || !reg.all_of<TileTag>(te)) return;
+                    if (reg.all_of<PropTag>(te) || reg.all_of<HazardTag>(te)) return;
+                    const auto& tt = reg.get<Transform>(te);
+                    const auto& tc = reg.get<Collider>(te);
+                    if (probeX + probeW > tt.x && probeX < tt.x + tc.w &&
+                        probeY + probeH > tt.y && probeY < tt.y + tc.h)
+                        hit = true;
+                });
+            } else {
+                tileView.each([&](const Transform& tt, const Collider& tc) {
+                    if (hit) return;
+                    if (probeX + probeW > tt.x && probeX < tt.x + tc.w &&
+                        probeY + probeH > tt.y && probeY < tt.y + tc.h)
+                        hit = true;
+                });
+            }
+            return hit;
+        };
 
         if (!stunned) {
             constexpr float AGGRO_RANGE = 300.0f;
@@ -392,21 +451,50 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             auto [playerCX, playerCY_aggro] = nearestPlayerCenter(enemyCX, t.y + c.h * 0.5f);
             float dist     = std::abs(enemyCX - playerCX);
             if (dist < AGGRO_RANGE && dist > 4.0f) {
-                float desiredDir = (playerCX > enemyCX) ? 1.0f : -1.0f;
-
-                bool wantsToTurn = react
-                    && react->lastDirSign != 0.0f
-                    && desiredDir != react->lastDirSign;
-
-                if (wantsToTurn && react->turnCooldown > 0.0f) {
-                    v.dx *= 0.88f;
-                    if (std::abs(v.dx) < 1.0f) v.dx = 0.0f;
+                if (react && react->patrolTimer > 0.0f) {
+                    // Wall-stuck patrol mode: bounce back and forth instead of
+                    // pressing into the wall. Keep the current patrol direction
+                    // at full speed; don't override with the chase direction.
+                    react->patrolTimer -= dt;
+                    v.dx = react->lastDirSign * v.speed;
                 } else {
-                    if (wantsToTurn && react)
-                        react->turnCooldown = 0.3f;
-                    v.dx = desiredDir * v.speed;
-                    if (react) react->lastDirSign = desiredDir;
+                    float desiredDir = (playerCX > enemyCX) ? 1.0f : -1.0f;
+
+                    bool wantsToTurn = react
+                        && react->lastDirSign != 0.0f
+                        && desiredDir != react->lastDirSign;
+
+                    if (wantsToTurn && react->turnCooldown > 0.0f) {
+                        v.dx *= 0.88f;
+                        if (std::abs(v.dx) < 1.0f) v.dx = 0.0f;
+                    } else {
+                        if (wantsToTurn && react)
+                            react->turnCooldown = 0.3f;
+                        v.dx = desiredDir * v.speed;
+                        if (react) react->lastDirSign = desiredDir;
+                    }
                 }
+
+                // Wall-press detection: if the enemy is moving into a wall,
+                // accumulate the stuck timer. Once it exceeds the threshold,
+                // flip direction and enter patrol mode so the enemy bounces
+                // back and forth rather than grinding against the wall.
+                if (react && std::abs(v.dx) >= 1.0f) {
+                    if (wallAhead(v.dx)) {
+                        react->wallStuckTimer += dt;
+                        if (react->wallStuckTimer >= 0.4f) {
+                            v.dx                  = -v.dx;
+                            react->lastDirSign    = (v.dx > 0.0f) ? 1.0f : -1.0f;
+                            react->patrolTimer    = 2.5f;
+                            react->wallStuckTimer = 0.0f;
+                        }
+                    } else {
+                        react->wallStuckTimer = 0.0f;
+                    }
+                }
+            } else {
+                // Out of aggro range: clear stuck timer so it doesn't carry over.
+                if (react) react->wallStuckTimer = 0.0f;
             }
         } else {
             v.dx *= 0.85f;
@@ -414,75 +502,87 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
         }
 
         if (climbState && !stunned && !reg.all_of<FloatTag>(ent)) {
-            constexpr float LADDER_AGGRO = 200.0f;
+            constexpr float LADDER_AGGRO      = 200.0f;
+            // Enemies only use ladders when actively chasing — guard with the
+            // same aggro radius used for horizontal pursuit. This prevents them
+            // from climbing when the player is on the other side of the map.
+            constexpr float LADDER_CHASE_RANGE = 300.0f;
             float enemyCX   = t.x + c.w * 0.5f;
-            float enemyFeet = t.y + c.h;
+            float enemyCY_l = t.y + c.h * 0.5f;
+            auto [nearCX_pre, nearCY_pre] = nearestPlayerCenter(enemyCX, enemyCY_l);
+            float dxPre = nearCX_pre - enemyCX;
+            float dyPre = nearCY_pre - enemyCY_l;
+            float distToPlayer = std::sqrt(dxPre * dxPre + dyPre * dyPre);
 
-            float bestColTop = 1e9f, bestColBot = -1e9f;
-            float ladMinX = 1e9f, ladMaxX = -1e9f;
-            bool  inLadderColumn = false;
-            // Nearest ladder-tile top at or below enemy feet for climb-down entry.
-            float entryTop = -1e9f;
+            if (distToPlayer < LADDER_CHASE_RANGE) {
+                float enemyFeet = t.y + c.h;
 
-            ladderView.each([&](const Transform& lt, const Collider& lc) {
-                constexpr float inset = 4.0f;
-                bool alignX = (t.x + inset) < (lt.x + lc.w) && (t.x + c.w - inset) > lt.x;
-                if (!alignX) return;
-                inLadderColumn = true;
-                bestColTop = std::min(bestColTop, lt.y);
-                bestColBot = std::max(bestColBot, lt.y + (float)lc.h);
-                ladMinX    = std::min(ladMinX,    lt.x);
-                ladMaxX    = std::max(ladMaxX,    lt.x + (float)lc.w);
-                if (lt.y <= enemyFeet + 2.0f && lt.y > entryTop)
-                    entryTop = lt.y;
-            });
+                float bestColTop = 1e9f, bestColBot = -1e9f;
+                float ladMinX = 1e9f, ladMaxX = -1e9f;
+                bool  inLadderColumn = false;
+                // Nearest ladder-tile top at or below enemy feet for climb-down entry.
+                float entryTop = -1e9f;
 
-            if (inLadderColumn) {
-                float ladCX  = (ladMinX + ladMaxX) * 0.5f;
-                float ladW   = ladMaxX - ladMinX;
+                ladderView.each([&](const Transform& lt, const Collider& lc) {
+                    constexpr float inset = 4.0f;
+                    bool alignX = (t.x + inset) < (lt.x + lc.w) && (t.x + c.w - inset) > lt.x;
+                    if (!alignX) return;
+                    inLadderColumn = true;
+                    bestColTop = std::min(bestColTop, lt.y);
+                    bestColBot = std::max(bestColBot, lt.y + (float)lc.h);
+                    ladMinX    = std::min(ladMinX,    lt.x);
+                    ladMaxX    = std::max(ladMaxX,    lt.x + (float)lc.w);
+                    if (lt.y <= enemyFeet + 2.0f && lt.y > entryTop)
+                        entryTop = lt.y;
+                });
 
-                float enemyCY  = t.y + c.h * 0.5f;
-                auto [nearCX_lad, nearCY_lad] = nearestPlayerCenter(enemyCX, enemyCY);
-                float playerCY = nearCY_lad;
-                float vertDist = playerCY - enemyCY;
-                float hDist    = std::abs(enemyCX - nearCX_lad);
+                if (inLadderColumn) {
+                    float ladCX  = (ladMinX + ladMaxX) * 0.5f;
+                    float ladW   = ladMaxX - ladMinX;
 
-                bool shouldClimbUp = hDist < LADDER_AGGRO
-                    && vertDist < -40.0f
-                    && enemyFeet > bestColTop + 4.0f;
+                    float enemyCY  = t.y + c.h * 0.5f;
+                    auto [nearCX_lad, nearCY_lad] = nearestPlayerCenter(enemyCX, enemyCY);
+                    float playerCY = nearCY_lad;
+                    float vertDist = playerCY - enemyCY;
+                    float hDist    = std::abs(enemyCX - nearCX_lad);
 
-                // Tolerance matches STEP_UP_HEIGHT so the enemy can drop in
-                // from an adjacent platform one tile above.
-                bool shouldClimbDown = entryTop > -1e9f
-                    && hDist < LADDER_AGGRO
-                    && vertDist > 40.0f
-                    && enemyFeet >= entryTop - 2.0f
-                    && enemyFeet <= entryTop + STEP_UP_HEIGHT;
+                    bool shouldClimbUp = hDist < LADDER_AGGRO
+                        && vertDist < -40.0f
+                        && enemyFeet > bestColTop + 4.0f;
 
-                if (shouldClimbUp) {
-                    climbState->climbing    = true;
-                    climbState->goingUp     = true;
-                    climbState->steppingOff = false;
-                    climbState->columnTop   = bestColTop;
-                    climbState->columnBot   = bestColBot;
-                    climbState->ladderCX    = ladCX;
-                    climbState->ladderW     = ladW;
-                    t.x  = ladCX - c.w * 0.5f;
-                    v.dx = 0.0f;
-                    return;
-                }
-                if (shouldClimbDown) {
-                    climbState->climbing    = true;
-                    climbState->goingUp     = false;
-                    climbState->steppingOff = false;
-                    climbState->columnTop   = bestColTop;
-                    climbState->columnBot   = bestColBot;
-                    climbState->ladderCX    = ladCX;
-                    climbState->ladderW     = ladW;
-                    t.x  = ladCX - c.w * 0.5f;
-                    t.y  = entryTop + 1.0f;
-                    v.dx = 0.0f;
-                    return;
+                    // Tolerance matches STEP_UP_HEIGHT so the enemy can drop in
+                    // from an adjacent platform one tile above.
+                    bool shouldClimbDown = entryTop > -1e9f
+                        && hDist < LADDER_AGGRO
+                        && vertDist > 40.0f
+                        && enemyFeet >= entryTop - 2.0f
+                        && enemyFeet <= entryTop + STEP_UP_HEIGHT;
+
+                    if (shouldClimbUp) {
+                        climbState->climbing    = true;
+                        climbState->goingUp     = true;
+                        climbState->steppingOff = false;
+                        climbState->columnTop   = bestColTop;
+                        climbState->columnBot   = bestColBot;
+                        climbState->ladderCX    = ladCX;
+                        climbState->ladderW     = ladW;
+                        t.x  = ladCX - c.w * 0.5f;
+                        v.dx = 0.0f;
+                        return;
+                    }
+                    if (shouldClimbDown) {
+                        climbState->climbing    = true;
+                        climbState->goingUp     = false;
+                        climbState->steppingOff = false;
+                        climbState->columnTop   = bestColTop;
+                        climbState->columnBot   = bestColBot;
+                        climbState->ladderCX    = ladCX;
+                        climbState->ladderW     = ladW;
+                        t.x  = ladCX - c.w * 0.5f;
+                        t.y  = entryTop + 1.0f;
+                        v.dx = 0.0f;
+                        return;
+                    }
                 }
             }
         }
@@ -500,11 +600,25 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
             }
         }
 
-        // Ledge detection: probe below leading foot; reverse if no ground.
-        if (!reg.all_of<FloatTag>(ent) && !stunned) {
-            constexpr float PROBE_DEPTH = 12.0f;
-            float halfW  = c.w * 0.5f;
-            float probeX = (v.dx > 0.0f) ? (t.x + c.w - halfW) : t.x;
+        // Ledge detection: probe below the leading foot; reverse velocity if no ground.
+        // Runs even when stunned so that knockback near a ledge doesn't send
+        // the enemy flying off the platform.
+        if (!reg.all_of<FloatTag>(ent)) {
+            constexpr float PROBE_DEPTH = 16.0f;
+            float halfW = c.w * 0.5f;
+
+            // When stopped (v.dx ≈ 0) use the sprite's current facing direction
+            // so we probe the correct leading foot instead of always defaulting left.
+            float faceSign = 0.0f;
+            if (std::abs(v.dx) >= 1.0f) {
+                faceSign = (v.dx > 0.0f) ? 1.0f : -1.0f;
+            } else if (reg.all_of<FaceRightTag>(ent)) {
+                faceSign = r.flipH ? -1.0f : 1.0f;
+            } else {
+                faceSign = r.flipH ? 1.0f : -1.0f;
+            }
+
+            float probeX = (faceSign >= 0.0f) ? (t.x + c.w - halfW) : t.x;
             float probeY = t.y + c.h - 2.0f;
             float probeW = halfW;
             float probeH = PROBE_DEPTH;
@@ -540,7 +654,10 @@ inline void MovementSystem(entt::registry& reg, float dt, int windowW, float lev
                 });
             }
 
-            if (!groundBelow) {
+            // No ground on the leading side → reverse horizontal velocity.
+            // For stunned enemies this cancels knockback that would carry them
+            // off the platform edge.
+            if (!groundBelow && std::abs(v.dx) >= 1.0f) {
                 v.dx = -v.dx;
                 t.x += v.dx * dt;
             }

@@ -408,8 +408,13 @@ struct HitFlash {
 
 // Prevents enemies from instantly flipping direction on aggro change.
 struct EnemyReaction {
-    float turnCooldown = 0.0f;
-    float lastDirSign  = 0.0f;
+    float turnCooldown  = 0.0f;
+    float lastDirSign   = 0.0f;
+    // Wall-stuck detection: how long the enemy has been pressing against a wall
+    // while in aggro mode.  Resets whenever the path is clear.
+    float wallStuckTimer = 0.0f;
+    // > 0 → enemy is in patrol-bounce mode (not chasing).  Counts down each frame.
+    float patrolTimer    = 0.0f;
 };
 
 struct ClimbState {
@@ -499,6 +504,10 @@ struct ShieldEntry {
     int          renderW   = 0;
     int          renderH   = 0;
     float        remaining = 20.f;
+    // Hit reaction effects
+    float spinVelocity = 0.f;  // angular velocity (rad/s), from corner hits
+    float spinAngle    = 0.f;  // accumulated individual spin offset (rad)
+    float shakeTimer   = 0.f;  // seconds of shake remaining after any hit
 };
 
 struct ActiveShield {

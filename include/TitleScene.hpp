@@ -317,16 +317,33 @@ class TitleScene : public Scene {
                 if (btn == SDL_GAMEPAD_BUTTON_EAST || btn == SDL_GAMEPAD_BUTTON_BACK) {
                     mCharPickerOpen = false; mPendingP2Pick = false; return true;
                 }
-                if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT && count > 0) {
-                    mCharPickerHighlight = (mCharPickerHighlight - 1 + count) % count;
+                auto pickerMoveTo = [&](int newIdx) {
+                    mCharPickerHighlight = std::clamp(newIdx, 0, count - 1);
                     mCharCards[mCharPickerHighlight].walkAnimFrame = 0;
                     mCharCards[mCharPickerHighlight].walkAnimTimer = 0.f;
+                    scrollCharPickerToHighlight();
+                };
+                int COLS = std::max(1, (mCharPickerPanel.w - 32) / (160 + 12));
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_LEFT && count > 0) {
+                    pickerMoveTo((mCharPickerHighlight - 1 + count) % count);
                     return true;
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_DPAD_RIGHT && count > 0) {
-                    mCharPickerHighlight = (mCharPickerHighlight + 1) % count;
-                    mCharCards[mCharPickerHighlight].walkAnimFrame = 0;
-                    mCharCards[mCharPickerHighlight].walkAnimTimer = 0.f;
+                    pickerMoveTo((mCharPickerHighlight + 1) % count);
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_UP && count > 0) {
+                    int row = mCharPickerHighlight / COLS, col = mCharPickerHighlight % COLS;
+                    int newRow = row - 1;
+                    if (newRow < 0) newRow = (count - 1) / COLS;
+                    pickerMoveTo(std::min(newRow * COLS + col, count - 1));
+                    return true;
+                }
+                if (btn == SDL_GAMEPAD_BUTTON_DPAD_DOWN && count > 0) {
+                    int row = mCharPickerHighlight / COLS, col = mCharPickerHighlight % COLS;
+                    int newRow = row + 1;
+                    int newIdx = newRow * COLS + col;
+                    pickerMoveTo(newIdx < count ? newIdx : col % count);
                     return true;
                 }
                 if (btn == SDL_GAMEPAD_BUTTON_SOUTH) {
@@ -518,6 +535,71 @@ class TitleScene : public Scene {
                     active.walkAnimTimer -= interval;
                     active.walkAnimFrame = (active.walkAnimFrame + 1) % (int)active.walkRects.size();
                 }
+            }
+        }
+
+        // --- Analog stick navigation for the char picker ---
+        // Polls all connected gamepads; takes the largest deflection so either
+        // P1 or P2's controller can navigate.
+        {
+            constexpr float DEADZONE     = 0.35f;  // 35% of axis range
+            constexpr float REPEAT_RATE  = 0.13f;  // seconds between repeated steps
+
+            float axisX = 0.f, axisY = 0.f;
+            int padCount = 0;
+            SDL_JoystickID* padIds = SDL_GetGamepads(&padCount);
+            if (padIds) {
+                for (int pi = 0; pi < padCount && pi < 2; ++pi) {
+                    SDL_Gamepad* p = SDL_GetGamepadFromID(padIds[pi]);
+                    if (!p) continue;
+                    float px = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTX) / 32767.f;
+                    float py = SDL_GetGamepadAxis(p, SDL_GAMEPAD_AXIS_LEFTY) / 32767.f;
+                    if (std::abs(px) > std::abs(axisX)) axisX = px;
+                    if (std::abs(py) > std::abs(axisY)) axisY = py;
+                }
+                SDL_free(padIds);
+            }
+
+            int count = (int)mCharCards.size();
+            int COLS  = std::max(1, (mCharPickerPanel.w - 32) / (160 + 12));
+
+            auto pickerStickMove = [&](int newIdx) {
+                mCharPickerHighlight = std::clamp(newIdx, 0, count - 1);
+                mCharCards[mCharPickerHighlight].walkAnimFrame = 0;
+                mCharCards[mCharPickerHighlight].walkAnimTimer = 0.f;
+                scrollCharPickerToHighlight();
+            };
+
+            // Horizontal (left/right)
+            if (std::abs(axisX) > DEADZONE) {
+                mPickerStickRepeatX -= dt;
+                if (mPickerStickRepeatX <= 0.f) {
+                    int dir = (axisX > 0.f) ? 1 : -1;
+                    pickerStickMove((mCharPickerHighlight + dir + count) % count);
+                    mPickerStickRepeatX = REPEAT_RATE;
+                }
+            } else {
+                mPickerStickRepeatX = 0.f;  // reset so next push fires immediately
+            }
+
+            // Vertical (up/down rows)
+            if (std::abs(axisY) > DEADZONE) {
+                mPickerStickRepeatY -= dt;
+                if (mPickerStickRepeatY <= 0.f) {
+                    int row = mCharPickerHighlight / COLS;
+                    int col = mCharPickerHighlight % COLS;
+                    if (axisY < 0.f) { // up
+                        int newRow = row - 1;
+                        if (newRow < 0) newRow = (count - 1) / COLS;
+                        pickerStickMove(std::min(newRow * COLS + col, count - 1));
+                    } else {           // down
+                        int newIdx = (row + 1) * COLS + col;
+                        pickerStickMove(newIdx < count ? newIdx : col % count);
+                    }
+                    mPickerStickRepeatY = REPEAT_RATE;
+                }
+            } else {
+                mPickerStickRepeatY = 0.f;
             }
         }
     }
@@ -1038,12 +1120,32 @@ class TitleScene : public Scene {
     SDL_Rect              mCharPickerSelectRect{};
     SDL_Rect              mChooseCharBtnRect{};
     SDL_Renderer*         mRenderer = nullptr;
+    // Analog-stick repeat timers for char picker navigation (seconds until next step).
+    float                 mPickerStickRepeatX = 0.f;
+    float                 mPickerStickRepeatY = 0.f;
 
     void preloadCharCards();
     void stashCharCardCache();
     void openCharPicker();
     void buildWalkSheet(CharCard& c);
     void renderCharPicker(SDL_Renderer* ren);
+
+    // Scrolls the picker so the currently highlighted card is fully inside the clip area.
+    void scrollCharPickerToHighlight() {
+        if (mCharPickerHighlight < 0 || mCharPickerHighlight >= (int)mCharCards.size()) return;
+        const SDL_Rect& cr  = mCharCards[mCharPickerHighlight].rect;
+        constexpr int CARD_H = 200;
+        // Clip area relative to panel: header=46px top, footer=52px bottom
+        int clipTop    = mCharPickerPanel.y + 46;
+        int clipBottom = mCharPickerPanel.y + mCharPickerPanel.h - 52;
+        // Maximum scroll at which card top is still visible
+        int scrollForTop = cr.y - clipTop;
+        // Minimum scroll at which card bottom is still visible
+        int scrollForBot = cr.y + CARD_H - clipBottom;
+        if (mCharPickerScroll > scrollForTop) mCharPickerScroll = scrollForTop;
+        if (mCharPickerScroll < scrollForBot) mCharPickerScroll = scrollForBot;
+        mCharPickerScroll = std::clamp(mCharPickerScroll, 0, std::max(0, mCharPickerMaxScroll));
+    }
 
     // --- Settings panel ------------------------------------------------------
     SDL_Rect settingsPanelRect() const {

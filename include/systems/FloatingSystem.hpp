@@ -15,7 +15,9 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         constexpr float ENEMY_GRAVITY  = 800.0f;
         constexpr float ENEMY_MAX_FALL = 900.0f;
 
-        auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag>);
+        // Exclude PropTag so enemies don't land on / collide with turret pickup
+        // tiles or other decorative props — those are pass-through for enemies.
+        auto tileView  = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag, PropTag>);
         auto slopeView = reg.view<SlopeCollider, TileTag, Transform, Collider>();
         auto enemyView = reg.view<EnemyTag, Transform, Collider, Velocity>(
             entt::exclude<DeadTag, FloatTag>);
@@ -112,7 +114,7 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         constexpr float DEAD_GRAVITY  = 800.0f;
         constexpr float DEAD_MAX_FALL = 900.0f;
 
-        auto tileView2 = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag>);
+        auto tileView2 = reg.view<TileTag, Transform, Collider>(entt::exclude<HazardTag, PropTag>);
         auto deadView  = reg.view<DeadTag, EnemyTag, Transform, Collider, Velocity>(
             entt::exclude<FloatTag>);
 
@@ -132,36 +134,44 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         });
     }
 
-    // --- 2. Read player state ---
-    float playerX  = 0.0f, playerY  = 0.0f;
-    float playerW  = 0.0f, playerH  = 0.0f;
-    float playerVx = 0.0f, playerVy = 0.0f;
-    float slashDir = 0.0f; // +1 right, -1 left
-    bool  playerSlashing = false;
-    float swordX = 0.0f, swordY = 0.0f, swordW = 0.0f, swordH = 0.0f;
+    // --- 2. Read player state (all living players) ---
+    struct FloatPlayerData {
+        float x, y, w, h, vx, vy;
+        bool  slashing;
+        float slashDir;
+        float swordX, swordY, swordW, swordH;
+    };
+    std::vector<FloatPlayerData> floatPlayers;
 
     {
         auto pv = reg.view<PlayerTag, Transform, Collider, Velocity,
-                           GravityState, Renderable, AttackState>();
+                           GravityState, Renderable, AttackState>(entt::exclude<DeadTag>);
         pv.each([&](const Transform& pt, const Collider& pc,
                     const Velocity& pvel, const GravityState& pg,
                     const Renderable& pr, const AttackState& atk) {
-            playerX  = pt.x;
-            playerY  = pt.y;
-            playerW  = static_cast<float>(pc.w);
-            playerH  = static_cast<float>(pc.h);
-            playerVx = pvel.dx;
-            playerVy = pg.velocity;
+            FloatPlayerData pd;
+            pd.x  = pt.x;
+            pd.y  = pt.y;
+            pd.w  = static_cast<float>(pc.w);
+            pd.h  = static_cast<float>(pc.h);
+            pd.vx = pvel.dx;
+            pd.vy = pg.velocity;
 
-            playerSlashing = atk.isAttacking;
-            if (playerSlashing) {
-                float fx = pr.flipH ? -1.0f : 1.0f;
-                slashDir = fx;
-                swordW   = SWORD_REACH;
-                swordH   = pc.h * SWORD_HEIGHT;
-                swordY   = pt.y + pc.h * (1.0f - SWORD_HEIGHT) * 0.5f;
-                swordX   = (fx > 0.0f) ? pt.x + pc.w : pt.x - SWORD_REACH;
+            pd.slashing = atk.isAttacking;
+            pd.slashDir = 0.0f;
+            pd.swordX   = 0.0f;
+            pd.swordY   = 0.0f;
+            pd.swordW   = 0.0f;
+            pd.swordH   = 0.0f;
+            if (pd.slashing) {
+                float fx    = pr.flipH ? -1.0f : 1.0f;
+                pd.slashDir = fx;
+                pd.swordW   = SWORD_REACH;
+                pd.swordH   = pc.h * SWORD_HEIGHT;
+                pd.swordY   = pt.y + pc.h * (1.0f - SWORD_HEIGHT) * 0.5f;
+                pd.swordX   = (fx > 0.0f) ? pt.x + pc.w : pt.x - SWORD_REACH;
             }
+            floatPlayers.push_back(pd);
         });
     }
 
@@ -278,7 +288,7 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
             hazardView.each([&](entt::entity te, const Transform& tt, const Collider& tc) { bounce(te, tt, tc); });
         }
 
-        // --- Player body push ---
+        // --- Player body push (all living players) ---
         // Runs after CollisionSystem which pushes the player out of solid
         // floating entities; CONTACT_MARGIN compensates for that push-out.
         constexpr float BODY_PUSH_H    = 240.0f;
@@ -287,74 +297,75 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
         constexpr float CONTACT_MARGIN =   8.0f;
         constexpr float BOTTOM_MARGIN  =   6.0f;
 
-        bool bodyContact =
-            playerX           < ft.x + fc.w  + CONTACT_MARGIN &&
-            playerX + playerW > ft.x          - CONTACT_MARGIN &&
-            playerY           < ft.y + fc.h  + CONTACT_MARGIN &&
-            playerY + playerH > ft.y          - CONTACT_MARGIN;
+        bool anyBodyContact = false;
+        for (const auto& pd : floatPlayers) {
+            bool bodyContact =
+                pd.x       < ft.x + fc.w  + CONTACT_MARGIN &&
+                pd.x + pd.w > ft.x         - CONTACT_MARGIN &&
+                pd.y       < ft.y + fc.h  + CONTACT_MARGIN &&
+                pd.y + pd.h > ft.y         - CONTACT_MARGIN;
 
-        // Bottom-hit: player jumping up into the object's underside.
-        bool bottomHit = false;
-        {
-            float headY   = playerY;
-            float tileBot = ft.y + fc.h;
-            bool hOverlap = (playerX + playerW > ft.x) && (playerX < ft.x + fc.w);
-            bool nearBot  = (headY >= tileBot - BOTTOM_MARGIN) && (headY < tileBot + BOTTOM_MARGIN);
-            bool jumping  = (playerVy < -10.0f);
-            bottomHit = hOverlap && nearBot && jumping;
-        }
+            // Bottom-hit: player jumping up into the object's underside.
+            bool bottomHit = false;
+            {
+                float headY   = pd.y;
+                float tileBot = ft.y + fc.h;
+                bool hOverlap = (pd.x + pd.w > ft.x) && (pd.x < ft.x + fc.w);
+                bool nearBot  = (headY >= tileBot - BOTTOM_MARGIN) && (headY < tileBot + BOTTOM_MARGIN);
+                bool jumping  = (pd.vy < -10.0f);
+                bottomHit = hOverlap && nearBot && jumping;
+            }
 
-        if (bodyContact || bottomHit) {
-            float pCx = playerX + playerW * 0.5f;
-            float fCx = ft.x    + fc.w   * 0.5f;
-            float pCy = playerY + playerH * 0.5f;
-            float fCy = ft.y    + fc.h   * 0.5f;
+            if (bodyContact || bottomHit) {
+                anyBodyContact = true;
+                float pCx = pd.x + pd.w * 0.5f;
+                float fCx = ft.x + fc.w * 0.5f;
+                float pCy = pd.y + pd.h * 0.5f;
+                float fCy = ft.y + fc.h * 0.5f;
 
-            float hDir = (fCx >= pCx) ? 1.0f : -1.0f;
-            float vDir = (fCy >= pCy) ? 1.0f : -1.0f;
+                float hDir = (fCx >= pCx) ? 1.0f : -1.0f;
+                float vDir = (fCy >= pCy) ? 1.0f : -1.0f;
 
-            float overlapH = (playerW * 0.5f + fc.w * 0.5f) - std::abs(pCx - fCx);
-            float overlapV = (playerH * 0.5f + fc.h * 0.5f) - std::abs(pCy - fCy);
-            bool topBottomHit = overlapV < overlapH || bottomHit;
+                float overlapH = (pd.w * 0.5f + fc.w * 0.5f) - std::abs(pCx - fCx);
+                float overlapV = (pd.h * 0.5f + fc.h * 0.5f) - std::abs(pCy - fCy);
+                bool topBottomHit = overlapV < overlapH || bottomHit;
 
-            if (!fs.wasInContact) {
-                if (topBottomHit && !bottomHit) {
-                    float vMag = std::max(120.0f, std::abs(playerVy));
-                    fs.driftVy  += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
-                    if (std::abs(playerVx) > 10.0f) {
-                        float hMag = std::abs(playerVx) * 0.6f;
-                        fs.driftVx  += (playerVx > 0.0f ? 1.0f : -1.0f) * hMag * (BODY_PUSH_H / PLAYER_SPEED);
-                        fs.spinSpeed += (playerVx > 0.0f ? 1.0f : -1.0f) * BODY_SPIN * 0.5f;
+                if (!fs.wasInContact) {
+                    if (topBottomHit && !bottomHit) {
+                        float vMag = std::max(120.0f, std::abs(pd.vy));
+                        fs.driftVy  += vDir * vMag * (BODY_PUSH_V / MAX_FALL_SPEED);
+                        if (std::abs(pd.vx) > 10.0f) {
+                            float hMag = std::abs(pd.vx) * 0.6f;
+                            fs.driftVx  += (pd.vx > 0.0f ? 1.0f : -1.0f) * hMag * (BODY_PUSH_H / PLAYER_SPEED);
+                            fs.spinSpeed += (pd.vx > 0.0f ? 1.0f : -1.0f) * BODY_SPIN * 0.5f;
+                        }
+                        fs.spinSpeed += hDir * BODY_SPIN * 0.5f;
+                    } else if (!topBottomHit) {
+                        float hMag = std::max(80.0f, std::abs(pd.vx));
+                        fs.driftVx  += hDir * hMag * (BODY_PUSH_H / PLAYER_SPEED);
+                        fs.spinSpeed += hDir * BODY_SPIN;
                     }
-                    fs.spinSpeed += hDir * BODY_SPIN * 0.5f;
-                } else if (!topBottomHit) {
-                    float hMag = std::max(80.0f, std::abs(playerVx));
-                    fs.driftVx  += hDir * hMag * (BODY_PUSH_H / PLAYER_SPEED);
-                    fs.spinSpeed += hDir * BODY_SPIN;
+                    fs.baseY = ft.y - bob;
                 }
-                fs.baseY = ft.y - bob;
-            }
 
-            // Continuous upward push while player presses against underside,
-            // capped to prevent runaway acceleration.
-            if (bottomHit) {
-                constexpr float BOTTOM_HIT_PUSH  = 220.0f;
-                constexpr float BOTTOM_HIT_CAP   = 400.0f;
-                if (fs.driftVy > -BOTTOM_HIT_CAP) {
-                    float jMag = std::max(BOTTOM_HIT_PUSH, std::abs(playerVy) * 0.8f);
-                    fs.driftVy -= jMag * dt * 8.0f;
-                    fs.driftVy  = std::max(fs.driftVy, -BOTTOM_HIT_CAP);
+                // Continuous upward push while player presses against underside,
+                // capped to prevent runaway acceleration.
+                if (bottomHit) {
+                    constexpr float BOTTOM_HIT_PUSH = 220.0f;
+                    constexpr float BOTTOM_HIT_CAP  = 400.0f;
+                    if (fs.driftVy > -BOTTOM_HIT_CAP) {
+                        float jMag = std::max(BOTTOM_HIT_PUSH, std::abs(pd.vy) * 0.8f);
+                        fs.driftVy -= jMag * dt * 8.0f;
+                        fs.driftVy  = std::max(fs.driftVy, -BOTTOM_HIT_CAP);
+                    }
+                    fs.spinSpeed += hDir * BODY_SPIN * dt * 6.0f;
+                    fs.baseY = ft.y - bob;
                 }
-                fs.spinSpeed += hDir * BODY_SPIN * dt * 6.0f;
-                fs.baseY = ft.y - bob;
             }
-
-            fs.wasInContact = true;
-        } else {
-            fs.wasInContact = false;
         }
+        fs.wasInContact = anyBodyContact;
 
-        // --- Sword slash push ---
+        // --- Sword slash push (all living players) ---
         constexpr float SLASH_PUSH_FORCE = 280.0f;
         constexpr float SLASH_SPIN       = 360.0f;
 
@@ -375,16 +386,17 @@ inline FloatingResult FloatingSystem(entt::registry& reg, float dt) {
             });
         }
 
-        if (playerSlashing) {
+        for (const auto& pd : floatPlayers) {
+            if (!pd.slashing) continue;
             bool swordOverlap =
-                swordX          < ft.x + fc.w &&
-                swordX + swordW > ft.x         &&
-                swordY          < ft.y + fc.h  &&
-                swordY + swordH > ft.y;
+                pd.swordX            < ft.x + fc.w &&
+                pd.swordX + pd.swordW > ft.x        &&
+                pd.swordY            < ft.y + fc.h  &&
+                pd.swordY + pd.swordH > ft.y;
 
             if (swordOverlap) {
-                fs.driftVx   += slashDir * SLASH_PUSH_FORCE;
-                fs.spinSpeed += slashDir * SLASH_SPIN;
+                fs.driftVx   += pd.slashDir * SLASH_PUSH_FORCE;
+                fs.spinSpeed += pd.slashDir * SLASH_SPIN;
             }
         }
     }

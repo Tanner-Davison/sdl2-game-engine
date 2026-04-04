@@ -640,12 +640,13 @@ void GameScene::Update(float dt) {
         // continue to arc, fall, and splat on the floor rather than freezing.
         mBloodParticles.Update(dt, tileQueryFn, tileMoveQueryFn);
 
+        // animDone = at least one dead player has finished their death animation.
         bool animDone = false;
-        auto pv = reg.view<PlayerTag, AnimationState>();
-        pv.each([&](const AnimationState& anim) {
-            if (!anim.looping && anim.currentFrame >= anim.totalFrames - 1)
-                animDone = true;
-        });
+        reg.view<PlayerTag, AnimationState, DeadTag>()
+            .each([&](const AnimationState& anim) {
+                if (!anim.looping && anim.currentFrame >= anim.totalFrames - 1)
+                    animDone = true;
+            });
 
         constexpr float MIN_DEATH_HOLD = 1.0f;
         constexpr float MAX_DEATH_WAIT = 3.0f;
@@ -672,14 +673,14 @@ void GameScene::Update(float dt) {
     MovingPlatformTick(reg, dt);
     FloatingResult floatResult = FloatingSystem(reg, dt);
     LadderSystem(reg, dt);
-    // Snapshot player animation before state update for SFX trigger
-    AnimationID prevPlayerAnim = AnimationID::NONE;
-    int prevPlayerFrame = 0;
+    // Snapshot each player's animation state before the update so we can detect
+    // per-entity transitions for SFX triggering. Keyed by entity handle.
+    struct PlayerAnimSnap { AnimationID anim; int frame; };
+    std::unordered_map<entt::entity, PlayerAnimSnap> prevPlayerAnims;
     if (Audio() && Audio()->IsReady()) {
         auto pview = reg.view<PlayerTag, AnimationState>();
-        pview.each([&](const AnimationState& anim) {
-            prevPlayerAnim  = anim.currentAnim;
-            prevPlayerFrame = anim.currentFrame;
+        pview.each([&](entt::entity e, const AnimationState& anim) {
+            prevPlayerAnims[e] = {anim.currentAnim, anim.currentFrame};
         });
     }
 
@@ -693,6 +694,34 @@ void GameScene::Update(float dt) {
                  mLevel.gravityMode == GravityMode::WallRun,
                  mLevelW,
                  mLevelH);
+    // Collect living player centers for enemy SFX distance attenuation
+    struct EnemySfxPlayerCenter { float cx, cy; };
+    std::vector<EnemySfxPlayerCenter> sfxPlayerCenters;
+    {
+        auto pv = reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>);
+        pv.each([&](const Transform& pt, const Collider& pc) {
+            sfxPlayerCenters.push_back({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f});
+        });
+    }
+    // Returns attenuated volume: full within 200px, silent beyond 550px, linear ramp.
+    // These distances are tuned to the visible viewport (~1280px wide at 1x zoom).
+    // Skips the PlayOverlap entirely when the result would be 0.
+    auto enemySfxVolume = [&](float ex, float ey, float baseVol) -> float {
+        if (sfxPlayerCenters.empty()) return baseVol;
+        constexpr float FULL_DIST   = 200.0f;
+        constexpr float SILENT_DIST = 550.0f;
+        float minDist = SILENT_DIST + 1.0f;
+        for (const auto& p : sfxPlayerCenters) {
+            float dx = ex - p.cx, dy = ey - p.cy;
+            float d  = std::sqrt(dx * dx + dy * dy);
+            if (d < minDist) minDist = d;
+        }
+        if (minDist <= FULL_DIST)   return baseVol;
+        if (minDist >= SILENT_DIST) return 0.0f;
+        float t = (minDist - FULL_DIST) / (SILENT_DIST - FULL_DIST);
+        return baseVol * (1.0f - t);
+    };
+
     // Snapshot enemy animation frames + sheets BEFORE AnimationSystem for SFX triggers
     struct EnemySfxSnap { SDL_Texture* sheet; int frame; int totalFrames; };
     std::unordered_map<entt::entity, EnemySfxSnap> prevEnemySnap;
@@ -708,10 +737,11 @@ void GameScene::Update(float dt) {
 
     // Detect animation loop wraps and re-trigger multi-file SFX (round-robin)
     if (Audio() && Audio()->IsReady() && !prevEnemySnap.empty()) {
-        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>(
+        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable, Transform, Collider>(
             entt::exclude<DeadTag>);
         ev.each([&](entt::entity e, EnemyAnimData& ead,
-                     const AnimationState& anim, const Renderable& r) {
+                     const AnimationState& anim, const Renderable& r,
+                     const Transform& et, const Collider& ec) {
             auto pit = prevEnemySnap.find(e);
             if (pit == prevEnemySnap.end()) return;
             if (r.sheet != pit->second.sheet) return;  // sheet changed — handled below
@@ -731,8 +761,10 @@ void GameScene::Update(float dt) {
             if ((int)ss.files.size() <= 1) return;  // single file loops via SDL mixer
 
             const auto& fi = ss.files[ss.nextIdx];
+            float vol = enemySfxVolume(et.x + ec.w * 0.5f, et.y + ec.h * 0.5f, fi.volume);
+            if (vol <= 0.0f) return;
             std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
-            if (!sfxId.empty() && Audio()->Sfx().PlayOverlap(sfxId, fi.volume))
+            if (!sfxId.empty() && Audio()->Sfx().PlayOverlap(sfxId, vol))
                 ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
         });
     }
@@ -876,33 +908,25 @@ void GameScene::Update(float dt) {
     MovingPlatformCarry(reg);
 
     // --- Power-up pickup ---
+    // Each player independently picks up only the power-ups they personally overlap.
+    // A consumed set prevents the same item being given to multiple players.
     {
-        entt::entity playerEnt = entt::null;
-        SDL_Rect     playerRect{};
-        {
-            auto pv = reg.view<PlayerTag, Transform, Collider>();
-            pv.each([&](entt::entity e, const Transform& t, const Collider& c) {
-                playerEnt  = e;
-                playerRect = {(int)t.x, (int)t.y, c.w, c.h};
-            });
-        }
-        if (playerEnt != entt::null) {
+        std::vector<entt::entity> consumed;
+        auto pv = reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>);
+        pv.each([&](entt::entity playerEnt, const Transform& pt, const Collider& pc) {
+            SDL_Rect playerRect = {(int)pt.x, (int)pt.y, pc.w, pc.h};
             std::vector<entt::entity> toConsume;
-            auto                      puv = reg.view<PowerUpTag, Transform, Collider>();
-            puv.each([&](entt::entity      e,
-                         const PowerUpTag& pu,
-                         const Transform&  t,
-                         const Collider&   c) {
+            auto puv = reg.view<PowerUpTag, Transform, Collider>();
+            puv.each([&](entt::entity e, const PowerUpTag&, const Transform& t, const Collider& c) {
+                if (std::find(consumed.begin(), consumed.end(), e) != consumed.end()) return;
                 SDL_Rect pr = {(int)t.x, (int)t.y, c.w, c.h};
-                bool     overlap =
-                    (playerRect.x < pr.x + pr.w && playerRect.x + playerRect.w > pr.x &&
-                     playerRect.y < pr.y + pr.h && playerRect.y + playerRect.h > pr.y);
-                if (overlap)
+                if (playerRect.x < pr.x + pr.w && playerRect.x + playerRect.w > pr.x &&
+                    playerRect.y < pr.y + pr.h && playerRect.y + playerRect.h > pr.y)
                     toConsume.push_back(e);
             });
             for (entt::entity e : toConsume) {
-                if (!reg.valid(e))
-                    continue;
+                if (!reg.valid(e)) continue;
+                if (std::find(consumed.begin(), consumed.end(), e) != consumed.end()) continue;
                 const PowerUpTag& pu = reg.get<PowerUpTag>(e);
 
                 // Teleport: only entrances trigger; destinations are inert.
@@ -1043,8 +1067,9 @@ void GameScene::Update(float dt) {
                 if (it2 != mSortedTileRenderList.end())
                     mSortedTileRenderList.erase(it2);
                 reg.destroy(e);
+                consumed.push_back(e);
             }
-        }
+        });
     }
 
     // --- Active power-up tick ---
@@ -1124,9 +1149,10 @@ void GameScene::Update(float dt) {
 
     // Fire enemy SFX on animation sheet transitions
     if (Audio() && Audio()->IsReady() && !prevEnemySnap.empty()) {
-        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable>();
+        auto ev = reg.view<EnemyTag, EnemyAnimData, AnimationState, Renderable, Transform, Collider>();
         ev.each([&](entt::entity e, EnemyAnimData& ead,
-                     const AnimationState& anim, const Renderable& r) {
+                     const AnimationState& anim, const Renderable& r,
+                     const Transform& et, const Collider& ec) {
             auto pit = prevEnemySnap.find(e);
             if (pit == prevEnemySnap.end()) return;
             bool retrigger = ead.sfxRetrigger;
@@ -1141,9 +1167,11 @@ void GameScene::Update(float dt) {
             if (slotIdx < 0 || ead.slotSfx[slotIdx].files.empty()) return;
             auto& ss = ead.slotSfx[slotIdx];
             const auto& fi = ss.files[ss.nextIdx];
+            float vol = enemySfxVolume(et.x + ec.w * 0.5f, et.y + ec.h * 0.5f, fi.volume);
+            if (vol <= 0.0f) return;
             std::string sfxId = audio::EnemySfxId(ead.typeName, slotIdx, ss.nextIdx);
             if (sfxId.empty()) return;
-            Audio()->Sfx().PlayOverlap(sfxId, fi.volume);
+            Audio()->Sfx().PlayOverlap(sfxId, vol);
             if (ss.files.size() > 1)
                 ss.nextIdx = (ss.nextIdx + 1) % (int)ss.files.size();
         });
@@ -1155,46 +1183,74 @@ void GameScene::Update(float dt) {
 
     goalsCollected += collision.goalsCollected;
     stompCount += collision.enemiesStomped + collision.enemiesSlashed;
-    if (collision.playerDied && !mPlayerDying) {
-        mPlayerDying    = true;
-        mDeathAnimTimer = 0.0f;
-        // Massive blood burst at player centre
-        {
-            auto pv = reg.view<PlayerTag, Transform, Collider>();
-            pv.each([&](const Transform& pt, const Collider& pc) {
-                emitBlood({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f,
-                           0.f, -1.f, BloodEventType::PlayerDeath, 1.0f});
-            });
+    // Per-player kill: applies death animation to one player, adds DeadTag,
+    // and only triggers the global game-over sequence when ALL players are dead
+    // (in multiplayer) or immediately (in single-player).
+    auto killPlayer = [&](entt::entity pe) {
+        if (!reg.valid(pe) || reg.all_of<DeadTag>(pe)) return;
+
+        // Stop movement
+        if (auto* v = reg.try_get<Velocity>(pe)) { v->dx = 0.0f; v->dy = 0.0f; }
+
+        // Death animation for this player only
+        auto* r    = reg.try_get<Renderable>(pe);
+        auto* anim = reg.try_get<AnimationState>(pe);
+        auto* set  = reg.try_get<AnimationSet>(pe);
+        if (r && anim && set) {
+            const std::vector<SDL_Rect>* deathFr = nullptr;
+            SDL_Texture* deathSh = nullptr;
+            float deathFps = 8.0f;
+            AnimationID deathId = AnimationID::DEATH;
+            if (!set->death.empty()) {
+                deathFr  = &set->death;
+                deathSh  = set->deathSheet;
+                deathFps = (set->deathFps > 0.0f) ? set->deathFps : 8.0f;
+            } else if (!set->hurt.empty()) {
+                deathFr  = &set->hurt;
+                deathSh  = set->hurtSheet;
+                deathFps = (set->hurtFps > 0.0f) ? set->hurtFps : 12.0f;
+                deathId  = AnimationID::HURT;
+            }
+            if (deathFr && deathSh) {
+                r->sheet           = deathSh;
+                r->frames          = *deathFr;
+                anim->currentFrame = 0;
+                anim->timer        = 0.0f;
+                anim->fps          = deathFps;
+                anim->looping      = false;
+                anim->totalFrames  = (int)deathFr->size();
+                anim->currentAnim  = deathId;
+            }
         }
-        auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
-        dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
-                   const AnimationSet& set) {
-            v.dx = 0.0f; v.dy = 0.0f;
-            const std::vector<SDL_Rect>* frames = nullptr;
-            SDL_Texture* sheet = nullptr;
-            float fps = 8.0f;
-            AnimationID id = AnimationID::DEATH;
-            if (!set.death.empty()) {
-                frames = &set.death;
-                sheet  = set.deathSheet;
-                fps    = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
-            } else if (!set.hurt.empty()) {
-                frames = &set.hurt;
-                sheet  = set.hurtSheet;
-                fps    = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
-                id     = AnimationID::HURT;
+
+        // Blood burst at this player's position
+        if (auto* pt = reg.try_get<Transform>(pe)) {
+            if (auto* pc = reg.try_get<Collider>(pe)) {
+                emitBlood({pt->x + pc->w * 0.5f, pt->y + pc->h * 0.5f,
+                           0.f, -1.f, BloodEventType::PlayerDeath, 1.0f});
             }
-            if (frames && sheet) {
-                r.sheet           = sheet;
-                r.frames          = *frames;
-                anim.currentFrame = 0;
-                anim.timer        = 0.0f;
-                anim.fps          = fps;
-                anim.looping      = false;
-                anim.totalFrames  = (int)frames->size();
-                anim.currentAnim  = id;
+        }
+
+        reg.emplace<DeadTag>(pe);
+
+        // Trigger game-over only when ALL players are now dead.
+        if (!mPlayerDying) {
+            bool anyAlive = false;
+            reg.view<PlayerTag>(entt::exclude<DeadTag>)
+                .each([&](entt::entity) { anyAlive = true; });
+            if (!anyAlive) {
+                mPlayerDying    = true;
+                mDeathAnimTimer = 0.0f;
             }
-        });
+        }
+    };
+
+    if (collision.playerDied) {
+        // Find which player(s) just had their HP reach 0 (not yet DeadTag).
+        reg.view<PlayerTag, Health>(entt::exclude<DeadTag>)
+            .each([&](entt::entity pe, const Health& hp) {
+                if (hp.current <= 0.0f) killPlayer(pe);
+            });
     }
 
     if (collision.playerHit)
@@ -1227,18 +1283,30 @@ void GameScene::Update(float dt) {
         if (!reg.valid(e))
             continue;
 
-        // Shield pickup
+        // Shield pickup — give only to the living player closest to the tile.
         if (auto* sp = reg.try_get<ShieldPickupTag>(e)) {
             auto* rend = reg.try_get<Renderable>(e);
             if (rend) {
-                auto pv = reg.view<PlayerTag>();
-                for (auto pe : pv) {
+                // Find the closest living player to this tile's center.
+                const auto& tTr = reg.get<Transform>(e);
+                float tileCX = tTr.x + (rend->renderW > 0 ? rend->renderW : 20) * 0.5f;
+                float tileCY = tTr.y + (rend->renderH > 0 ? rend->renderH : 20) * 0.5f;
+                entt::entity bestPe = entt::null;
+                float bestDist = 1e9f;
+                reg.view<PlayerTag, Transform, Collider>(entt::exclude<DeadTag>)
+                    .each([&](entt::entity pe, const Transform& pt, const Collider& pc) {
+                        float dx = (pt.x + pc.w * 0.5f) - tileCX;
+                        float dy = (pt.y + pc.h * 0.5f) - tileCY;
+                        float d  = dx * dx + dy * dy;
+                        if (d < bestDist) { bestDist = d; bestPe = pe; }
+                    });
+                if (bestPe != entt::null) {
                     ShieldEntry se;
-                    se.tex      = rend->sheet;
-                    se.renderW  = rend->renderW > 0 ? rend->renderW : 20;
-                    se.renderH  = rend->renderH > 0 ? rend->renderH : 20;
+                    se.tex       = rend->sheet;
+                    se.renderW   = rend->renderW > 0 ? rend->renderW : 20;
+                    se.renderH   = rend->renderH > 0 ? rend->renderH : 20;
                     se.remaining = sp->duration;
-                    auto* as = reg.try_get<ActiveShield>(pe);
+                    auto* as = reg.try_get<ActiveShield>(bestPe);
                     if (as) {
                         as->shields.push_back(se);
                         as->orbitRadius = std::max(as->orbitRadius,
@@ -1247,7 +1315,7 @@ void GameScene::Update(float dt) {
                         ActiveShield newAs;
                         newAs.shields.push_back(se);
                         newAs.orbitRadius = std::max(se.renderW, se.renderH) * 1.2f;
-                        reg.emplace<ActiveShield>(pe, std::move(newAs));
+                        reg.emplace<ActiveShield>(bestPe, std::move(newAs));
                     }
                 }
             }
@@ -1365,53 +1433,48 @@ void GameScene::Update(float dt) {
     // Hazard damage
     {
         auto hView = reg.view<PlayerTag,
+                              Transform,
+                              Collider,
                               Health,
                               HazardState,
                               AnimationState,
                               Renderable,
                               AnimationSet>();
         hView.each([&](entt::entity        playerEnt,
+                       const Transform&    pt,
+                       const Collider&     pc,
                        Health&             hp,
                        HazardState&        hz,
                        AnimationState&     anim,
                        Renderable&         r,
                        const AnimationSet& set) {
-            hz.active = collision.onHazard;
+            // Per-player hazard check: only THIS player's position vs hazard tiles.
+            // Using the global collision.onHazard would incorrectly damage all players
+            // when only one of them is touching a hazard.
+            constexpr float TOUCH = 1.0f;
+            bool thisPlayerOnHazard = false;
+            {
+                auto hazView = reg.view<HazardTag, Transform, Collider>();
+                hazView.each([&](entt::entity he, const Transform& ht, const Collider& hc) {
+                    if (thisPlayerOnHazard) return;
+                    float hx = ht.x, hy = ht.y;
+                    if (const auto* off = reg.try_get<ColliderOffset>(he)) {
+                        hx += off->x; hy += off->y;
+                    }
+                    if (pt.x        < hx + hc.w + TOUCH &&
+                        pt.x + pc.w > hx          - TOUCH &&
+                        pt.y        < hy + hc.h + TOUCH &&
+                        pt.y + pc.h > hy          - TOUCH)
+                        thisPlayerOnHazard = true;
+                });
+            }
+            hz.active = thisPlayerOnHazard;
             if (hz.active) {
                 mCamera.StartShake(2.5f, 0.15f);
                 hp.current -= HAZARD_DAMAGE_PER_SEC * dt;
                 if (hp.current <= 0.0f) {
                     hp.current = 0.0f;
-                    if (!mPlayerDying) {
-                        mPlayerDying    = true;
-                        mDeathAnimTimer = 0.0f;
-                        auto dv = reg.view<PlayerTag, Velocity>();
-                        dv.each([](Velocity& v) { v.dx = 0.0f; v.dy = 0.0f; });
-                        const std::vector<SDL_Rect>* deathFr = nullptr;
-                        SDL_Texture* deathSh = nullptr;
-                        float deathFps = 8.0f;
-                        AnimationID deathId = AnimationID::DEATH;
-                        if (!set.death.empty()) {
-                            deathFr  = &set.death;
-                            deathSh  = set.deathSheet;
-                            deathFps = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
-                        } else if (!set.hurt.empty()) {
-                            deathFr  = &set.hurt;
-                            deathSh  = set.hurtSheet;
-                            deathFps = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
-                            deathId  = AnimationID::HURT;
-                        }
-                        if (deathFr && deathSh) {
-                            r.sheet           = deathSh;
-                            r.frames          = *deathFr;
-                            anim.currentFrame = 0;
-                            anim.timer        = 0.0f;
-                            anim.fps          = deathFps;
-                            anim.looping      = false;
-                            anim.totalFrames  = (int)deathFr->size();
-                            anim.currentAnim  = deathId;
-                        }
-                    }
+                    killPlayer(playerEnt);
                 }
                 hz.flashTimer += dt;
                 // Attack always takes priority — never stomp it while in lava.
@@ -1453,67 +1516,74 @@ void GameScene::Update(float dt) {
     // Fire animation SFX on transition, time-matched to animation duration.
     // Runs AFTER both PlayerStateSystem and hazard code so we see the final
     // animation state for the frame (not an intermediate that gets overridden).
+    // Each player entity is compared against its OWN previous snapshot so
+    // P1 and P2 transitions are detected independently.
     if (Audio() && Audio()->IsReady()) {
+        auto animToSlot = [](AnimationID a) -> int {
+            switch (a) {
+                case AnimationID::IDLE:  return 0;
+                case AnimationID::WALK:  return 1;
+                case AnimationID::DUCK:  return 2;
+                case AnimationID::JUMP:  return 3;
+                case AnimationID::FRONT: return 4;
+                case AnimationID::SLASH: return 5;
+                case AnimationID::HURT:  return 6;
+                case AnimationID::DEATH: return 7;
+                default:                 return -1;
+            }
+        };
+
         auto pview = reg.view<PlayerTag, AnimationState>();
-        pview.each([&](const AnimationState& anim) {
-            bool animChanged = (anim.currentAnim != prevPlayerAnim);
+        pview.each([&](entt::entity e, const AnimationState& anim) {
+            auto it = prevPlayerAnims.find(e);
+            if (it == prevPlayerAnims.end()) return;
+            AnimationID prevAnim  = it->second.anim;
+            int         prevFrame = it->second.frame;
+
+            bool animChanged   = (anim.currentAnim != prevAnim);
             bool animRestarted = !animChanged && !anim.looping
                               && anim.currentFrame == 0
-                              && prevPlayerFrame > 0;
-            if (animChanged || animRestarted) {
-                std::print("[Audio] Anim {}: {} -> {} (frames={} fps={:.1f} loop={})\n",
-                           animRestarted ? "restart" : "transition",
-                           (int)prevPlayerAnim, (int)anim.currentAnim,
-                           anim.totalFrames, anim.fps, anim.looping);
+                              && prevFrame > 0;
+            if (!animChanged && !animRestarted) return;
 
-                bool enteringDeath = (anim.currentAnim == AnimationID::DEATH);
-                if (enteringDeath) {
-                    // Fade looping track; one-shot/sequential tracks finish naturally.
-                    Audio()->FadeOutAnimSFX(300);
-                } else {
-                    Audio()->StopAnimSFX();
-                }
+            std::print("[Audio] Player {:x} anim {}: {} -> {} (frames={} fps={:.1f} loop={})\n",
+                       (uint32_t)e,
+                       animRestarted ? "restart" : "transition",
+                       (int)prevAnim, (int)anim.currentAnim,
+                       anim.totalFrames, anim.fps, anim.looping);
 
-                // While dying, don't re-trigger hurt sounds from the queue
-                if (mPlayerDying && anim.currentAnim == AnimationID::HURT)
-                    return;
+            bool enteringDeath = (anim.currentAnim == AnimationID::DEATH);
+            if (enteringDeath) {
+                Audio()->FadeOutAnimSFX(300);
+            } else {
+                Audio()->StopAnimSFX();
+            }
 
-                float animDuration = (anim.fps > 0.0f && anim.totalFrames > 0)
-                    ? static_cast<float>(anim.totalFrames) / anim.fps
-                    : 0.0f;
+            // While dying, don't re-trigger hurt sounds from the queue.
+            if (mPlayerDying && anim.currentAnim == AnimationID::HURT)
+                return;
 
-                auto animToSlot = [](AnimationID a) -> int {
-                    switch (a) {
-                        case AnimationID::IDLE:  return 0;
-                        case AnimationID::WALK:  return 1;
-                        case AnimationID::DUCK:  return 2;
-                        case AnimationID::JUMP:  return 3;
-                        case AnimationID::FRONT: return 4;
-                        case AnimationID::SLASH: return 5;
-                        case AnimationID::HURT:  return 6;
-                        case AnimationID::DEATH: return 7;
-                        default:                 return -1;
-                    }
-                };
-                int slotIdx = animToSlot(anim.currentAnim);
-                if (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT
-                    && !mSlotSfx[slotIdx].empty()) {
-                    int& nextIdx = mSlotSfxNext[slotIdx];
-                    const auto& fi = mSlotSfx[slotIdx][nextIdx];
-                    auto sfxId = audio::PlayerAnimSfxId(anim.currentAnim, nextIdx);
-                    if (!sfxId.empty()) {
-                        if (mSlotSfx[slotIdx].size() > 1) {
-                            if (Audio()->Sfx().PlayOneShotSeq(sfxId, fi.volume))
-                                nextIdx = (nextIdx + 1) % (int)mSlotSfx[slotIdx].size();
-                        } else {
-                            float targetDur = fi.timeStretch ? animDuration : 0.0f;
-                            Audio()->Sfx().PlayTimed(sfxId, targetDur, anim.looping, fi.volume);
-                        }
+            float animDuration = (anim.fps > 0.0f && anim.totalFrames > 0)
+                ? static_cast<float>(anim.totalFrames) / anim.fps
+                : 0.0f;
+
+            int slotIdx = animToSlot(anim.currentAnim);
+            if (slotIdx >= 0 && slotIdx < PLAYER_ANIM_SLOT_COUNT
+                && !mSlotSfx[slotIdx].empty()) {
+                int& nextIdx = mSlotSfxNext[slotIdx];
+                const auto& fi = mSlotSfx[slotIdx][nextIdx];
+                auto sfxId = audio::PlayerAnimSfxId(anim.currentAnim, nextIdx);
+                if (!sfxId.empty()) {
+                    if (mSlotSfx[slotIdx].size() > 1) {
+                        if (Audio()->Sfx().PlayOneShotSeq(sfxId, fi.volume))
+                            nextIdx = (nextIdx + 1) % (int)mSlotSfx[slotIdx].size();
+                    } else {
+                        float targetDur = fi.timeStretch ? animDuration : 0.0f;
+                        Audio()->Sfx().PlayTimed(sfxId, targetDur, anim.looping, fi.volume);
                     }
                 }
             }
         });
-
     }
 
     if (mLevel.gravityMode != GravityMode::OpenWorld) {
@@ -1650,20 +1720,41 @@ void GameScene::Update(float dt) {
             {
                 bool blocked = false;
                 auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
-                shv.each([&](const Transform& pt, const Collider& pc, const ActiveShield& as) {
+                shv.each([&](const Transform& pt, const Collider& pc, ActiveShield& as) {
                     if (blocked) return;
                     float pcx = pt.x + pc.w * 0.5f;
                     float pcy = pt.y + pc.h * 0.5f;
+                    // Bullet centre (8×8 bullet)
+                    float bCX = btr.x + 4.f;
+                    float bCY = btr.y + 4.f;
                     int n = (int)as.shields.size();
                     for (int i = 0; i < n && !blocked; ++i) {
+                        auto& se = as.shields[i];
+                        // spinAngle is a visual-only texture rotation — does not shift orbit position
                         float a = as.angle + (float)i / n * 2.f * 3.14159265f;
-                        const auto& se = as.shields[i];
                         float sx = pcx + std::cos(a) * as.orbitRadius - se.renderW * 0.5f;
                         float sy = pcy + std::sin(a) * as.orbitRadius - se.renderH * 0.5f;
                         SDL_FRect shieldR = {sx, sy, (float)se.renderW, (float)se.renderH};
                         if (SDL_HasRectIntersectionFloat(&bulletR, &shieldR)) {
                             bulletsToDestroy.push_back(be);
                             blocked = true;
+
+                            // Always shake on any hit
+                            se.shakeTimer = 0.15f;
+
+                            // Corner hit → spin impulse.
+                            // Normalise hit position to [-1, 1] in each axis.
+                            float shCX = sx + se.renderW * 0.5f;
+                            float shCY = sy + se.renderH * 0.5f;
+                            float lx = (bCX - shCX) / (se.renderW  * 0.5f + 0.01f);
+                            float ly = (bCY - shCY) / (se.renderH * 0.5f + 0.01f);
+                            constexpr float CORNER_THRESH = 0.45f;
+                            if (std::abs(lx) > CORNER_THRESH && std::abs(ly) > CORNER_THRESH) {
+                                // Cross product of hit-offset × bullet-dir gives torque sign
+                                float torque = lx * bt.dy - ly * bt.dx;
+                                se.spinVelocity += torque * 20.0f;
+                                se.spinVelocity  = std::clamp(se.spinVelocity, -16.0f, 16.0f);
+                            }
                         }
                     }
                 });
@@ -1705,7 +1796,11 @@ void GameScene::Update(float dt) {
                         emitBlood({pCX, pCY, bt.dx, bt.dy,
                                    BloodEventType::PlayerHit, bulletBloodIntensity});
 
-                        if (!bulletKilledPlayer) {
+                        if (bulletKilledPlayer) {
+                            // killPlayer handles death anim, blood burst, DeadTag,
+                            // and game-over check for THIS player only.
+                            killPlayer(pe);
+                        } else {
                             auto* anim = reg.try_get<AnimationState>(pe);
                             auto* r    = reg.try_get<Renderable>(pe);
                             auto* set  = reg.try_get<AnimationSet>(pe);
@@ -1935,54 +2030,15 @@ void GameScene::Update(float dt) {
             if (reg.valid(be)) reg.destroy(be);
     }
 
-    if (bulletKilledPlayer && !mPlayerDying) {
-        mPlayerDying    = true;
-        mDeathAnimTimer = 0.0f;
-        // Massive death burst from player centre
-        {
-            auto pv = reg.view<PlayerTag, Transform, Collider>();
-            pv.each([&](const Transform& pt, const Collider& pc) {
-                emitBlood({pt.x + pc.w * 0.5f, pt.y + pc.h * 0.5f,
-                           0.f, -1.f, BloodEventType::PlayerDeath, 1.0f});
-            });
-        }
-        auto dv = reg.view<PlayerTag, Velocity, AnimationState, Renderable, AnimationSet>();
-        dv.each([](Velocity& v, AnimationState& anim, Renderable& r,
-                   const AnimationSet& set) {
-            v.dx = 0.0f; v.dy = 0.0f;
-            const std::vector<SDL_Rect>* frames = nullptr;
-            SDL_Texture* sheet = nullptr;
-            float fps = 8.0f;
-            AnimationID id = AnimationID::DEATH;
-            if (!set.death.empty()) {
-                frames = &set.death;
-                sheet  = set.deathSheet;
-                fps    = (set.deathFps > 0.0f) ? set.deathFps : 8.0f;
-            } else if (!set.hurt.empty()) {
-                frames = &set.hurt;
-                sheet  = set.hurtSheet;
-                fps    = (set.hurtFps > 0.0f) ? set.hurtFps : 12.0f;
-                id     = AnimationID::HURT;
-            }
-            if (frames && sheet) {
-                r.sheet           = sheet;
-                r.frames          = *frames;
-                anim.currentFrame = 0;
-                anim.timer        = 0.0f;
-                anim.fps          = fps;
-                anim.looping      = false;
-                anim.totalFrames  = (int)frames->size();
-                anim.currentAnim  = id;
-            }
-        });
-        mCamera.StartShake(6.0f, 0.2f);
-    }
+    // bulletKilledPlayer death is now handled inline via killPlayer(pe) above,
+    // which correctly kills only the hit player and triggers game-over only when
+    // ALL players are dead. The old global-death block has been removed.
 
     // --- Shield orbit ---
     {
-        auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield>();
+        auto shv = reg.view<PlayerTag, Transform, Collider, ActiveShield, PlayerIndex>();
         shv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
-                     ActiveShield& as) {
+                     ActiveShield& as, const PlayerIndex& pi) {
             for (auto it = as.shields.begin(); it != as.shields.end(); ) {
                 it->remaining -= dt;
                 if (it->remaining <= 0.f)
@@ -1995,17 +2051,39 @@ void GameScene::Update(float dt) {
                 return;
             }
 
+            // Tick shake timer and spin decay for each shield piece
+            constexpr float SPIN_DECAY = 6.0f; // rad/s² deceleration
+            for (auto& se : as.shields) {
+                if (se.shakeTimer > 0.f)
+                    se.shakeTimer = std::max(0.f, se.shakeTimer - dt);
+
+                if (std::abs(se.spinVelocity) > 0.05f) {
+                    se.spinAngle    += se.spinVelocity * dt;
+                    float decel      = SPIN_DECAY * dt;
+                    if (se.spinVelocity > 0.f)
+                        se.spinVelocity = std::max(0.f, se.spinVelocity - decel);
+                    else
+                        se.spinVelocity = std::min(0.f, se.spinVelocity + decel);
+                } else {
+                    se.spinVelocity = 0.f;
+                }
+            }
+
+            // Route to each player's own controller
+            SDL_Gamepad* pad = (pi.index == 0) ? mCachedPad : mCachedPad2;
+
             bool gamepadAimed = false;
-            if (mCachedPad) {
-                float rx = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
-                float ry = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+            if (pad) {
+                float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
                 constexpr float DEAD = 0.25f;
                 if (rx * rx + ry * ry > DEAD * DEAD) {
                     as.angle = std::atan2(ry, rx);
                     gamepadAimed = true;
                 }
             }
-            if (!gamepadAimed) {
+            // Only P1 falls back to keyboard; P2 only uses their own gamepad
+            if (!gamepadAimed && pi.index == 0) {
                 constexpr float ROTATE_SPEED = 4.0f;
                 const bool* keys = SDL_GetKeyboardState(nullptr);
                 if (keys[SDL_SCANCODE_LEFT])  as.angle -= ROTATE_SPEED * dt;
@@ -2016,26 +2094,30 @@ void GameScene::Update(float dt) {
 
     // --- Turret power-up ---
     {
-        auto tpv = reg.view<PlayerTag, Transform, Collider, ActiveTurretPowerUp>();
+        auto tpv = reg.view<PlayerTag, Transform, Collider, ActiveTurretPowerUp, PlayerIndex>();
         tpv.each([&](entt::entity pe, const Transform& pt, const Collider& pc,
-                      ActiveTurretPowerUp& tp) {
+                      ActiveTurretPowerUp& tp, const PlayerIndex& pi) {
             tp.remaining -= dt;
             if (tp.remaining <= 0.f) {
                 reg.remove<ActiveTurretPowerUp>(pe);
                 return;
             }
 
+            // Route to each player's own controller
+            SDL_Gamepad* pad = (pi.index == 0) ? mCachedPad : mCachedPad2;
+
             bool gpAimed = false;
-            if (mCachedPad) {
-                float rx = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
-                float ry = SDL_GetGamepadAxis(mCachedPad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
+            if (pad) {
+                float rx = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.f;
+                float ry = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.f;
                 constexpr float DEAD = 0.25f;
                 if (rx * rx + ry * ry > DEAD * DEAD) {
                     tp.angle = std::atan2(ry, rx);
                     gpAimed = true;
                 }
             }
-            if (!gpAimed) {
+            // Only P1 falls back to keyboard; P2 only uses their own gamepad
+            if (!gpAimed && pi.index == 0) {
                 constexpr float ROTATE_SPEED = 4.0f;
                 const bool* keys = SDL_GetKeyboardState(nullptr);
                 if (keys[SDL_SCANCODE_LEFT])  tp.angle -= ROTATE_SPEED * dt;
@@ -2528,9 +2610,19 @@ void GameScene::RenderShield(SDL_Renderer* ren, int W, int H) {
 
         for (int i = 0; i < n; ++i) {
             const auto& se = as.shields[i];
+            // Orbit position: only controlled by as.angle (right stick / keyboard)
             float a = as.angle + (float)i / n * PI2;
-            float wx = pcx + std::cos(a) * as.orbitRadius;
-            float wy = pcy + std::sin(a) * as.orbitRadius;
+
+            // Shake: damped high-frequency oscillation that fades out
+            float shakeX = 0.f, shakeY = 0.f;
+            if (se.shakeTimer > 0.f) {
+                float amp = se.shakeTimer * 28.f; // ~4px peak at full 0.15s timer
+                shakeX = amp * std::sin(se.shakeTimer * 140.f);
+                shakeY = amp * std::cos(se.shakeTimer * 109.f); // different freq → elliptical
+            }
+
+            float wx = pcx + std::cos(a) * as.orbitRadius + shakeX;
+            float wy = pcy + std::sin(a) * as.orbitRadius + shakeY;
 
             float screenX = wx - mCamera.x;
             float screenY = wy - mCamera.y;
@@ -2542,11 +2634,16 @@ void GameScene::RenderShield(SDL_Renderer* ren, int W, int H) {
                              screenY - se.renderH * 0.5f,
                              (float)se.renderW, (float)se.renderH};
 
+            // Convert spinAngle (radians) to degrees for SDL
+            double spinDeg = se.spinAngle * (180.0 / 3.14159265);
+
             float alpha = (se.remaining < 3.f) ? (se.remaining / 3.f) : 1.f;
             Uint8 alphaU = (Uint8)(alpha * 255);
             if (se.tex) {
                 SDL_SetTextureAlphaMod(se.tex, alphaU);
-                SDL_RenderTexture(ren, se.tex, nullptr, &dst);
+                // Rotate the texture around its own centre; orbit position is unchanged
+                SDL_RenderTextureRotated(ren, se.tex, nullptr, &dst,
+                                         spinDeg, nullptr, SDL_FLIP_NONE);
                 SDL_SetTextureAlphaMod(se.tex, 255);
             } else {
                 SDL_SetRenderDrawColor(ren, 100, 180, 255, alphaU);
@@ -2627,7 +2724,6 @@ void GameScene::RenderTurretPowerUp(SDL_Renderer* ren, int W, int H) {
 // SpawnPlayer2 — creates the second player entity when two Xbox controllers are connected.
 // If mP2ProfilePath is set, loads P2's own sprite sheets from their profile.
 // Otherwise reuses P1's already-loaded sprite sheets (no extra GPU uploads).
-// P2 gets a blue PlayerTint so they are visually distinct from P1.
 void GameScene::SpawnPlayer2() {
     if (!mWindow) return;
     SDL_Renderer* ren = mWindow->GetRenderer();
@@ -2803,7 +2899,6 @@ void GameScene::SpawnPlayer2() {
     reg.emplace<Renderable>(p2, p2IdleTex, p2IdleF, false, p2SpriteW, p2SpriteH);
     reg.emplace<PlayerTag>(p2);
     reg.emplace<PlayerIndex>(p2, 1);                                      // P2 slot
-    reg.emplace<PlayerTint>(p2, Uint8(140), Uint8(180), Uint8(255));      // blue tint
     reg.emplace<Health>(p2);
     reg.emplace<Collider>(p2, pColW, pColH);
     reg.emplace<RenderOffset>(p2, pROffX, pROffY);

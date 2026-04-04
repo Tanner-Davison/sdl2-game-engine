@@ -106,8 +106,9 @@ inline CollisionResult CollisionSystem(entt::registry& reg, float dt, int window
             liveEnemyView.each([&](entt::entity enemy, const Transform& et, const Collider& ec) {
                 SDL_FRect enemyR = {et.x, et.y, (float)ec.w, (float)ec.h};
                 for (int i = 0; i < n; ++i) {
-                    float a = as->angle + (float)i / n * PI2;
                     const auto& se = as->shields[i];
+                    // spinAngle is visual-only; orbit position is unaffected
+                    float a = as->angle + (float)i / n * PI2;
                     float sx = pcx + std::cos(a) * as->orbitRadius - se.renderW * 0.5f;
                     float sy = pcy + std::sin(a) * as->orbitRadius - se.renderH * 0.5f;
                     SDL_FRect shieldR = {sx, sy, (float)se.renderW, (float)se.renderH};
