@@ -40,8 +40,8 @@
         }
     ],
     "player": {
-        "x": 2508.0,
-        "y": 1406.0
+        "x": 4180.0,
+        "y": 1368.0
     },
     "tiles": [
         {
@@ -2862,7 +2862,7 @@
             "hitboxH": 114,
             "hitboxOffX": 0,
             "hitboxOffY": 0,
-            "hitboxW": 87,
+            "hitboxW": 71,
             "img": "game_assets/tiles/midevil-platformer/Cartoon_Medieval_Candlemaker_Level_Set_Platformer - Ground 09.png",
             "ladder": false,
             "moveGroupId": 0,
@@ -2913,7 +2913,7 @@
             "hitboxH": 114,
             "hitboxOffX": 0,
             "hitboxOffY": 0,
-            "hitboxW": 83,
+            "hitboxW": 65,
             "img": "game_assets/tiles/midevil-platformer/Cartoon_Medieval_Candlemaker_Level_Set_Platformer - Ground 09.png",
             "ladder": false,
             "moveGroupId": 0,
@@ -3015,7 +3015,7 @@
             "hitboxH": 114,
             "hitboxOffX": 0,
             "hitboxOffY": 0,
-            "hitboxW": 90,
+            "hitboxW": 56,
             "img": "game_assets/tiles/midevil-platformer/Cartoon_Medieval_Candlemaker_Level_Set_Platformer - Ground 09.png",
             "ladder": false,
             "moveGroupId": 0,
@@ -22545,10 +22545,10 @@
             "goal": false,
             "h": 76,
             "hazard": false,
-            "hitboxH": 0,
+            "hitboxH": 76,
             "hitboxOffX": 0,
             "hitboxOffY": 0,
-            "hitboxW": 0,
+            "hitboxW": 76,
             "img": "game_assets/tiles/BASIC TILES/Tiles_05.png",
             "ladder": false,
             "moveGroupId": 0,

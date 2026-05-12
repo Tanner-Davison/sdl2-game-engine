@@ -1,0 +1,158 @@
+Package: vcpkg-cmake-config
+Version: 2024-05-23
+Architecture: arm64-osx
+Multi-Arch: same
+Abi: df2c239d709850bbfaa85f3b92928fb4ccc3fcf03abd2529a7a8293fd0611878
+Status: install ok installed
+
+Package: vcpkg-cmake
+Version: 2024-04-23
+Architecture: arm64-osx
+Multi-Arch: same
+Abi: bc0c53cdf4a7b83a21a0cb92c0e67bf6c00c4e3834203ae56ff7dd97da11c5a1
+Status: install ok installed
+
+Package: entt
+Version: 3.16.0
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 376603472358da4a584d98eef0e0190bef71ee8128cc6b4201978382716d7419
+Description: Gaming meets modern C++ - a fast and reliable entity-component system and much more
+Status: install ok installed
+
+Package: zlib
+Version: 1.3.1
+Depends: vcpkg-cmake:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 9d2403b5fc6adf91027869a67b3880c9540bcabf2ca4f28727294ef4fb6226b7
+Description: A compression library
+Status: install ok installed
+
+Package: libpng
+Version: 1.6.55
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx, zlib
+Architecture: x64-osx
+Multi-Arch: same
+Abi: ee2d4b5b37168be34812812f4d52287ff557724b72572f0679f06253bceacb9d
+Description: libpng is a library implementing an interface for reading and writing PNG (Portable Network Graphics) format files
+Status: install ok installed
+
+Package: nlohmann-json
+Version: 3.12.0
+Port-Version: 2
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 07a03e97a4f0959391c7f2c5de1bf8012bcb973df114d6a24a0471408915d8c6
+Description: JSON for Modern C++
+Status: install ok installed
+
+Package: sdl3
+Version: 3.4.2
+Port-Version: 1
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 87353ea33a0e90408aeea664b5f0245d7007699247dfacfe18228537118caaeb
+Description: Simple DirectMedia Layer is a cross-platform development library designed to provide low level access to audio, keyboard, mouse, joystick, and graphics hardware via OpenGL and Direct3D.
+Status: install ok installed
+
+Package: sdl3-image
+Version: 3.4.0
+Depends: sdl3, vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 453b0a5f6f03b2f423b1bc1d1a36219109bc3481d3b43096a4a10eb21d63cfce
+Description: SDL_image is an image file loading library. It loads images as SDL surfaces and textures, and supports the following formats: BMP, GIF, JPEG, LBM, PCX, PNG, PNM, TGA, TIFF, WEBP, XCF, XPM, XV
+Status: install ok installed
+
+Package: sdl3-mixer
+Version: 3.2.0
+Depends: sdl3, vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 35474907e3b99b0564beea567c381fdd6ad73d155cb13111676d623a24c06efd
+Description: An audio mixer that supports various file formats for Simple Directmedia Layer.
+Status: install ok installed
+
+Package: bzip2
+Version: 1.0.8
+Port-Version: 6
+Depends: vcpkg-cmake:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: facff06b941faad7ec252628c8aaef1cbebf1df9320bd1df74fdbbf6f2d43d3f
+Description: bzip2 is a freely available, patent free, high-quality data compressor. It typically compresses files to within 10% to 15% of the best available techniques (the PPM family of statistical compressors), whilst being around twice as fast at compression and six times faster at decompression.
+Default-Features: tool
+Status: install ok installed
+
+Package: bzip2
+Feature: tool
+Architecture: x64-osx
+Multi-Arch: same
+Description: Builds bzip2 executable
+Status: install ok installed
+
+Package: brotli
+Version: 1.2.0
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 7c89c2a76c1354477766a2897af5056af1415656fe6135841ce8d98d7091187d
+Description: a generic-purpose lossless compression algorithm that compresses data using a combination of a modern variant of the LZ77 algorithm, Huffman coding and 2nd order context modeling.
+Status: install ok installed
+
+Package: freetype
+Version: 2.13.3
+Depends: vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: 4ee013dfed95f4e9ee069b692991d67a1c9fc4c88aeae6471008e65b20229bb5
+Description: A library to render fonts.
+Default-Features: brotli, bzip2, png, zlib
+Status: install ok installed
+
+Package: freetype
+Feature: brotli
+Depends: brotli
+Architecture: x64-osx
+Multi-Arch: same
+Description: Support decompression of WOFF2 streams
+Status: install ok installed
+
+Package: freetype
+Feature: bzip2
+Depends: bzip2
+Architecture: x64-osx
+Multi-Arch: same
+Description: Support bzip2 compressed fonts.
+Status: install ok installed
+
+Package: freetype
+Feature: png
+Depends: libpng
+Architecture: x64-osx
+Multi-Arch: same
+Description: Support PNG compressed OpenType embedded bitmaps.
+Status: install ok installed
+
+Package: freetype
+Feature: zlib
+Depends: zlib
+Architecture: x64-osx
+Multi-Arch: same
+Description: Use zlib instead of internal library for DEFLATE
+Status: install ok installed
+
+Package: sdl3-ttf
+Version: 3.2.2
+Port-Version: 1
+Depends: freetype, sdl3, vcpkg-cmake:arm64-osx, vcpkg-cmake-config:arm64-osx
+Architecture: x64-osx
+Multi-Arch: same
+Abi: bd519f8fc510213aa0d477d41a655de5a312d55df133800f6efbfae2920ef904
+Description: A library for rendering TrueType fonts with SDL
+Status: install ok installed
+
