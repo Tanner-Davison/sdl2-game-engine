@@ -23,7 +23,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/steps/Steps Loop 5.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/walk.wav",
                     "timeStretch": false,
                     "volume": 1.0
                 }
@@ -41,7 +41,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/gremlinyum.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/crouch.wav",
                     "timeStretch": false,
                     "volume": 1.0
                 }
@@ -59,7 +59,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/Plop.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/jump.wav",
                     "timeStretch": false,
                     "volume": 1.0
                 }
@@ -88,17 +88,17 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yummy.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/slash_0.wav",
                     "timeStretch": false,
                     "volume": 0.7999999523162842
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yumyum.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/slash_1.wav",
                     "timeStretch": false,
                     "volume": 0.7999999523162842
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/Yummy Yummy Yum/yumyumyummy.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/slash_2.wav",
                     "timeStretch": false,
                     "volume": 0.5999999046325684
                 }
@@ -116,7 +116,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/screaming-in-pain.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/hurt.wav",
                     "timeStretch": false,
                     "volume": 1.0
                 }
@@ -134,7 +134,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/Cartoon Voice Whats Happening/whatshappening.wav",
+                    "path": "game_assets/audio/sfx/players/angryorange/death.wav",
                     "timeStretch": false,
                     "volume": 1.0
                 }

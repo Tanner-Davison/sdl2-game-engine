@@ -29,7 +29,7 @@
         }
     ],
     "gravityMode": "platformer",
-    "music": "/Users/tanner.davison/Downloads/dungeon-2026-03-08-20-06-13-utc/Dungeon.mp3",
+    "music": "game_assets/audio/music/level1.mp3",
     "musicVolume": 1.0,
     "name": "level1",
     "parallaxLayers": [
@@ -14010,7 +14010,7 @@
             "shooterDamage": 25.0,
             "shooterFireRate": 4.300018310546875,
             "shooterRange": 1000.0,
-            "shooterSfx": "/Users/tanner.davison/Downloads/shot.wav",
+            "shooterSfx": "game_assets/audio/sfx/tiles/shooter_shot.wav",
             "shooterSide": 3,
             "slope": "none",
             "slopeHeightFrac": 1.0,
@@ -14112,7 +14112,7 @@
             "shooterDamage": 10.0,
             "shooterFireRate": 3.0500106811523438,
             "shooterRange": 300.0,
-            "shooterSfx": "/Users/tanner.davison/Desktop/machinegun2/Machine Gun Fire 01.wav",
+            "shooterSfx": "game_assets/audio/sfx/tiles/shooter_machinegun.wav",
             "shooterSide": 3,
             "slope": "none",
             "slopeHeightFrac": 1.0,

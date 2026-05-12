@@ -13,7 +13,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/evildeadzombie.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/idle.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -33,14 +33,14 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/zombiefever.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/move_0.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/zombiesound.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/move_1.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -60,21 +60,21 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombie-attack-1.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/attack_0.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack2.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/attack_1.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieattack3.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/attack_2.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -94,14 +94,14 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/zombiehurting.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/hurt_0.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 1.0
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/Zombie Attack And Growl Pack/zombieehh.mp3",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/hurt_1.mp3",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -121,7 +121,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/zombiedeath.wav",
+                    "path": "game_assets/audio/sfx/enemies/skelaton_sorcerer/dead.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,

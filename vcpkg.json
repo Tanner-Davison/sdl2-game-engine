@@ -1,7 +1,13 @@
 {
   "dependencies": [
-    "sdl3",
-    "sdl3-image",
+    {
+      "name": "sdl3",
+      "default-features": false,
+      "features": [
+        { "name": "x11", "platform": "linux" }
+      ]
+    },
+    { "name": "sdl3-image", "default-features": false, "features": ["png", "jpeg"] },
     "sdl3-ttf",
     "sdl3-mixer",
     "entt",

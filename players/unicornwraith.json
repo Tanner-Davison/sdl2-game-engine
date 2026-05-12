@@ -67,7 +67,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/darkswoosh.wav",
+                    "path": "game_assets/audio/sfx/players/unicornwraith/slash.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.2098214328289032,

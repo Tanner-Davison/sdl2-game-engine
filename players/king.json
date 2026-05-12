@@ -12,7 +12,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/heartbeat.wav",
+                    "path": "game_assets/audio/sfx/players/king/idle.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -114,7 +114,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/gruntmale/malegruntpainone.wav",
+                    "path": "game_assets/audio/sfx/players/king/hurt.wav",
                     "timeStretch": true,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -134,7 +134,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/maledeath.wav",
+                    "path": "game_assets/audio/sfx/players/king/death.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,

@@ -13,7 +13,7 @@
         }
     ],
     "gravityMode": "platformer",
-    "music": "/Users/tanner.davison/Downloads/safarimusic.wav",
+    "music": "game_assets/audio/music/RetroForest.wav",
     "musicVolume": 0.125,
     "name": "RetroForest",
     "parallaxLayers": [],

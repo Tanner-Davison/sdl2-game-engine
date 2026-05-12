@@ -23,7 +23,7 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/Knight In Armour Footsteps/Knight In Armour Footsteps.wav",
+                    "path": "game_assets/audio/sfx/players/bones/walk.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
@@ -76,14 +76,14 @@
             },
             "sfx": [
                 {
-                    "path": "/Users/tanner.davison/Downloads/swoosh/swordswoosh.wav",
+                    "path": "game_assets/audio/sfx/players/bones/slash_0.wav",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
                     "volume": 0.9955357313156128
                 },
                 {
-                    "path": "/Users/tanner.davison/Downloads/sword-slash.mp3",
+                    "path": "game_assets/audio/sfx/players/bones/slash_1.mp3",
                     "timeStretch": false,
                     "trimEnd": 1.0,
                     "trimStart": 0.0,
