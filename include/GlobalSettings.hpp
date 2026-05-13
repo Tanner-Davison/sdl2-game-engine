@@ -1,8 +1,26 @@
 #pragma once
 #include <algorithm>
+#include <filesystem>
+#include <string>
 
 // =============================================================================
-//  GlobalSettings
+//  Path utilities
+//
+//  toRelPath() converts an absolute path to a relative one by stripping the
+//  current working directory prefix. This ensures paths saved in JSON files
+//  (player profiles, enemy profiles, level data) are portable across machines
+//  and operating systems regardless of where the project lives on disk.
+// =============================================================================
+inline std::string toRelPath(const std::string& absPath) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path rel = fs::relative(fs::path(absPath), fs::current_path(ec), ec);
+    if (!ec && !rel.empty() && rel.native().find("..") == std::string::npos)
+        return rel.generic_string(); // always forward slashes
+    return absPath; // fallback: return as-is if outside cwd
+}
+
+// =============================================================================
 //
 //  Lightweight POD singleton that carries runtime-configurable game settings.
 //  Persisted to / loaded from forge2d_settings.json by TitleScene.

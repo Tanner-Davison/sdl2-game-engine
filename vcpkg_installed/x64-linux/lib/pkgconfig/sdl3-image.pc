@@ -8,5 +8,5 @@ Description: image loading library for Simple DirectMedia Layer
 Version: 3.4.4
 
 Libs: "-L${libdir}" -lSDL3_image
-Requires: sdl3 >= 3.4.0 
+Requires: sdl3 >= 3.4.0 libjpeg libpng
 Cflags: "-I${includedir}"

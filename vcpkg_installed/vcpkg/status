@@ -66,13 +66,84 @@ Multi-Arch: same
 Description: Build with X11 support
 Status: install ok installed
 
+Package: libjpeg-turbo
+Version: 3.1.4.1
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-linux
+Multi-Arch: same
+Abi: 59dd7963f7203d4bf4cf36e03243123fc7f5080e4ea72b73a56c00fe5b919683
+Description: libjpeg-turbo is a JPEG image codec that uses SIMD instructions (MMX, SSE2, NEON, AltiVec) to accelerate baseline JPEG compression and decompression on x86, x86-64, ARM, and PowerPC systems.
+Status: install ok installed
+
 Package: sdl3-image
 Version: 3.4.4
 Depends: sdl3, vcpkg-cmake, vcpkg-cmake-config
 Architecture: x64-linux
 Multi-Arch: same
-Abi: 6e61d63ba5b258155a8f31d83a27da7aec1faff16c8dbd8818bcd86e4d52e64b
+Abi: 1fb5360e6d7966f178428da17794d95608bfa74d6477898fb40085caa36497fb
 Description: SDL_image is an image file loading library. It loads images as SDL surfaces and textures, and supports the following formats: BMP, GIF, JPEG, LBM, PCX, PNG, PNM, TGA, TIFF, WEBP, XCF, XPM, XV
+Status: install ok installed
+
+Package: sdl3-image
+Feature: jpeg
+Depends: libjpeg-turbo
+Architecture: x64-linux
+Multi-Arch: same
+Description: Support for JPEG image format
+Status: install ok installed
+
+Package: sdl3-image
+Feature: png
+Depends: libpng
+Architecture: x64-linux
+Multi-Arch: same
+Description: Support for PNG image format
+Status: install ok installed
+
+Package: mpg123
+Version: 1.33.4
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-linux
+Multi-Arch: same
+Abi: c2f02077dc24972cd0a42d0beb1943491956f1fe05bc5c54bc1e15ab0773d219
+Description: mpg123 is a real time MPEG 1.0/2.0/2.5 audio player/decoder for layers 1, 2 and 3 (MPEG 1.0 layer 3 also known as MP3).
+Status: install ok installed
+
+Package: libogg
+Version: 1.3.6
+Port-Version: 1
+Depends: vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-linux
+Multi-Arch: same
+Abi: 571c62ea8f508be5f5c245b881a806dc5f27ab63bfb883b79bd39746ec356db3
+Description: Ogg is a multimedia container format, and the native file and stream format for the Xiph.org multimedia codecs.
+Status: install ok installed
+
+Package: libvorbis
+Version: 1.3.7
+Port-Version: 4
+Depends: libogg, vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-linux
+Multi-Arch: same
+Abi: 907e45b01e0b871cf1732b8ff6adcdf14fa668036980ce777a8b760baff1e479
+Description: Ogg Vorbis is a fully open, non-proprietary, patent-and-royalty-free, general-purpose compressed audio format
+Status: install ok installed
+
+Package: libflac
+Version: 1.5.0
+Depends: libogg, vcpkg-cmake, vcpkg-cmake-config
+Architecture: x64-linux
+Multi-Arch: same
+Abi: ccd5bafc81d51f6a3f590dcef002c8aed5a64521e22cea33fca18b82bce595cf
+Description: Library for manipulating FLAC files
+Default-Features: stack-protector
+Status: install ok installed
+
+Package: libflac
+Feature: stack-protector
+Architecture: x64-linux
+Multi-Arch: same
+Description: Build with stack smashing protection
 Status: install ok installed
 
 Package: sdl3-mixer
@@ -80,8 +151,32 @@ Version: 3.2.2
 Depends: sdl3, vcpkg-cmake, vcpkg-cmake-config
 Architecture: x64-linux
 Multi-Arch: same
-Abi: 41cfa56e1d3c1e94b25850a6287a62bf7b2a7e11711fe2d38e17f51c8fe7bd19
+Abi: d34f871b9a7f89a5722fb2a4f51971816134777d782745d834c9645e63f2b883
 Description: An audio mixer that supports various file formats for Simple Directmedia Layer.
+Status: install ok installed
+
+Package: sdl3-mixer
+Feature: libflac
+Depends: libflac
+Architecture: x64-linux
+Multi-Arch: same
+Description: Use libflac to play FLAC audio format.
+Status: install ok installed
+
+Package: sdl3-mixer
+Feature: libvorbis
+Depends: libvorbis
+Architecture: x64-linux
+Multi-Arch: same
+Description: Use libvorbis to play Vorbis audio format.
+Status: install ok installed
+
+Package: sdl3-mixer
+Feature: mpg123
+Depends: mpg123
+Architecture: x64-linux
+Multi-Arch: same
+Description: Use mpg123 to play MP3 audio format.
 Status: install ok installed
 
 Package: bzip2

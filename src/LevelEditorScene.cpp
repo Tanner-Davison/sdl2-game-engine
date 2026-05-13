@@ -1,3 +1,4 @@
+#include "GlobalSettings.hpp"
 #include "LevelEditorScene.hpp"
 #include "AnimatedTile.hpp"
 #include "EditorCanvasRenderer.hpp"
@@ -1011,11 +1012,11 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
                     // Tool-aware: PowerUp tool targets power-up or shooter tiles
                     if (mActiveToolId == ToolId::PowerUp || mActiveToolId == ToolId::Shooter) {
                         if (ti >= 0 && mLevel.tiles[ti].HasShooter()) {
-                            mLevel.tiles[ti].shooter->sfxPath = path;
+                            mLevel.tiles[ti].shooter->sfxPath = toRelPath(path);
                             SetStatus("Turret " + std::to_string(ti) + " fire SFX: "
                                       + p.filename().string());
                         } else if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
-                            mLevel.tiles[ti].powerUp->sfxPath = path;
+                            mLevel.tiles[ti].powerUp->sfxPath = toRelPath(path);
                             SetStatus("Power-up " + std::to_string(ti) + " fire SFX: "
                                       + p.filename().string());
                         } else {
@@ -1026,19 +1027,19 @@ bool LevelEditorScene::HandleEvent(SDL_Event& e) {
 
                     // Fallback: try turret, then power-up, then level music
                     if (ti >= 0 && mLevel.tiles[ti].HasShooter()) {
-                        mLevel.tiles[ti].shooter->sfxPath = path;
+                        mLevel.tiles[ti].shooter->sfxPath = toRelPath(path);
                         SetStatus("Turret " + std::to_string(ti) + " fire SFX: "
                                   + p.filename().string());
                         return true;
                     }
                     if (ti >= 0 && mLevel.tiles[ti].HasPowerUp()) {
-                        mLevel.tiles[ti].powerUp->sfxPath = path;
+                        mLevel.tiles[ti].powerUp->sfxPath = toRelPath(path);
                         SetStatus("Power-up " + std::to_string(ti) + " fire SFX: "
                                   + p.filename().string());
                         return true;
                     }
                     mMusicConfirmActive  = true;
-                    mMusicConfirmNewPath = path;
+                    mMusicConfirmNewPath = toRelPath(path);
                     SetStatus("Confirm music change...");
                     return true;
                 }

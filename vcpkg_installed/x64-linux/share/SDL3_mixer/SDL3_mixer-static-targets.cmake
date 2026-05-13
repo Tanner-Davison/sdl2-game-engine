@@ -59,7 +59,7 @@ add_library(SDL3_mixer::SDL3_mixer-static STATIC IMPORTED)
 
 set_target_properties(SDL3_mixer::SDL3_mixer-static PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "SDL3::Headers"
+  INTERFACE_LINK_LIBRARIES "SDL3::Headers;\$<LINK_ONLY:Vorbis::vorbisfile>;\$<LINK_ONLY:FLAC::FLAC>;\$<LINK_ONLY:MPG123::libmpg123>"
 )
 
 # Load information for each installed configuration.

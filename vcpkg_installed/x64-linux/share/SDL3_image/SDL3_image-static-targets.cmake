@@ -59,7 +59,7 @@ add_library(SDL3_image::SDL3_image-static STATIC IMPORTED)
 
 set_target_properties(SDL3_image::SDL3_image-static PROPERTIES
   INTERFACE_INCLUDE_DIRECTORIES "${_IMPORT_PREFIX}/include"
-  INTERFACE_LINK_LIBRARIES "SDL3::Headers;\$<LINK_ONLY:SDL3::SDL3-static>"
+  INTERFACE_LINK_LIBRARIES "SDL3::Headers;\$<LINK_ONLY:SDL3::SDL3-static>;\$<LINK_ONLY:JPEG::JPEG>;\$<LINK_ONLY:PNG::PNG>"
 )
 
 # Load information for each installed configuration.

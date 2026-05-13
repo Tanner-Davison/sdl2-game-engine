@@ -9,7 +9,7 @@
     },
     { "name": "sdl3-image", "default-features": false, "features": ["png", "jpeg"] },
     "sdl3-ttf",
-    "sdl3-mixer",
+    { "name": "sdl3-mixer", "default-features": false, "features": ["mpg123", "libvorbis", "libflac"] },
     "entt",
     "nlohmann-json",
     "libpng",

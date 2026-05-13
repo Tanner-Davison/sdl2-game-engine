@@ -1,3 +1,4 @@
+#include "GlobalSettings.hpp"
 #include "EnemyCreatorScene.hpp"
 #include "TitleScene.hpp"
 #include "audio/AudioEngine.hpp"
@@ -150,7 +151,7 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
                 bool dup = false;
                 for (const auto& e : sfx)
                     if (e.path == dropped) { dup = true; break; }
-                if (!dup) sfx.push_back({dropped, 1.0f, false});
+                if (!dup) sfx.push_back({toRelPath(dropped), 1.0f, false});
                 computeLayout();
                 auto slotName = EnemyAnimSlotName(static_cast<EnemyAnimSlot>(targetSlot));
                 mDropMsg = std::string(slotName) + " SFX " + std::to_string(sfx.size())
@@ -179,7 +180,7 @@ bool EnemyCreatorScene::HandleEvent(SDL_Event& e) {
                 } catch (...) {}
 
                 if (hasPng) {
-                    mProfile.Slot(static_cast<EnemyAnimSlot>(mSelectedSlot)).folderPath = dir;
+                    mProfile.Slot(static_cast<EnemyAnimSlot>(mSelectedSlot)).folderPath = toRelPath(dir);
                     rebuildPreview(mSelectedSlot);
                     recomputePreviewRect();
                     initHBFromProfile(mSelectedSlot);

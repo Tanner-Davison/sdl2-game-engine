@@ -1,3 +1,4 @@
+#include "GlobalSettings.hpp"
 #include "PlayerCreatorScene.hpp"
 #include "GameScene.hpp"
 #include "TitleScene.hpp"
@@ -171,7 +172,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
                 bool dup = false;
                 for (const auto& e : sfx)
                     if (e.path == dropped) { dup = true; break; }
-                if (!dup) sfx.push_back({dropped, 1.0f, false});
+                if (!dup) sfx.push_back({toRelPath(dropped), 1.0f, false});
                 computeLayout();
                 auto slotName = PlayerAnimSlotName(static_cast<PlayerAnimSlot>(targetSlot));
                 mDropMsg = std::string(slotName) + " SFX " + std::to_string(sfx.size())
@@ -195,7 +196,7 @@ bool PlayerCreatorScene::HandleEvent(SDL_Event& e) {
                 } catch (...) {}
 
                 if (hasPng) {
-                    mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).folderPath = dir;
+                    mProfile.Slot(static_cast<PlayerAnimSlot>(mSelectedSlot)).folderPath = toRelPath(dir);
                     rebuildPreview(mSelectedSlot);
                     recomputePreviewRect();
                     initHBFromProfile(mSelectedSlot);
